@@ -140,7 +140,8 @@ class DrawTraj():
         thickness: int = 3,
         is_ego: bool = True,
         hue_start: int = 120,
-        hue_end: int = 80
+        hue_end: int = 80,
+        fixed_z: float = 0.0,
     ) -> np.ndarray:
         """
         Draws a smooth trajectory on an image with perspective transformation and color gradient.
@@ -171,7 +172,7 @@ class DrawTraj():
         pts_4d = np.stack([
             line[:, 0],
             line[:, 1],
-            np.ones((line.shape[0])) * -1.84,
+            np.ones((line.shape[0])) * fixed_z,
             np.ones((line.shape[0]))
         ])
 

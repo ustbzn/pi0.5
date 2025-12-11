@@ -10,8 +10,14 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=40G
 
+export TZ='UTC-8'
+# SwanLab 配置
+export WANDB_DISABLED=true
+export SWANLAB_API_KEY='WIuVGDGJJcxnKEAis5knC'
+# 保存路径
+export LOG_DIR="/D2/NXT/vlm/miaobinqi/DriveMoE/logs"
 
 CUDA_VISIBLE_DEVICES=0 HYDRA_FULL_ERROR=1 torchrun \
     script/run.py \
     --config-name=base \
-    --config-path=../config/eval/DrivePi0\
+    --config-path=../config/eval/DrivePi0

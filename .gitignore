@@ -2,8 +2,11 @@
 /b2d_dynamic_camera
 /b2d_fixed_camera
 /camera_labels
-/log
+/logs
 /Bench2Drive-Base
+
+# visualizations
+/visualizations
 
 # model
 /paligemma-3b-pt-224

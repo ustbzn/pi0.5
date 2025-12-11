@@ -12,7 +12,8 @@ from PIL import Image
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
-import wandb
+import swanlab
+# import wandb
 from src.agent.dataset import Bench2DriveDataset
 from src.model.DrivePi0.drivepi0 import DrivePiZero
 from src.model.DrivePi0.processing import VLAProcessor
@@ -22,7 +23,7 @@ from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_bil
 
 log = logging.getLogger(__name__)
 
-os.environ["WANDB__SERVICE_WAIT"] = "300"
+# os.environ["WANDB__SERVICE_WAIT"] = "300"
 
 class DrivePiZeroTrainAgent:
     def __init__(self, cfg):
@@ -54,17 +55,34 @@ class DrivePiZeroTrainAgent:
         self.main_rank = not self.multi_gpu or global_rank == 0
 
         # logging
-        self.use_wandb = cfg.get("wandb", False)
-        if self.use_wandb and self.main_rank:
-            wandb.init(
-                entity=cfg.wandb.entity,
-                project=cfg.wandb.project,
-                name=cfg.wandb.run,
-                mode="offline",
+        # self.use_wandb = cfg.get("wandb", False)
+        # if self.use_wandb and self.main_rank:
+        #     wandb.init(
+        #         entity=cfg.wandb.entity,
+        #         project=cfg.wandb.project,
+        #         name=cfg.wandb.run,
+        #         mode="offline",
+        #         config=OmegaConf.to_container(cfg, resolve=True),
+        #         id=self.wandb_id if hasattr(self, "wandb_id") else None,
+        #         resume="allow",  # not using resume_from
+        #     )
+        # =========== SwanLab 初始化 ===========
+        self.use_swanlab = cfg.get("swanlab", {}).get("enable", False)
+        self.swanlab_run = None
+        if self.use_swanlab and self.main_rank:
+            swan_log_dir = os.path.join(os.getcwd(), "swanlog")
+            os.makedirs(swan_log_dir, exist_ok=True)
+            self.swanlab_run = swanlab.init(
+                project=cfg.swanlab.project,
+                experiment_name=cfg.swanlab.experiment_name,
+                description=cfg.swanlab.get("description", None),
                 config=OmegaConf.to_container(cfg, resolve=True),
-                id=self.wandb_id if hasattr(self, "wandb_id") else None,
-                resume="allow",  # not using resume_from
+                mode=cfg.swanlab.get("mode", "cloud"),
+                entity=cfg.swanlab.get("entity", None),
+                logdir=swan_log_dir,
             )
+            log.info(f"SwanLab log directory set to: {swan_log_dir}")
+        
         self.save_model_freq = int(cfg.save_model_freq)
         self.log_freq = cfg.log_freq
         self.log_dir = cfg.log_dir
@@ -84,7 +102,13 @@ class DrivePiZeroTrainAgent:
             log.warning(
                 "Quantizing VLM but not adding Lora weights, which means the VLM will be fully frozen!"
             )  # since the weights have requires_grad=False. However, we are not excluding the weights from the optimizer yet!
-        self.dtype = torch.bfloat16 if cfg.get("use_bf16", True) else torch.float32
+        # dtype 处理 (支持 fp16)
+        if cfg.get("use_bf16", False):
+            self.dtype = torch.bfloat16
+        elif cfg.get("use_fp16", False):
+            self.dtype = torch.float16
+        else:
+            self.dtype = torch.float32
         self.model = DrivePiZero(cfg, use_ddp=self.multi_gpu)
         if cfg.resume_checkpoint_path:
             self.load_checkpoint(cfg.resume_checkpoint_path)
@@ -94,6 +118,9 @@ class DrivePiZeroTrainAgent:
         self.model.freeze_unused_weights()
         if cfg.lora:
             self.model.freeze_non_lora_weights_in_vlm()
+        # 如果不训练 VLM，则彻底冻结 VLM 相关权重（vision tower / projector / gemma）
+        if not cfg.train_vlm:
+            self.model.freeze_vlm_weights()
         self.model.to(self.dtype)
         self.model.to(self.device)
         if cfg.get(
@@ -426,31 +453,33 @@ class DrivePiZeroTrainAgent:
                     loss_train_metric = np.mean(loss_train_deque)
                     peak_vram = torch.cuda.max_memory_reserved(self.gpu_id) / (1024**3)
                     log_msg = f"Batch {cnt_batch} Update {cnt_update}: t {timer():8.4f} | vram {peak_vram:6.3f} | train loss {loss_train_metric:6.4f} | action lr {self.action_optimizer.param_groups[0]['lr']:10.8f}"
-                    if self.train_vlm:
-                        log_msg += f" | vlm lr {self.vlm_optimizer.param_groups[0]['lr']:10.8f}"
                     log.info(log_msg)
-                    if self.use_wandb:
-                        wandb_metrics = {
-                            "loss - train": loss_train_metric,
-                            "gradient steps": cnt_update,
-                            "action lr": self.action_optimizer.param_groups[0]["lr"],
-                        }
-                        if self.train_vlm:
-                            wandb_metrics["vlm lr"] = self.vlm_optimizer.param_groups[
-                                0
-                            ]["lr"]
-                        if new_eval_from_last_log:
-                            wandb_metrics.update(
-                                {
-                                    f"eval acc - thres {threshold}": accuracy.item()
-                                    for threshold, accuracy in zip(
-                                        self.eval_thresholds, eval_accuracy
-                                    )
-                                }
-                            )
-                            wandb_metrics["eval l1 loss"] = eval_l1_loss.item()
-                            new_eval_from_last_log = False
-                        wandb.log(wandb_metrics, step=cnt_batch, commit=True)
+                    # 构建 metrics 字典
+                    metrics = {
+                        "train/loss": loss_train_metric,
+                        "train/gradient_steps": cnt_update,
+                        "train/action_lr": self.action_optimizer.param_groups[0]["lr"],
+                    }
+                    if self.train_vlm:
+                        metrics["vlm lr"] = self.vlm_optimizer.param_groups[0]["lr"]
+                    
+                    if new_eval_from_last_log:
+                        metrics.update(
+                            {
+                                f"eval acc - thres {threshold}": accuracy.item()
+                                for threshold, accuracy in zip(
+                                    self.eval_thresholds, eval_accuracy
+                                )
+                            }
+                        )
+                        metrics["eval l1 loss"] = eval_l1_loss.item()
+                        new_eval_from_last_log = False
+                    # if self.use_wandb:
+                    #     # 保持原有的 wandb
+                    #     wandb.log(metrics, step=cnt_batch, commit=True)
+                    # [新增] SwanLab Log
+                    if self.use_swanlab:
+                        swanlab.log(metrics, step=cnt_batch)
 
                 # Count
                 cnt_batch += 1
@@ -476,7 +505,7 @@ class DrivePiZeroTrainAgent:
             "vlm_lr_scheduler": self.vlm_lr_scheduler.state_dict()
             if self.train_vlm
             else None,
-            "wandb_id": wandb.run.id if self.use_wandb else None,
+            # "wandb_id": wandb.run.id if self.use_wandb else None,
         }
         savepath = os.path.join(self.checkpoint_dir, f"step{cnt_update}.pt")
         torch.save(data, savepath)
@@ -489,7 +518,7 @@ class DrivePiZeroTrainAgent:
         data = torch.load(path, weights_only=True, map_location="cpu")
         self.cnt_update = data["cnt_update"]
         self.cnt_batch = data["cnt_batch"]
-        self.wandb_id = data["wandb_id"]
+        # self.wandb_id = data["wandb_id"]
         # remove "_orig_mod." prefix if saved model was compiled
         data["model"] = {
             k.replace("_orig_mod.", ""): v for k, v in data["model"].items()

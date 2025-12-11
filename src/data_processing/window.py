@@ -30,10 +30,10 @@ class Bench2DriveGenerater:
 
     def _get_data(self, all_episode_data, window_size, horizon):
         all_data = []
-        for episode_data in all_episode_data:
+        print(f"正在预处理 {len(all_episode_data)} 条数据，请稍候...")
+        for episode_data in tqdm(all_episode_data, desc="Pre-processing"):
             all_data += self._split_data(episode_data, window_size=window_size, horizon=horizon)
         return all_data
-
     def _split_data(self, episode_data, window_size=5, horizon=10):
         episode_x_list, \
         episode_y_list, \

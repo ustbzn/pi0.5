@@ -251,6 +251,23 @@ class DrivePiZero(nn.Module, NoSyncBase):
             if self._check_gemma_unused_parameter_by_name(name):
                 param.requires_grad = False
 
+    def freeze_vlm_weights(self):
+        """Freeze all VLM-related parameters (vision tower, projector, gemma)."""
+        # vision encoder
+        for _, param in self.vision_tower.named_parameters():
+            param.requires_grad = False
+        log.info("Froze all weights in vision tower")
+
+        # vision-text projector
+        for _, param in self.multi_modal_projector.named_parameters():
+            param.requires_grad = False
+        log.info("Froze all weights in multi_modal_projector")
+
+        # language backbone (gemma in joint_model mixtures["vlm"])
+        for _, param in self.joint_model.mixtures["vlm"].named_parameters():
+            param.requires_grad = False
+        log.info("Froze all weights in VLM (gemma) part of the joint model")
+
     def freeze_all_weights(self):
         for _, param in self.named_parameters():
             param.requires_grad = False

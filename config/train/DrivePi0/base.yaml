@@ -5,24 +5,27 @@ hydra:
     dir: ${log_dir}
 _target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
 
-current_dir: YOUR_REPO_PATH  # You need to set path
+current_dir: /D2/NXT/vlm/miaobinqi/DriveMoE  # You need to set path
 log_dir: ${oc.env:LOG_DIR}/train/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
 name: drive-pi0
 device: cuda
 n_nodes: 1
 seed: 42
-pretrained_model_path:    # You need to set path
+pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/paligemma-3b-pt-224   # You need to set path
 load_pretrained_weights: True
-resume_checkpoint_path:
+resume_checkpoint_path: 
+# resume_checkpoint_path: ${current_dir}/checkpoint
 train_vlm: True
 action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
 use_torch_compile: True
 use_bf16: True
+# use_fp16: False
+# 混合精度
 use_amp: True
 quantize: False
 lora: False
 lora_r: 32
-lora_dropout: 0.0
+lora_dropout: 0.05
 
 data:
   train:
@@ -40,22 +43,32 @@ data:
     num_of_action_experts: 13 # useless in drive-pi0
     shuffle_buffer_size: 200000
 
-wandb:
-  entity: ${oc.env:WANDB_ENTITY}
+swanlab:
+  enable: True
   project: drive-pi0
-  run: ${now:%H-%M-%S}_${name}
+  experiment_name: ${now:%Y-%m-%d}_${now:%H-%M}_A100
+  mode: cloud
+  description: null
+  entity: null
+
+# wandb:
+#   entity: null
+#   project: drive-pi0
+#   run: ${now:%H-%M-%S}_${name}
 
 log_freq: 16
 n_epochs: 15
 n_updates: ${eval:'225348 // ${global_batch_size} * ${n_epochs}'}
+# 一个global_batch_size保存一次模型
 save_model_freq: ${eval:'225348 // ${global_batch_size} * 1'}
 eval_freq: 2000
 eval_size: 1024
 eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
 
 global_batch_size: 1024
-per_device_batch_size: 8
+per_device_batch_size: 16
 num_workers: 8
+# 学习率
 action_lr: 5e-5
 vlm_lr: 5e-5
 action_lr_scheduler:
@@ -68,6 +81,7 @@ vlm_lr_scheduler:
   warmup_steps: 200
 action_weight_decay: 0
 vlm_weight_decay: 0
+# 梯度裁剪
 max_grad_norm: 1.0
 
 flow_sampling: beta

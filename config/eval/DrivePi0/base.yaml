@@ -5,7 +5,7 @@ hydra:
     dir: ${log_dir}
 _target_: src.agent.drivepi0.eval.DrivePiZeroEvalAgent
 
-# current_dir: "YOUR_CURRENT_WORK_DIR"  # You need to set path
+current_dir: /D2/NXT/vlm/miaobinqi/DriveMoE  # You need to set path
 log_dir: ${oc.env:LOG_DIR}/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
 name: drive-pi0
 device: cuda
@@ -17,8 +17,8 @@ quantize: False
 lora: False
 lora_r: 32
 lora_dropout: 0.0
-pretrained_model_path: "YOUR_MODEL_PATH"  # You need to set path
-checkpoint_path: "YOUR_CHECKPOINT_PATH"  # You need to set path
+pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/paligemma-3b-pt-224  # You need to set path
+checkpoint_path: /D2/NXT/vlm/miaobinqi/DriveMoE/logs/train/drive-pi0/2025-12-02_02-14_42/checkpoint/step3300.pt  # You need to set path
 
 data:
   statistics_path: ${current_dir}/statistics.json
@@ -37,14 +37,16 @@ flow_sampling: beta
 num_inference_steps: 10
 final_action_clip_value: 1.0  # data normalized in [-1,1]
 debug: False
-save_images: False
+# 保存轨迹数据（用于后续可视化）
+save_trajectories: True
 
 cond_steps: 5
 horizon_steps: 10
 action_dim: 2 # EEF_POS
 proprio_dim: 10  # POS_EULER
 state_dim: ${proprio_dim}
-max_seq_len: 788  # fixed 768 for image + max 20 for text
+# 参数更改
+max_seq_len: 532  # fixed 512 for image + max 20 for text
 tokenizer_padding: max_length # instead of truncating to longest
 max_image_text_tokens: ${max_seq_len}
 
@@ -92,7 +94,8 @@ vision:
     patch_size: 14
     layer_norm_eps: 1e-6
     attention_dropout: 0.0
-    num_image_tokens: 768 # 3 images: 256 * 3
+    # 参数更改
+    num_image_tokens: 512 # 2 images: 256 * 2
     lora:
       r: ${lora_r}
       dropout: ${lora_dropout}

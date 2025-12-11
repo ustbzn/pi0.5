@@ -10,6 +10,13 @@
 #SBATCH --cpus-per-task=104
 #SBATCH --mem=500G
 
+export TZ='UTC-8'
+# SwanLab 配置
+export WANDB_DISABLED=true
+export SWANLAB_API_KEY='WIuVGDGJJcxnKEAis5knC'
+# 保存路径
+export LOG_DIR="/D2/NXT/vlm/miaobinqi/DriveMoE/logs"
+
 # GPU check
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 NUM_GPU="$(nvidia-smi --list-gpus | wc -l)"
