@@ -1,0 +1,187 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+current_dir: /D2/NXT/vlm/miaobinqi/DriveMoE  # You need to set path
+log_dir: ${oc.env:LOG_DIR}/train/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/paligemma-3b-pt-224   # You need to set path
+load_pretrained_weights: True
+resume_checkpoint_path: 
+# resume_checkpoint_path: ${current_dir}/checkpoint
+train_vlm: True
+action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
+use_torch_compile: True
+use_bf16: True
+# use_fp16: False
+# 混合精度
+use_amp: True
+quantize: False
+lora: False
+lora_r: 32
+lora_dropout: 0.05
+
+data:
+  train:
+    statistics_path: ${current_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: b2d_dynamic_camera
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13 # useless in drive-pi0
+    shuffle_buffer_size: 200000
+  val:
+    statistics_path: ${current_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: b2d_dynamic_camera
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13 # useless in drive-pi0
+    shuffle_buffer_size: 200000
+
+swanlab:
+  enable: True
+  project: drive-pi0
+  experiment_name: ${now:%Y-%m-%d}_${now:%H-%M}_4*A100
+  mode: cloud
+  description: null
+  entity: null
+
+# wandb:
+#   entity: null
+#   project: drive-pi0
+#   run: ${now:%H-%M-%S}_${name}
+
+log_freq: 16
+n_epochs: 15
+n_train: 225348  # total training samples; update when dataset size changes
+n_updates: ${eval:'${n_train} // ${global_batch_size} * ${n_epochs}'}
+# 一个global_batch_size保存一次模型
+save_model_freq: ${eval:'${n_train} // ${global_batch_size} * 1'}
+eval_freq: 2000
+# eval_freq: ${eval:'${n_train} // ${global_batch_size} * 4'}
+eval_size: 1024
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+
+global_batch_size: 1024
+per_device_batch_size: 16
+num_workers: 8
+# 学习率
+action_lr: 5e-5
+vlm_lr: 5e-5
+action_lr_scheduler:
+  first_cycle_steps: 10000000 # basically no decaying
+  min_lr: 1e-8
+  warmup_steps: 200 # a bit of warmup
+vlm_lr_scheduler:
+  first_cycle_steps: 10000000
+  min_lr: 1e-8
+  warmup_steps: 200
+action_weight_decay: 0
+vlm_weight_decay: 0
+# 梯度裁剪
+max_grad_norm: 1.0
+
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0  # data normalized in [-1,1]
+
+cond_steps: 5  # 必须与 window.sh 中的 --window_size 参数一致
+horizon_steps: 10  # 必须与 window.sh 中的 --horizon 参数一致
+action_dim: 2 # EEF_POS
+proprio_dim: 10  # POS_EULER
+state_dim: ${proprio_dim}
+max_seq_len: 532  # fixed 512 for image + max 20 for text
+tokenizer_padding: max_length # instead of truncating to longest
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:   # gemma
+    hidden_size: 2048
+    intermediate_size: 16384
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:  # not applicable for gemma
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True  # technically no, but sharing weights with action anyway
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256 # only applicable if using adaptive
+
+# Fixed
+image_token_index: 257152
+vocab_size: 257216
+pad_token_id: 0
+
+vision:
+  _target_: src.model.paligemma.siglip.SiglipVisionModel
+  config:
+    hidden_size: 1152 # siglip
+    intermediate_size: 4304
+    num_hidden_layers: 27
+    num_attention_heads: 16
+    num_channels: 3
+    image_size: 224
+    patch_size: 14
+    layer_norm_eps: 1e-6
+    attention_dropout: 0.0
+    num_image_tokens: 512 # 2 images: 256 * 2
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+  use_quantize: ${quantize}
+  use_lora: ${lora}
+
+vision_projector:
+  _target_: src.model.paligemma.siglip.PaliGemmaMultiModalProjector
+  config:
+    vision_config:
+      hidden_size: 1152
+      projection_dim: 2048
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+  use_quantize: ${quantize}
+  use_lora: ${lora}
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 18
+    num_attention_heads: 8
+    num_key_value_heads: 1
+    head_dim: 256
+    max_position_embeddings: 8192
+    rms_norm_eps: 1e-6
+    rope_theta: 10000.0
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
