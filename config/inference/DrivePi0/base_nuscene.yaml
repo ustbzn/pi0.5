@@ -18,7 +18,9 @@ lora: False
 lora_r: 32
 lora_dropout: 0.0
 pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/paligemma-3b-pt-224  # You need to set path
-checkpoint_path: /D2/NXT/vlm/miaobinqi/DriveMoE/logs/train/drive-pi0/2026-01-02_18-24_nuscene_0102/checkpoint/step920.pt  # You need to set path
+checkpoint_path: /D2/NXT/vlm/miaobinqi/DriveMoE/logs/train/drive-pi0/2026-01-08_02-46_nuscene_0108/checkpoint/step920.pt  # You need to set path
+# 归一化方法: percentile_clip, percentile, minmax
+norm_mode: percentile_clip
 
 data:
   statistics_path: ${current_dir}/datasets/nuscene-1230/statistics.json
@@ -27,6 +29,7 @@ data:
   split: val
   num_of_action_experts: 13 # useless in drive-pi0
   shuffle_buffer_size: 200000
+  norm_mode: ${norm_mode}
 
 
 eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]

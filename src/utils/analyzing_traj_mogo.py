@@ -386,9 +386,14 @@ class MOGOTrajectoryAnalyzer:
                 print(f"错误: pkl缺少 his_cam_front 字段: {pkl_path}")
                 return None
             
-            # 兼容不同的数据格式
+            # 兼容不同的数据格式（与 inference_mogo.py 保持一致）
+            # 1) 处理 dict 类型（StringWrapper 序列化为 dict 的情况）
+            if isinstance(img_ref, dict) and "_string_wrapper_marker" in img_ref:
+                img_ref = img_ref.get("_bytes_value", b"")
+            # 2) 处理有 .numpy() 方法的对象
             if hasattr(img_ref, "numpy"):
                 img_ref = img_ref.numpy()
+            # 3) 处理 bytes 或 str
             if isinstance(img_ref, bytes):
                 img_path = img_ref.decode("utf-8")
             elif isinstance(img_ref, str):
@@ -445,10 +450,6 @@ class MOGOTrajectoryAnalyzer:
 
         gt_traj = self.gt_trajectories[sample_idx]
         pred_traj = self.pred_trajectories[sample_idx]
-        # 逆时针旋转90度 (x, y) -> (-y, x)
-        rotation = np.array([[0, -1], [1, 0]])
-        gt_traj = gt_traj @ rotation.T
-        pred_traj = pred_traj @ rotation.T
         img_rgb = self._load_front_image_from_pkl(sample_idx)
         if img_rgb is None:
             return
@@ -480,8 +481,8 @@ class MOGOTrajectoryAnalyzer:
         axes[1].scatter(gt_traj[0, 0], gt_traj[0, 1], color='green', s=100, marker='s', label='GT Start', zorder=5)
         axes[1].scatter(pred_traj[0, 0], pred_traj[0, 1], color='red', s=100, marker='s', label='Pred Start', zorder=5)
         
-        axes[1].set_xlabel("Y (left positive)")
-        axes[1].set_ylabel("X (up positive)")
+        axes[1].set_xlabel("X")
+        axes[1].set_ylabel("Y")
 
         # 计算轨迹范围
         all_pts = np.concatenate([gt_traj, pred_traj], axis=0)
@@ -497,7 +498,6 @@ class MOGOTrajectoryAnalyzer:
             axes[1].set_xlim(bev_xlim)
         else:
             axes[1].set_xlim(x_min - margin_x, x_max + margin_x)
-        axes[1].invert_xaxis()
 
         if bev_ylim and _in_range(bev_ylim, y_min, y_max):
             axes[1].set_ylim(bev_ylim)

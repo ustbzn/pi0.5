@@ -53,6 +53,8 @@ class DrivePiZeroInferenceAgent:
             max_seq_len=cfg.max_seq_len,
             tokenizer_padding=cfg.tokenizer_padding,
         )
+        # 保存 norm_mode（从顶层或 data 中读取）
+        self.norm_mode = cfg.data.get("norm_mode", "percentile")
         print('Agent done')
     
     
@@ -114,7 +116,7 @@ class DrivePiZeroInferenceAgent:
         self.model.load_state_dict(data["model"], strict=True)
         log.info(f"Loaded model from {path}")
     
-    def run_batch_inference(self, val_data_dir: str, output_dir: str, statistic_path: str = "statistics.json"):
+    def run_batch_inference(self, val_data_dir: str, output_dir: str, statistic_path: str = "statistics.json", scene_name_filter: str = None):
         """
         按场景批量推理，每个场景保存一个 npy 文件
         
@@ -130,7 +132,9 @@ class DrivePiZeroInferenceAgent:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
-        normalize = Normalize.get_instance(statistic_path)
+        # 使用 self.norm_mode 创建归一化器
+        norm_mode = getattr(self, 'norm_mode', 'percentile')
+        normalize = Normalize.get_instance(statistic_path, norm_mode=norm_mode)
         
         # ------------------------------------------------------------------
         # 自动从 val_data_dir 中推断场景前缀：
@@ -149,8 +153,20 @@ class DrivePiZeroInferenceAgent:
             log.warning(f"No valid '*_step*.pkl' files found in {val_data_path}")
             return
         
-        # 遍历按名字排序后的场景
-        for scene_name in tqdm(sorted(scene_to_files.keys()), desc="Processing scenes"):
+        # 根据可选的 scene_name_filter 决定要处理的场景
+        all_scene_names = sorted(scene_to_files.keys())
+        if scene_name_filter is not None:
+            if scene_name_filter not in scene_to_files:
+                log.warning(f"Scene '{scene_name_filter}' not found in {val_data_path}. "
+                            f"Available scenes: {all_scene_names}")
+                return
+            target_scenes = [scene_name_filter]
+            log.info(f"Filtering to single scene: {scene_name_filter}")
+        else:
+            target_scenes = all_scene_names
+        
+        # 遍历按名字排序后的场景（或单个指定场景）
+        for scene_name in tqdm(target_scenes, desc="Processing scenes"):
             scene_files = sorted(scene_to_files[scene_name], key=lambda x: x[0])
             
             # 存储该场景的所有轨迹
@@ -196,13 +212,6 @@ class DrivePiZeroInferenceAgent:
                         log.warning(f"Unexpected pred_trajectory shape: {pred_trajectory.shape}, expected [10, 2]")
                     # 现在应该是 [horizon, 2]
                     
-                    # 获取真实轨迹（与 eval.py 保持一致：从 DataLoader 获取的方式）
-                    gt_trajectory = normalize.prepare_traj(all_data)  # [horizon, 2] 或 [1, horizon, 2]
-                    
-                    # 确保轨迹形状正确：如果是 [1, horizon, 2]，先 squeeze；如果是 [horizon, 2]，保持不变
-                    if len(gt_trajectory.shape) == 3:
-                        gt_trajectory = gt_trajectory.squeeze(0)  # [horizon, 2]
-                    
                     # 反归一化预测轨迹到真实坐标（按照 eval.py 的方式）
                     # pred_trajectory 形状: [horizon, 2]，先加 batch 维变成 [1, horizon, 2]
                     pred = pred_trajectory.unsqueeze(0)  # [1, horizon, 2]
@@ -218,17 +227,29 @@ class DrivePiZeroInferenceAgent:
                         y_pred = torch.from_numpy(y_pred)
                     pred_traj_real = torch.stack([x_pred, y_pred], dim=1)  # [horizon, 2]
                     
-                    # 反归一化真实轨迹到真实坐标（按照 eval.py 的方式）
-                    # gt_trajectory 形状: [horizon, 2]，先加 batch 维变成 [1, horizon, 2]
-                    label = gt_trajectory.unsqueeze(0)  # [1, horizon, 2]
-                    x_label, y_label = normalize.infer_traj(label)
-                    # 确保 x_label 和 y_label 是 tensor
-                    if isinstance(x_label, np.ndarray):
-                        x_label = torch.from_numpy(x_label)
-                    if isinstance(y_label, np.ndarray):
-                        y_label = torch.from_numpy(y_label)
-                    # 拼回 [horizon, 2]（torch.stack 会自动处理 numpy array）
-                    gt_traj_real = torch.stack([x_label, y_label], dim=1)  # [horizon, 2]
+                    # 获取真实轨迹：直接从原始数据读取，不经过归一化→反归一化
+                    # 避免因 norm_mode（如 percentile_clip）导致的信息丢失
+                    fur_x_gt = all_data["fur_x"]
+                    fur_y_gt = all_data["fur_y"]
+                    
+                    # 转换为 numpy 数组（如果还不是）
+                    if isinstance(fur_x_gt, np.ndarray):
+                        fur_x_gt_arr = fur_x_gt
+                        fur_y_gt_arr = fur_y_gt
+                    else:
+                        fur_x_gt_arr = np.array(fur_x_gt)
+                        fur_y_gt_arr = np.array(fur_y_gt)
+                    
+                    # 处理形状：如果是 [T, horizon]，取最后一个时间步
+                    if fur_x_gt_arr.ndim == 2:
+                        fur_x_gt_last = fur_x_gt_arr[-1]  # [horizon]
+                        fur_y_gt_last = fur_y_gt_arr[-1]  # [horizon]
+                    else:
+                        fur_x_gt_last = fur_x_gt_arr  # [horizon]
+                        fur_y_gt_last = fur_y_gt_arr  # [horizon]
+                    
+                    # 拼接成 [horizon, 2] 形状
+                    gt_traj_real = np.stack([fur_x_gt_last, fur_y_gt_last], axis=-1)  # [horizon, 2]
                     
                     # 确保最终形状正确：应该是 [horizon, 2]
                     if len(pred_traj_real.shape) != 2 or pred_traj_real.shape[1] != 2:
@@ -299,6 +320,8 @@ if __name__ == '__main__':
                         help="Path to statistics file")
     parser.add_argument("--output_dir", type=str, default=None,
                         help="Output directory (default: logs/inference/drive-pi0/TIMESTAMP)")
+    parser.add_argument("--scene_name", type=str, default=None,
+                        help="Only run inference on a single scene name (e.g. 'scene-0003')")
     args = parser.parse_args()
     
     config = OmegaConf.load(args.config_path)
@@ -322,7 +345,7 @@ if __name__ == '__main__':
         with open(pkl_data_path, 'rb') as f:
             all_data = pickle.load(f)
             # prepare state
-            normalize = Normalize.get_instance(statistic_path)
+            normalize = Normalize.get_instance(statistic_path, norm_mode=inference_agent.norm_mode)
             state = normalize.prepare_state(all_data)
             # prepare 
             data_dict = {}
@@ -347,11 +370,14 @@ if __name__ == '__main__':
         log.info(f"Starting batch inference...")
         log.info(f"Val data directory: {args.val_data_dir}")
         log.info(f"Output directory: {output_dir}")
+        if args.scene_name is not None:
+            log.info(f"Only infer scene: {args.scene_name}")
         
         inference_agent.run_batch_inference(
             val_data_dir=args.val_data_dir,
             output_dir=str(output_dir),
-            statistic_path=statistic_path
+            statistic_path=statistic_path,
+            scene_name_filter=args.scene_name
         )
         
         log.info(f"Batch inference completed. Results saved to: {output_dir}")

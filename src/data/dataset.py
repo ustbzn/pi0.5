@@ -12,12 +12,13 @@ from src.data.utils.normalization import Normalize
 from src.data.camera_scenario_map import get_scenario_id, get_cam_id_by_name, get_cam_id_by_label
 
 class TorchDataset(Dataset):
-    def __init__(self, data_path: str, statistics_path: str, use_fixed_images: bool, num_of_action_experts: int):
+    def __init__(self, data_path: str, statistics_path: str, use_fixed_images: bool, num_of_action_experts: int, norm_mode: str = "percentile"):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
         self.statistics_path = statistics_path
         self.use_fixed_images = use_fixed_images
         self.num_of_action_experts = num_of_action_experts
+        self.norm_mode = norm_mode
         self.list_data_dict = [f for f in os.listdir(self.data_path) if f.endswith('.pkl')]
     
     def __len__(self):
@@ -28,7 +29,7 @@ class TorchDataset(Dataset):
         pkl_data_path = os.path.join(self.data_path, self.list_data_dict[i])
         with open(pkl_data_path, 'rb') as f:
             all_data = pickle.load(f)
-            normalize = Normalize.get_instance(self.statistics_path)
+            normalize = Normalize.get_instance(self.statistics_path, norm_mode=self.norm_mode)
             state = normalize.prepare_state(all_data)
             data_dict['state'] = state
             # drive-pi0
@@ -83,7 +84,8 @@ def prepare_b2d_dataset(
     num_of_action_experts: int,
     split: Optional[str] = None,
     dynamic_dir_name: str = 'b2d_dynamic_camera',
-    fixed_dir_name: str = 'b2d_fixed_camera'
+    fixed_dir_name: str = 'b2d_fixed_camera',
+    norm_mode: str = "percentile"
 ):
     """
     Select the dataset directory based on camera type and split.
@@ -95,7 +97,8 @@ def prepare_b2d_dataset(
             data_path=data_path,
             statistics_path=statistics_path,
             use_fixed_images=True,
-            num_of_action_experts=num_of_action_experts
+            num_of_action_experts=num_of_action_experts,
+            norm_mode=norm_mode
         )
     data_path = os.path.join(work_dir, dynamic_dir_name)
     if split == 'train':
@@ -104,7 +107,8 @@ def prepare_b2d_dataset(
             data_path=train_data_path,
             statistics_path=statistics_path,
             use_fixed_images=False,
-            num_of_action_experts=num_of_action_experts
+            num_of_action_experts=num_of_action_experts,
+            norm_mode=norm_mode
         )
     if split == 'val':
         val_data_path = os.path.join(data_path, 'val')
@@ -112,7 +116,8 @@ def prepare_b2d_dataset(
             data_path=val_data_path,
             statistics_path=statistics_path,
             use_fixed_images=False,
-            num_of_action_experts=num_of_action_experts
+            num_of_action_experts=num_of_action_experts,
+            norm_mode=norm_mode
         )
     raise ValueError("split type must be 'train' or 'val'")
     raise ValueError("split type must be 'train' or 'val'")
