@@ -114,7 +114,7 @@ final_action_clip_value: 1.0  # data normalized in [-1,1]
 cond_steps: 5  # 必须与 window.sh 中的 --window_size 参数一致
 horizon_steps: 7  # 必须与 window.sh 中的 --horizon 参数一致
 action_dim: 2 # EEF_POS
-proprio_dim: 9  # 实际维度: his_speed(1) + his_acceleration(2) + his_angular_velocity(3) + his_theta(1) + x_command_far(1) + y_command_far(1) = 9
+proprio_dim: 10  # 实际维度: his_speed(1) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + x_command_far(1) + y_command_far(1) = 10
 state_dim: ${proprio_dim}
 max_seq_len: 532  # fixed 512 for image + max 20 for text
 tokenizer_padding: max_length # instead of truncating to longest
