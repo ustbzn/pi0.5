@@ -23,28 +23,6 @@ def calculate(data):
 def flatten(data):
     return np.concatenate([arr.flatten() for arr in data])
 
-def transform_ego_to_nuscenes(x_arr, y_arr):
-    """
-    将 ego-car 坐标系 (x, y) 转换为 nuScenes 坐标系，通过交换 x 和 y 轴
-    转换: (x, y) -> (y, x)
-    
-    Args:
-        x_arr: x 坐标数组，可以是任意形状
-        y_arr: y 坐标数组，形状应与 x_arr 相同
-    
-    Returns:
-        transformed_x: 转换后的 x 坐标（原 y）
-        transformed_y: 转换后的 y 坐标（原 x）
-    """
-    x_arr = np.array(x_arr)
-    y_arr = np.array(y_arr)
-    
-    # 转换: (x, y) -> (y, x)，即交换 x 和 y 轴
-    transformed_x = y_arr.copy()
-    transformed_y = x_arr.copy()
-    
-    return transformed_x, transformed_y
-
 def generate_data(data_path):
     """
     生成统计量：
@@ -97,20 +75,10 @@ def generate_data(data_path):
             his_acceleration.append(all_data['his_acceleration'])
             his_speed.append(all_data['his_speed'])
             
-            # 对坐标相关字段进行转换：ego-car (x, y) -> nuScenes (y, -x)
-            # 转换未来轨迹 fur_x, fur_y
-            fur_x_transformed, fur_y_transformed = transform_ego_to_nuscenes(
-                all_data['fur_x'], all_data['fur_y']
-            )
-            fur_x.append(fur_x_transformed)
-            fur_y.append(fur_y_transformed)
-            
-            # 转换远距离命令 x_command_far, y_command_far
-            command_far_x_transformed, command_far_y_transformed = transform_ego_to_nuscenes(
-                all_data['x_command_far'], all_data['y_command_far']
-            )
-            command_far_x.append(command_far_x_transformed)
-            command_far_y.append(command_far_y_transformed)
+            fur_x.append(all_data['fur_x'])
+            fur_y.append(all_data['fur_y'])
+            command_far_x.append(all_data['x_command_far'])
+            command_far_y.append(all_data['y_command_far'])
     his_speed = flatten(his_speed)
     his_acceleration = flatten(his_acceleration)
     his_angular_velocity = flatten(his_angular_velocity)

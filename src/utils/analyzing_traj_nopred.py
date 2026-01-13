@@ -266,34 +266,42 @@ class TrajectoryAnalyzer:
                 fig, ax_bev = plt.subplots(1, 1, figsize=(10, 8))
             
             # 绘制 BEV 轨迹
-            ax_bev.plot(traj[:, 0], traj[:, 1], "b-", linewidth=2, label="Trajectory", marker='o', markersize=4)
+            # 数值上：traj[:, 0] / traj[:, 1] 分别是原始 fur_x / fur_y
+            # 可视化约定：
+            #   - 纵轴：x，向上为正
+            #   - 横轴：y，向右为正（往左 y 变小）
+            ax_bev.plot(traj[:, 1], traj[:, 0], "b-", linewidth=2, label="Trajectory", marker='o', markersize=4)
             
             # 标记起始点
-            ax_bev.scatter(traj[0, 0], traj[0, 1], color='green', s=100, marker='s', 
+            ax_bev.scatter(traj[0, 1], traj[0, 0], color='green', s=100, marker='s', 
                           label='Start', zorder=5)
             # 标记终点
-            ax_bev.scatter(traj[-1, 0], traj[-1, 1], color='red', s=100, marker='s', 
+            ax_bev.scatter(traj[-1, 1], traj[-1, 0], color='red', s=100, marker='s', 
                           label='End', zorder=5)
             
-            ax_bev.set_xlabel("X")
-            ax_bev.set_ylabel("Y")
+            ax_bev.set_xlabel("Y (right positive)")
+            ax_bev.set_ylabel("X (up positive)")
             ax_bev.set_title(f"BEV Trajectory ({file_scene_name}, step {step_num})")
             
-            # 设置坐标轴范围
-            x_min, x_max = traj[:, 0].min(), traj[:, 0].max()
-            y_min, y_max = traj[:, 1].min(), traj[:, 1].max()
+            # 设置坐标轴范围（基于原始 (x, y) 数值）
+            x_min, x_max = traj[:, 0].min(), traj[:, 0].max()  # 纵轴
+            y_min, y_max = traj[:, 1].min(), traj[:, 1].max()  # 横轴
             margin_x = max(1.0, 0.1 * (x_max - x_min + 1e-6))
             margin_y = max(1.0, 0.1 * (y_max - y_min + 1e-6))
             
-            if bev_xlim:
-                ax_bev.set_xlim(bev_xlim)
-            else:
-                ax_bev.set_xlim(x_min - margin_x, x_max + margin_x)
-            
             if bev_ylim:
-                ax_bev.set_ylim(bev_ylim)
+                # 横轴范围使用 y
+                ax_bev.set_xlim(bev_ylim)
             else:
-                ax_bev.set_ylim(y_min - margin_y, y_max + margin_y)
+                ax_bev.set_xlim(y_min - margin_y, y_max + margin_y)
+            
+            if bev_xlim:
+                # 纵轴范围使用 x
+                ax_bev.set_ylim(bev_xlim)
+            else:
+                ax_bev.set_ylim(x_min - margin_x, x_max + margin_x)
+            
+            # 横轴方向：向右 y 变大，向左 y 变小（标准方向，无需反转）
             
             ax_bev.set_aspect("equal")
             ax_bev.grid(True, alpha=0.3)

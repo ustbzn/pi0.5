@@ -6,7 +6,7 @@ hydra:
 _target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
 
 current_dir: /D2/NXT/vlm/miaobinqi/DriveMoE  # You need to set path
-run_name: ${now:%Y-%m-%d}_${now:%H-%M}_nuscene_0108
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_nuscene_0111
 log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
 
 name: drive-pi0
@@ -34,7 +34,7 @@ data:
     statistics_path: ${current_dir}/${data.train.dynamic_dir}/statistics.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: datasets/nuscene-1230 # 训练集不变
+    dynamic_dir: datasets/nuscene-0111 # 训练集不变
     dynamic_dir_test: datasets/nuscene # 归一化数据替换的测试
     fixed_dir: b2d_fixed_camera
     split: train
@@ -45,7 +45,7 @@ data:
     statistics_path: ${current_dir}/${data.val.dynamic_dir}/statistics.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: datasets/nuscene-1230 # 测试集不变
+    dynamic_dir: datasets/nuscene-0111 # 测试集不变
     dynamic_dir_test: datasets/nuscene # 归一化数据替换的测试
     fixed_dir: b2d_fixed_camera
     split: val
@@ -69,7 +69,7 @@ swanlab:
 log_freq: 16
 n_epochs: 40
 # 归一化方法: percentile_clip, percentile, minmax
-norm_mode: percentile_clip
+norm_mode: percentile
 # 需要修改的参数
 n_train: 23930  # total training samples; update when dataset size changes
 n_updates: ${eval:'${n_train} // ${global_batch_size} * ${n_epochs}'}

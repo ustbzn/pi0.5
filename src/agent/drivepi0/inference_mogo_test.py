@@ -172,36 +172,6 @@ class DrivePiZeroInferenceAgent:
         print(f"  theta: [{stats_data['theta'][0]:.6f}, {stats_data['theta'][1]:.6f}] (1%, 99%百分位数)")
         print(f"{'='*60}\n")
         
-        # 坐标系转换函数：交换 x 和 y
-        def swap_xy(traj):
-            """
-            交换 x 和 y 坐标: (x, y) -> (y, x)
-            
-            Args:
-                traj: 轨迹数组，形状为 [horizon, 2] 或 [N, horizon, 2]
-            
-            Returns:
-                转换后的轨迹，形状不变
-            """
-            if isinstance(traj, torch.Tensor):
-                traj_np = traj.cpu().numpy()
-                is_tensor = True
-            else:
-                traj_np = np.array(traj)
-                is_tensor = False
-            
-            # 保存原始形状
-            original_shape = traj_np.shape
-            traj_flat = traj_np.reshape(-1, 2)
-            
-            # 转换: (x, y) -> (y, x)
-            traj_transformed = np.stack([traj_flat[:, 1], traj_flat[:, 0]], axis=1)
-            traj_transformed = traj_transformed.reshape(original_shape)
-            
-            if is_tensor:
-                return torch.from_numpy(traj_transformed).to(traj.device if hasattr(traj, 'device') else 'cpu')
-            return traj_transformed
-        
         # 处理图像路径提取的辅助函数
         def extract_image_path(img_ref):
             """从不同格式的图像引用中提取路径字符串"""
@@ -220,31 +190,48 @@ class DrivePiZeroInferenceAgent:
                 raise ValueError(f"Unsupported type for image reference: {type(img_ref)}")
         
         # 处理单个 pkl 目录的函数
-        def process_pkl_directory(pkl_dir: Path, timestamp_name: str):
+        def process_pkl_directory(pkl_dir: Path, timestamp_name: str, timestamp_filter: Optional[str] = None):
             """
             处理单个 pkl 目录下的所有文件
             
             Args:
                 pkl_dir: 包含 pkl 文件的目录路径
                 timestamp_name: 时间戳名称（用于生成输出文件名）
+                timestamp_filter: 如果指定，只处理匹配该时间戳的文件（用于扁平化目录结构）
             
             Returns:
                 (pred_trajectories, gt_trajectories) 列表，如果处理失败返回 None
             """
-            # 读取数字命名的 pkl 文件：00001.pkl, 00002.pkl, ...
+            # 读取 pkl 文件，支持多种命名格式：
+            # 1. 数字命名：00001.pkl, 00002.pkl, ...
+            # 2. 时间戳_stepN格式：20251210141637_step1.pkl, 20251210141637_step2.pkl, ...
             pkl_files = []
             for pkl_file in pkl_dir.glob("*.pkl"):
-                # 匹配数字命名的文件（如 00001.pkl）
-                match = re.match(r"(\d+)\.pkl$", pkl_file.name)
-                if match:
-                    file_num = int(match.group(1))
+                # 如果指定了时间戳过滤，先检查是否匹配
+                if timestamp_filter is not None:
+                    if not pkl_file.name.startswith(timestamp_filter + "_step"):
+                        continue
+                
+                # 尝试匹配数字命名的文件（如 00001.pkl）
+                match_num = re.match(r"(\d+)\.pkl$", pkl_file.name)
+                if match_num:
+                    file_num = int(match_num.group(1))
                     pkl_files.append((file_num, pkl_file))
+                else:
+                    # 尝试匹配时间戳_stepN格式（如 20251210141637_step1.pkl）
+                    match_timestamp = re.match(r"(\d+)_step(\d+)\.pkl$", pkl_file.name)
+                    if match_timestamp:
+                        step_num = int(match_timestamp.group(2))
+                        pkl_files.append((step_num, pkl_file))
             
             # 按文件编号排序
             pkl_files = sorted(pkl_files, key=lambda x: x[0])
             
             if not pkl_files:
-                print(f"[WARNING] No valid numeric '*.pkl' files found in {pkl_dir}")
+                if timestamp_filter:
+                    print(f"[WARNING] No valid '*.pkl' files found in {pkl_dir} matching timestamp {timestamp_filter}")
+                else:
+                    print(f"[WARNING] No valid '*.pkl' files found in {pkl_dir}")
                 return None
             
             # 存储该时间戳的所有轨迹
@@ -268,122 +255,19 @@ class DrivePiZeroInferenceAgent:
                             # 如果是 Python 3 生成的 pickle，不需要 encoding 参数
                             all_data = pickle.load(f)
                     
-                    # ========== 1. 反转前：获取原始自车坐标系数据 ==========
-                    # 直接使用原始 GT 轨迹（自车坐标系 (x, y)），不经过归一化 / 反归一化
-                    fur_x_raw = all_data["fur_x"]
-                    fur_y_raw = all_data["fur_y"]
-                    # 处理维度：如果是 [T, horizon]，默认取最后一个时间步；如果是一维则直接使用
-                    if isinstance(fur_x_raw, np.ndarray):
-                        fur_x_arr = fur_x_raw
-                        fur_y_arr = fur_y_raw
-                    else:
-                        fur_x_arr = np.array(fur_x_raw)
-                        fur_y_arr = np.array(fur_y_raw)
-                    if fur_x_arr.ndim == 2:
-                        fur_x_last = fur_x_arr[-1]
-                        fur_y_last = fur_y_arr[-1]
-                    else:
-                        fur_x_last = fur_x_arr
-                        fur_y_last = fur_y_arr
-                    gt_traj_ego_before = np.stack([fur_x_last, fur_y_last], axis=-1)
-                    
-                    print(f"\n{'='*60}")
-                    print(f"处理文件: {pkl_file.name}")
-                    print(f"{'='*60}")
-                    print(f"[1] 反转前 - 自车坐标系 (x, y) - GT轨迹:")
-                    print(f"    形状: {gt_traj_ego_before.shape}")
-                    print(f"    x: {gt_traj_ego_before[:, 0]}")
-                    print(f"    y: {gt_traj_ego_before[:, 1]}")
-                    print(f"    目标点 (x_command_far, y_command_far): ({all_data['x_command_far'][-1]:.4f}, {all_data['y_command_far'][-1]:.4f})")
-                    
-                    # ========== 2. 反转后（推理前）：交换坐标系 ==========
-                    # 准备数据：将 x 和 y 进行交换 (x, y) -> (y, x)
-                    # 创建 all_data 的副本，交换坐标后用于模型输入
-                    all_data_swapped = {}
-                    for key, value in all_data.items():
-                        if key in ['x_command_far', 'y_command_far']:
-                            # 交换目标点坐标: (x, y) -> (y, x)
-                            if key == 'x_command_far':
-                                # x -> y (使用 y_command_far 的值)
-                                all_data_swapped['x_command_far'] = all_data['y_command_far'].copy()
-                            else:  # y_command_far
-                                # y -> x (使用 x_command_far 的值)
-                                all_data_swapped['y_command_far'] = all_data['x_command_far'].copy()
-                        elif key in ['fur_x', 'fur_y']:
-                            # 交换轨迹坐标: (x, y) -> (y, x)
-                            if key == 'fur_x':
-                                # x -> y (使用 fur_y 的值)
-                                all_data_swapped['fur_x'] = all_data['fur_y'].copy()
-                            else:  # fur_y
-                                # y -> x (使用 fur_x 的值)
-                                all_data_swapped['fur_y'] = all_data['fur_x'].copy()
-                        else:
-                            # 其他字段保持不变
-                            all_data_swapped[key] = value
-                    
-                    # 获取交换后的 GT 轨迹（交换坐标系 (y, x)）
-                    gt_trajectory_swapped = normalize.prepare_traj(all_data_swapped)
-                    if len(gt_trajectory_swapped.shape) == 3:
-                        gt_trajectory_swapped = gt_trajectory_swapped.squeeze(0)
-                    # 反归一化交换后的 GT 轨迹用于显示
-                    label_swapped = gt_trajectory_swapped.unsqueeze(0)
-                    x_label_swapped, y_label_swapped = normalize.infer_traj(label_swapped)
-                    if isinstance(x_label_swapped, np.ndarray):
-                        x_label_swapped = torch.from_numpy(x_label_swapped)
-                    if isinstance(y_label_swapped, np.ndarray):
-                        y_label_swapped = torch.from_numpy(y_label_swapped)
-                    gt_traj_swapped_before = torch.stack([x_label_swapped, y_label_swapped], dim=1).squeeze(0)
-                    if isinstance(gt_traj_swapped_before, torch.Tensor):
-                        gt_traj_swapped_before = gt_traj_swapped_before.cpu().numpy()
-                    
-                    print(f"[2] 反转后（推理前）- 交换坐标系 (y, x) - GT轨迹:")
-                    print(f"    形状: {gt_traj_swapped_before.shape}")
-                    print(f"    x (实际是y): {gt_traj_swapped_before[:, 0]}")
-                    print(f"    y (实际是x): {gt_traj_swapped_before[:, 1]}")
-                    print(f"    目标点 (x_command_far, y_command_far): ({all_data_swapped['x_command_far'][-1]:.4f}, {all_data_swapped['y_command_far'][-1]:.4f})")
-                    
-                    # 使用交换后的数据准备 state（模型输入）
-                    state = normalize.prepare_state(all_data_swapped)
-                    
-                    # 打印归一化后的 state
-                    print(f"[2.1] 归一化后的 state (交换坐标系 (y, x)):")
-                    print(f"    形状: {state.shape}")
-                    print(f"    state 内容 (speed, acc, ang_vel, theta, target_x, target_y):")
-                    if isinstance(state, torch.Tensor):
-                        state_np = state.cpu().numpy()
-                    else:
-                        state_np = state
-                    print(f"    {state_np}")
-                    
-                    # 获取归一化后的轨迹（用于显示）
-                    gt_trajectory_normalized = normalize.prepare_traj(all_data_swapped)
-                    if len(gt_trajectory_normalized.shape) == 3:
-                        gt_trajectory_normalized = gt_trajectory_normalized.squeeze(0)
-                    print(f"[2.2] 归一化后的轨迹 (交换坐标系 (y, x)):")
-                    print(f"    形状: {gt_trajectory_normalized.shape}")
-                    if isinstance(gt_trajectory_normalized, torch.Tensor):
-                        traj_norm_np = gt_trajectory_normalized.cpu().numpy()
-                    else:
-                        traj_norm_np = gt_trajectory_normalized
-                    print(f"    x (归一化，实际是y): {traj_norm_np[:, 0]}")
-                    print(f"    y (归一化，实际是x): {traj_norm_np[:, 1]}")
+                    # 准备数据
+                    state = normalize.prepare_state(all_data)
                     
                     data_dict = {}
-                    
                     image_front_path = extract_image_path(all_data['his_cam_front'])
                     data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
                     image_front_time_path = extract_image_path(all_data['his_cam_front_time'])
                     data_dict['image_front_history'] = image_normalization(image_front_time_path, (224, 224))
-                    
                     data_dict["language_instruction"] = "predict trajectory"
                     data_dict['state'] = state
                     
-                    # ========== 3. 推理过程 ==========
-                    print(f"[3] 推理过程 - 模型输入（交换坐标系 (y, x) 的归一化值）:")
-                    print(f"    开始推理...")
-                    # 推理（模型输入是交换后的坐标 (y, x)，输出也是 (y, x)）
-                    pred_trajectory = self.run(data_dict=data_dict)  # 应该是 [horizon, 2]
-                    print(f"    推理完成，输出形状: {pred_trajectory.shape}")
+                    # 推理
+                    pred_trajectory = self.run(data_dict=data_dict)
                     
                     # 确保 pred_trajectory 形状正确
                     if len(pred_trajectory.shape) == 1:
@@ -394,49 +278,18 @@ class DrivePiZeroInferenceAgent:
                     elif len(pred_trajectory.shape) == 2 and pred_trajectory.shape[0] != 10:
                         print(f"[WARNING] Unexpected pred_trajectory shape: {pred_trajectory.shape}, expected [10, 2]")
                     
-                    print(f"    推理输出（归一化值，交换坐标系 (y, x)）:")
-                    if len(pred_trajectory.shape) == 2:
-                        print(f"    x (归一化): {pred_trajectory[:, 0]}")
-                        print(f"    y (归一化): {pred_trajectory[:, 1]}")
-                    else:
-                        # 如果是一维数组，需要 reshape
-                        horizon = pred_trajectory.shape[0] // 2
-                        pred_reshaped = pred_trajectory.reshape(horizon, 2)
-                        print(f"    x (归一化): {pred_reshaped[:, 0]}")
-                        print(f"    y (归一化): {pred_reshaped[:, 1]}")
-                    
-                    # ========== 4. 推理后（反归一化）：交换坐标系 ==========
-                    # 反归一化预测轨迹（模型输出是在交换坐标系 (y, x) 下的归一化值）
+                    # 反归一化预测轨迹
                     pred = pred_trajectory.unsqueeze(0)
                     x_pred, y_pred = normalize.infer_traj(pred)
                     if isinstance(x_pred, np.ndarray):
                         x_pred = torch.from_numpy(x_pred)
                     if isinstance(y_pred, np.ndarray):
                         y_pred = torch.from_numpy(y_pred)
-                    # 模型输出是交换坐标系 (y, x)
-                    pred_traj_swapped = torch.stack([x_pred, y_pred], dim=1).squeeze(0)  # [horizon, 2] in (y, x)
-                    if isinstance(pred_traj_swapped, torch.Tensor):
-                        pred_traj_swapped_np = pred_traj_swapped.cpu().numpy()
-                    else:
-                        pred_traj_swapped_np = pred_traj_swapped
-                    
-                    print(f"[4] 推理后（反归一化）- 交换坐标系 (y, x) - 预测轨迹:")
-                    print(f"    形状: {pred_traj_swapped_np.shape}")
-                    print(f"    x (实际是y): {pred_traj_swapped_np[:, 0]}")
-                    print(f"    y (实际是x): {pred_traj_swapped_np[:, 1]}")
-                    
-                    # ========== 5. 反转后：转换回自车坐标系 ==========
-                    # 转换回原始坐标系: (y, x) -> (x, y)
-                    pred_traj_real = swap_xy(pred_traj_swapped)  # [horizon, 2] in (x, y)
+                    pred_traj_real = torch.stack([x_pred, y_pred], dim=1).squeeze(0)
                     if isinstance(pred_traj_real, torch.Tensor):
                         pred_traj_real = pred_traj_real.cpu().numpy()
                     
-                    print(f"[5] 反转后 - 自车坐标系 (x, y) - 最终预测轨迹:")
-                    print(f"    形状: {pred_traj_real.shape}")
-                    print(f"    x: {pred_traj_real[:, 0]}")
-                    print(f"    y: {pred_traj_real[:, 1]}")
-                    
-                    # 获取真实轨迹（保持在自车坐标系 (x, y)，不转换），直接使用原始值
+                    # 获取真实轨迹
                     fur_x_gt = all_data["fur_x"]
                     fur_y_gt = all_data["fur_y"]
                     if isinstance(fur_x_gt, np.ndarray):
@@ -451,7 +304,7 @@ class DrivePiZeroInferenceAgent:
                     else:
                         fur_x_gt_last = fur_x_gt_arr
                         fur_y_gt_last = fur_y_gt_arr
-                    gt_traj_real = np.stack([fur_x_gt_last, fur_y_gt_last], axis=-1)  # [horizon, 2] in (x, y)
+                    gt_traj_real = np.stack([fur_x_gt_last, fur_y_gt_last], axis=-1)
                     
                     # 存储（已经是 numpy 数组）
                     scene_pred_trajectories.append(pred_traj_real)
@@ -471,35 +324,75 @@ class DrivePiZeroInferenceAgent:
             return (scene_pred_trajectories, scene_gt_trajectories)
         
         # ------------------------------------------------------------------
-        # 检测目录结构：是根目录还是具体的 drivepi 目录
+        # 检测目录结构：支持多种目录结构
+        # 1. 根目录（包含多个时间戳目录，每个有 drivepi 子目录）
+        # 2. drivepi 目录（直接包含 pkl 文件）
+        # 3. 扁平目录（直接包含 timestamp_stepN.pkl 格式的文件）
         # ------------------------------------------------------------------
         timestamp_dirs = []
         
-        # 检查是否是根目录（包含多个时间戳目录）
-        # 例如：/D2/NXT/vlm/dataset/MOGO/test_data/2O-bags/
-        if val_data_path.name != "drivepi":
+        # 首先检查目录下是否直接有 pkl 文件（扁平化结构）
+        pkl_files_in_dir = list(val_data_path.glob("*.pkl"))
+        is_flat_structure = len(pkl_files_in_dir) > 0
+        
+        if is_flat_structure:
+            # 扁平化结构：直接包含 pkl 文件
+            # 按时间戳前缀分组（如果有多个时间戳）
+            timestamp_groups = {}
+            for pkl_file in pkl_files_in_dir:
+                # 尝试匹配时间戳_stepN格式
+                match = re.match(r"(\d+)_step(\d+)\.pkl$", pkl_file.name)
+                if match:
+                    timestamp = match.group(1)
+                    if timestamp not in timestamp_groups:
+                        timestamp_groups[timestamp] = []
+                    timestamp_groups[timestamp].append(pkl_file)
+                else:
+                    # 如果不是时间戳格式，使用目录名作为时间戳
+                    timestamp = val_data_path.name if val_data_path.name else "default"
+                    if timestamp not in timestamp_groups:
+                        timestamp_groups[timestamp] = []
+                    timestamp_groups[timestamp].append(pkl_file)
+            
+            # 为每个时间戳创建一个条目（使用原目录和时间戳）
+            for timestamp, files in timestamp_groups.items():
+                timestamp_dirs.append((timestamp, val_data_path, True))  # 第三个参数表示是扁平化结构
+            print(f"Found {len(timestamp_groups)} timestamp groups in flat directory structure")
+        
+        # 如果不是扁平化结构，检查是否是根目录或 drivepi 目录
+        elif val_data_path.name != "drivepi":
             # 可能是根目录，查找所有时间戳目录下的 drivepi 子目录
             for item in val_data_path.iterdir():
                 if item.is_dir():
                     # 检查是否有 drivepi 子目录
                     drivepi_dir = item / "drivepi"
                     if drivepi_dir.exists() and drivepi_dir.is_dir():
-                        timestamp_dirs.append((item.name, drivepi_dir))
+                        timestamp_dirs.append((item.name, drivepi_dir, False))  # 第三个参数表示不是扁平化结构
         else:
             # 已经是 drivepi 目录，直接处理
             # 获取父目录名作为时间戳名称
             timestamp_name = val_data_path.parent.name
-            timestamp_dirs.append((timestamp_name, val_data_path))
+            timestamp_dirs.append((timestamp_name, val_data_path, False))  # 不是扁平化结构
         
         if not timestamp_dirs:
-            print(f"[WARNING] No valid timestamp directories found in {val_data_path}")
+            print(f"[WARNING] No valid timestamp directories or pkl files found in {val_data_path}")
             return
         
-        print(f"Found {len(timestamp_dirs)} timestamp directories to process")
+        print(f"Found {len(timestamp_dirs)} timestamp directories/groups to process")
         
         # 遍历每个时间戳目录（类似 inference.py 遍历场景）
-        for timestamp_name, pkl_dir in tqdm(timestamp_dirs, desc="Processing timestamps"):
-            result = process_pkl_directory(pkl_dir, timestamp_name)
+        for timestamp_info in tqdm(timestamp_dirs, desc="Processing timestamps"):
+            if len(timestamp_info) == 3:
+                timestamp_name, pkl_dir, is_flat = timestamp_info
+            else:
+                # 兼容旧格式（没有 is_flat 标志）
+                timestamp_name, pkl_dir = timestamp_info
+                is_flat = any(pkl_dir.glob("*_step*.pkl"))
+            
+            # 对于扁平化目录结构，传递时间戳过滤器
+            timestamp_filter = timestamp_name if is_flat else None
+            
+            result = process_pkl_directory(pkl_dir, timestamp_name, timestamp_filter=timestamp_filter)
             
             if result is None:
                 print(f"[WARNING] No valid trajectories for timestamp: {timestamp_name}")
@@ -601,50 +494,20 @@ if __name__ == '__main__':
             except TypeError:
                 # 如果是 Python 3 生成的 pickle，不需要 encoding 参数
                 all_data = pickle.load(f)
-            # prepare state：将 x 和 y 进行交换 (x, y) -> (y, x)
-            # 使用推理 Agent 的 norm_mode，保持与 batch 推理一致
             normalize = Normalize.get_instance(statistic_path, norm_mode=inference_agent.norm_mode)
+            state = normalize.prepare_state(all_data)
             
-            # 创建 all_data 的副本，交换坐标后用于模型输入
-            all_data_swapped = {}
-            for key, value in all_data.items():
-                if key in ['x_command_far', 'y_command_far']:
-                    # 交换目标点坐标: (x, y) -> (y, x)
-                    if key == 'x_command_far':
-                        all_data_swapped['x_command_far'] = all_data['y_command_far'].copy()
-                    else:  # y_command_far
-                        all_data_swapped['y_command_far'] = all_data['x_command_far'].copy()
-                elif key in ['fur_x', 'fur_y']:
-                    # 交换轨迹坐标: (x, y) -> (y, x)
-                    if key == 'fur_x':
-                        all_data_swapped['fur_x'] = all_data['fur_y'].copy()
-                    else:  # fur_y
-                        all_data_swapped['fur_y'] = all_data['fur_x'].copy()
-                else:
-                    all_data_swapped[key] = value
-            
-            state = normalize.prepare_state(all_data_swapped)
-            # prepare 
             data_dict = {}
             image_front_path = extract_image_path(all_data['his_cam_front'])
             data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
-            # image_back_path = extract_image_path(all_data['his_cam_back'])
-            # data_dict['image_back'] = image_normalization(image_back_path, (224, 224))
             image_front_time_path = extract_image_path(all_data['his_cam_front_time'])
             data_dict['image_front_history'] = image_normalization(image_front_time_path, (224, 224))
-        
-            # prepare text
             data_dict["language_instruction"] = "predict trajectory"
-
             data_dict['state'] = state
+            
             trajectory = inference_agent.run(data_dict=data_dict)
-            
-            # 反归一化（模型输出是在交换坐标系 (y, x) 下的归一化值）
             x_pred, y_pred = normalize.infer_traj(trajectory)
-            
-            # 转换回原始坐标系 (x, y): (y, x) -> (x, y)
-            pred_traj_swapped = np.stack([x_pred, y_pred], axis=1)  # [horizon, 2] in (y, x)
-            pred_traj_ego = np.stack([pred_traj_swapped[:, 1], pred_traj_swapped[:, 0]], axis=1)  # [horizon, 2] in (x, y)
+            pred_traj_ego = np.stack([x_pred, y_pred], axis=1)
             
             print('x:', pred_traj_ego[:, 0])
             print('y:', pred_traj_ego[:, 1])

@@ -3,16 +3,26 @@ MOGO 数据集轨迹数据分析工具
 
 用于加载、展示和分析 MOGO 数据集的轨迹 npy 文件
 支持 MOGO 数据集的目录结构：
-- 20-bags/
-  - 20251210141637/
-    - drivepi/
-      - 00001.pkl
-      - 00002.pkl
-      - ...
-  - 20251210144033/
-    - drivepi/
-      - 00001.pkl
-      - ...
+
+1. 嵌套结构：
+   - 20-bags/
+     - 20251210141637/
+       - drivepi/
+         - 00001.pkl
+         - 00002.pkl
+         - ...
+     - 20251210144033/
+       - drivepi/
+         - 00001.pkl
+         - ...
+
+2. 扁平化结构（新增支持）：
+   - datasets/mogo-test/val/
+     - 20251210141637_step1.pkl
+     - 20251210141637_step2.pkl
+     - ...
+     - 20251210144033_step1.pkl
+     - ...
 
 轨迹 npy 文件命名格式：
 - {timestamp}_gt_trajectories.npy
@@ -47,8 +57,9 @@ class MOGOTrajectoryAnalyzer:
         Args:
             trajectory_dir: 轨迹 npy 文件目录路径（包含所有时间戳的 npy 文件）
                 - 期望格式：{timestamp}_gt_trajectories.npy 和 {timestamp}_pred_trajectories.npy
-            pkl_root_dir: pkl 文件根目录（如 20-bags/），用于 dual 视图
-                - 期望结构：{pkl_root_dir}/{timestamp}/drivepi/00001.pkl
+            pkl_root_dir: pkl 文件根目录，用于 dual 视图。支持两种目录结构：
+                - 嵌套结构：{pkl_root_dir}/{timestamp}/drivepi/00001.pkl
+                - 扁平化结构：{pkl_root_dir}/{timestamp}_step1.pkl, {timestamp}_step2.pkl, ...
         """
         self.trajectory_dir = Path(trajectory_dir)
         self.pkl_root_dir = Path(pkl_root_dir) if pkl_root_dir else None
@@ -73,29 +84,73 @@ class MOGOTrajectoryAnalyzer:
         # 按时间戳组织pkl文件
         timestamp_pkl_map: Dict[str, List[Tuple[int, Path]]] = {}
         
-        # 遍历所有时间戳目录
-        for timestamp_dir in sorted(self.pkl_root_dir.iterdir()):
-            if not timestamp_dir.is_dir():
-                continue
+        # 首先检查是否是扁平化结构（目录下直接有 pkl 文件）
+        pkl_files_in_root = list(self.pkl_root_dir.glob("*.pkl"))
+        
+        if pkl_files_in_root:
+            # 扁平化结构：直接包含 pkl 文件，格式如 20251210141637_step1.pkl
+            timestamp_groups: Dict[str, List[Tuple[int, Path]]] = {}
             
-            timestamp = timestamp_dir.name
-            drivepi_dir = timestamp_dir / "drivepi"
+            for pkl_file in pkl_files_in_root:
+                # 尝试匹配时间戳_stepN格式：20251210141637_step1.pkl
+                match_timestamp = re.match(r'(\d+)_step(\d+)\.pkl$', pkl_file.name)
+                if match_timestamp:
+                    timestamp = match_timestamp.group(1)
+                    step_num = int(match_timestamp.group(2))
+                    if timestamp not in timestamp_groups:
+                        timestamp_groups[timestamp] = []
+                    timestamp_groups[timestamp].append((step_num, pkl_file))
+                else:
+                    # 如果不是时间戳格式，尝试匹配纯数字格式：00001.pkl
+                    match_num = re.match(r'(\d+)\.pkl$', pkl_file.name)
+                    if match_num:
+                        # 对于纯数字格式，使用目录名作为时间戳
+                        timestamp = self.pkl_root_dir.name
+                        file_num = int(match_num.group(1))
+                        if timestamp not in timestamp_groups:
+                            timestamp_groups[timestamp] = []
+                        timestamp_groups[timestamp].append((file_num, pkl_file))
             
-            if not drivepi_dir.exists() or not drivepi_dir.is_dir():
-                continue
-            
-            # 查找所有数字命名的 pkl 文件
-            pkl_files = []
-            for pkl_file in drivepi_dir.glob("*.pkl"):
-                match = re.match(r'(\d+)\.pkl$', pkl_file.name)
-                if match:
-                    file_num = int(match.group(1))
-                    pkl_files.append((file_num, pkl_file))
-            
-            if pkl_files:
-                # 按文件编号排序
-                pkl_files = sorted(pkl_files, key=lambda x: x[0])
-                timestamp_pkl_map[timestamp] = pkl_files
+            # 按时间戳分组后，对每个时间戳内的文件按编号排序
+            for timestamp, pkl_files in timestamp_groups.items():
+                timestamp_pkl_map[timestamp] = sorted(pkl_files, key=lambda x: x[0])
+        else:
+            # 嵌套结构：遍历所有时间戳目录
+            for timestamp_dir in sorted(self.pkl_root_dir.iterdir()):
+                if not timestamp_dir.is_dir():
+                    continue
+                
+                timestamp = timestamp_dir.name
+                drivepi_dir = timestamp_dir / "drivepi"
+                
+                if not drivepi_dir.exists() or not drivepi_dir.is_dir():
+                    continue
+                
+                # 查找所有 pkl 文件，支持两种格式：
+                # 1. 纯数字格式：00001.pkl
+                # 2. 时间戳_step格式：20251210141637_step1.pkl
+                pkl_files = []
+                for pkl_file in drivepi_dir.glob("*.pkl"):
+                    # 首先尝试匹配时间戳_step格式
+                    match_timestamp = re.match(r'(\d+)_step(\d+)\.pkl$', pkl_file.name)
+                    if match_timestamp:
+                        # 提取时间戳和step编号
+                        file_timestamp = match_timestamp.group(1)
+                        step_num = int(match_timestamp.group(2))
+                        # 验证时间戳是否匹配目录名（可选，但更安全）
+                        if file_timestamp == timestamp:
+                            pkl_files.append((step_num, pkl_file))
+                    else:
+                        # 尝试匹配纯数字格式
+                        match_num = re.match(r'(\d+)\.pkl$', pkl_file.name)
+                        if match_num:
+                            file_num = int(match_num.group(1))
+                            pkl_files.append((file_num, pkl_file))
+                
+                if pkl_files:
+                    # 按文件编号排序
+                    pkl_files = sorted(pkl_files, key=lambda x: x[0])
+                    timestamp_pkl_map[timestamp] = pkl_files
         
         # 按时间戳和文件编号排序，建立全局索引
         sample_idx = 0
@@ -474,35 +529,49 @@ class MOGOTrajectoryAnalyzer:
         axes[0].axis("off")
 
         # 右：BEV 轨迹
-        axes[1].plot(gt_traj[:, 0], gt_traj[:, 1], "g-", linewidth=2, label="GT")
-        axes[1].plot(pred_traj[:, 0], pred_traj[:, 1], "r-", linewidth=2, label="Pred")
-        axes[1].scatter(gt_traj[:, 0], gt_traj[:, 1], c='green', s=30, alpha=0.7, label='GT Points')
-        axes[1].scatter(pred_traj[:, 0], pred_traj[:, 1], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
-        axes[1].scatter(gt_traj[0, 0], gt_traj[0, 1], color='green', s=100, marker='s', label='GT Start', zorder=5)
-        axes[1].scatter(pred_traj[0, 0], pred_traj[0, 1], color='red', s=100, marker='s', label='Pred Start', zorder=5)
+        # 数值上：gt_traj[:, 0] / pred_traj[:, 0] 是原始 fur_x，gt_traj[:, 1] / pred_traj[:, 1] 是原始 fur_y
+        # 可视化约定：
+        #   - 纵轴：x，向上为正（前方）
+        #   - 横轴：y，向右为正（右侧，往左 y 变小）
+        # 因此在图中使用 (y, x) 作为 (横, 纵)
+        axes[1].plot(gt_traj[:, 1], gt_traj[:, 0], "g-", linewidth=2, label="GT")
+        axes[1].plot(pred_traj[:, 1], pred_traj[:, 0], "r-", linewidth=2, label="Pred")
+        axes[1].scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
+        axes[1].scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
+        axes[1].scatter(gt_traj[0, 1], gt_traj[0, 0], color='green', s=100, marker='s', label='GT Start', zorder=5)
+        axes[1].scatter(pred_traj[0, 1], pred_traj[0, 0], color='red', s=100, marker='s', label='Pred Start', zorder=5)
         
-        axes[1].set_xlabel("X")
-        axes[1].set_ylabel("Y")
+        # 坐标轴语义：
+        #   - 横轴：Y（右正左负，往左 y 变小）
+        #   - 纵轴：X（前正后负）
+        axes[1].set_xlabel("Y (right positive)")
+        axes[1].set_ylabel("X (up positive)")
 
-        # 计算轨迹范围
+        # 计算轨迹范围用于自动范围或兜底（仍基于原始 (x, y) 数值）
         all_pts = np.concatenate([gt_traj, pred_traj], axis=0)
-        x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()
-        y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()
+        x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()  # 用于纵轴
+        y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()  # 用于横轴
         margin_x = max(1.0, 0.1 * (x_max - x_min + 1e-6))
         margin_y = max(1.0, 0.1 * (y_max - y_min + 1e-6))
 
         def _in_range(lim, data_min, data_max):
             return not ((data_max < lim[0]) or (data_min > lim[1]))
 
-        if bev_xlim and _in_range(bev_xlim, x_min, x_max):
-            axes[1].set_xlim(bev_xlim)
-        else:
-            axes[1].set_xlim(x_min - margin_x, x_max + margin_x)
-
+        # bev_xlim / bev_ylim 依然使用 (x, y) 的物理含义：
+        #   bev_xlim 作用在纵轴 X，bev_ylim 作用在横轴 Y
         if bev_ylim and _in_range(bev_ylim, y_min, y_max):
-            axes[1].set_ylim(bev_ylim)
+            # 横轴范围：Y
+            axes[1].set_xlim(bev_ylim)
         else:
-            axes[1].set_ylim(y_min - margin_y, y_max + margin_y)
+            axes[1].set_xlim(y_min - margin_y, y_max + margin_y)
+
+        if bev_xlim and _in_range(bev_xlim, x_min, x_max):
+            # 纵轴范围：X
+            axes[1].set_ylim(bev_xlim)
+        else:
+            axes[1].set_ylim(x_min - margin_x, x_max + margin_x)
+
+        # 横轴方向：向右 y 变大，向左 y 变小（标准方向，无需反转）
         axes[1].set_aspect("equal")
         axes[1].grid(True, alpha=0.3)
         axes[1].legend()
@@ -680,7 +749,7 @@ def main():
         "--pkl_root_dir",
         type=str,
         default=None,
-        help="pkl 文件根目录（如 20-bags/），用于 dual 视图。期望结构：{pkl_root_dir}/{timestamp}/drivepi/00001.pkl"
+        help="pkl 文件根目录，用于 dual 视图。支持两种结构：1) 嵌套结构：{pkl_root_dir}/{timestamp}/drivepi/00001.pkl 2) 扁平化结构：{pkl_root_dir}/{timestamp}_step1.pkl"
     )
     parser.add_argument(
         "--mode",

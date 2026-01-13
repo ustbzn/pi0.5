@@ -13,6 +13,8 @@
 import argparse
 import numpy as np
 from pathlib import Path
+import matplotlib
+matplotlib.use('Agg')  # 使用非交互式后端，支持多进程
 import matplotlib.pyplot as plt
 from typing import Optional, Tuple, List, Dict
 import cv2
@@ -20,6 +22,7 @@ from tqdm import tqdm
 import os
 import re
 import torch
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from src.utils.metric import get_action_accuracy
 from src.data.utils.normalization import Normalize
@@ -457,10 +460,12 @@ class TrajectoryAnalyzer:
 
         gt_traj = self.gt_trajectories[sample_idx]
         pred_traj = self.pred_trajectories[sample_idx]
+
         # 逆时针旋转90度 (x, y) -> (-y, x)
-        rotation = np.array([[0, -1], [1, 0]])
-        gt_traj = gt_traj @ rotation.T
-        pred_traj = pred_traj @ rotation.T
+        # rotation = np.array([[0, -1], [1, 0]])
+        # gt_traj = gt_traj @ rotation.T
+        # pred_traj = pred_traj @ rotation.T
+
         img_rgb = self._load_front_image_from_pkl(sample_idx)
         if img_rgb is None:
             return
@@ -486,26 +491,32 @@ class TrajectoryAnalyzer:
         axes[0].axis("off")
 
         # 右：BEV 轨迹（matplotlib）
-        axes[1].plot(gt_traj[:, 0], gt_traj[:, 1], "g-", linewidth=2, label="GT")
-        axes[1].plot(pred_traj[:, 0], pred_traj[:, 1], "r-", linewidth=2, label="Pred")
+        # 数值上：gt_traj[:, 0] / pred_traj[:, 0] 是原始 fur_x，gt_traj[:, 1] / pred_traj[:, 1] 是原始 fur_y
+        # 可视化约定：
+        #   - 纵轴：x，向上为正（前方）
+        #   - 横轴：y，向右为正（右侧，往左 y 变小）
+        # 因此在图中使用 (y, x) 作为 (横, 纵)
+        axes[1].plot(gt_traj[:, 1], gt_traj[:, 0], "g-", linewidth=2, label="GT")
+        axes[1].plot(pred_traj[:, 1], pred_traj[:, 0], "r-", linewidth=2, label="Pred")
         
         # 添加轨迹点标记
-        axes[1].scatter(gt_traj[:, 0], gt_traj[:, 1], c='green', s=30, alpha=0.7, label='GT Points')
-        axes[1].scatter(pred_traj[:, 0], pred_traj[:, 1], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
+        axes[1].scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
+        axes[1].scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
         
         # 标记起始点
-        axes[1].scatter(gt_traj[0, 0], gt_traj[0, 1], color='green', s=100, marker='s', label='GT Start', zorder=5)
-        axes[1].scatter(pred_traj[0, 0], pred_traj[0, 1], color='red', s=100, marker='s', label='Pred Start', zorder=5)
+        axes[1].scatter(gt_traj[0, 1], gt_traj[0, 0], color='green', s=100, marker='s', label='GT Start', zorder=5)
+        axes[1].scatter(pred_traj[0, 1], pred_traj[0, 0], color='red', s=100, marker='s', label='Pred Start', zorder=5)
         
-        axes[1].set_xlabel("Y (left positive)")
+        # 坐标轴语义：
+        #   - 横轴：Y（右正左负，往左 y 变小）
+        #   - 纵轴：X（前正后负）
+        axes[1].set_xlabel("Y (right positive)")
         axes[1].set_ylabel("X (up positive)")
-        # axes[1].set_xlabel("X")
-        # axes[1].set_ylabel("Y")
 
-        # 计算轨迹范围用于自动范围或兜底
+        # 计算轨迹范围用于自动范围或兜底（仍基于原始 (x, y) 数值）
         all_pts = np.concatenate([gt_traj, pred_traj], axis=0)
-        x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()
-        y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()
+        x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()  # 用于纵轴
+        y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()  # 用于横轴
         margin_x = max(1.0, 0.1 * (x_max - x_min + 1e-6))
         margin_y = max(1.0, 0.1 * (y_max - y_min + 1e-6))
 
@@ -513,18 +524,21 @@ class TrajectoryAnalyzer:
         def _in_range(lim, data_min, data_max):
             return not ((data_max < lim[0]) or (data_min > lim[1]))
 
-        if bev_xlim and _in_range(bev_xlim, x_min, x_max):
-            axes[1].set_xlim(bev_xlim)
-        else:
-            axes[1].set_xlim(x_min - margin_x, x_max + margin_x)
-
-        # 反转 X 轴方向：左正右负
-        axes[1].invert_xaxis()
-
+        # bev_xlim / bev_ylim 依然使用 (x, y) 的物理含义：
+        #   bev_xlim 作用在纵轴 X，bev_ylim 作用在横轴 Y
         if bev_ylim and _in_range(bev_ylim, y_min, y_max):
-            axes[1].set_ylim(bev_ylim)
+            # 横轴范围：Y
+            axes[1].set_xlim(bev_ylim)
         else:
-            axes[1].set_ylim(y_min - margin_y, y_max + margin_y)
+            axes[1].set_xlim(y_min - margin_y, y_max + margin_y)
+
+        if bev_xlim and _in_range(bev_xlim, x_min, x_max):
+            # 纵轴范围：X
+            axes[1].set_ylim(bev_xlim)
+        else:
+            axes[1].set_ylim(x_min - margin_x, x_max + margin_x)
+
+        # 横轴方向：向右 y 变大，向左 y 变小（标准方向，无需反转）
         axes[1].set_aspect("equal")
         axes[1].grid(True, alpha=0.3)
         axes[1].legend()
@@ -558,6 +572,7 @@ class TrajectoryAnalyzer:
         bev_xlim: Optional[Tuple[float, float]],
         bev_ylim: Optional[Tuple[float, float]],
         max_scenes: Optional[int] = None,
+        num_workers: int = 1,
     ):
         """
         可视化指定范围的样本
@@ -569,6 +584,7 @@ class TrajectoryAnalyzer:
             bev_xlim: BEV X轴范围
             bev_ylim: BEV Y轴范围
             max_scenes: 最大场景数量（None表示不限制）
+            num_workers: 并行处理的进程数（默认1表示单进程）
         """
         if self.gt_trajectories is None or self.pred_trajectories is None:
             print("错误: 请先加载轨迹数据")
@@ -612,28 +628,71 @@ class TrajectoryAnalyzer:
             print("警告: 过滤后范围为空")
             return
 
-        for idx in tqdm(filtered_indices, desc="dual visualize", unit="img"):
-            # 获取场景信息，用于组织文件结构
+        # 准备任务列表
+        tasks = []
+        for idx in filtered_indices:
             scene_info = self.get_scene_info(idx)
             if scene_info and save_dir_path:
-                # 多场景模式：保存到场景文件夹中
                 scene_name, local_idx = scene_info
                 scene_dir = save_dir_path / scene_name
                 scene_dir.mkdir(parents=True, exist_ok=True)
-                # 使用本地索引而不是全局索引
                 save_path = str(scene_dir / f"dual_view_{local_idx:06d}.png")
             else:
-                # 单文件模式或未指定保存目录：使用全局索引
                 save_path = str(save_dir_path / f"dual_view_{idx:06d}.png") if save_dir_path else None
             
-            self.visualize_dual_view(
-                sample_idx=idx,
-                save_path=save_path,
-                bev_xlim=bev_xlim,
-                bev_ylim=bev_ylim,
-            )
-    
-    
+            # 获取轨迹数据
+            gt_traj = self.gt_trajectories[idx]
+            pred_traj = self.pred_trajectories[idx]
+            
+            # 获取pkl文件路径（转换为字符串以便跨进程传递）
+            pkl_file_path = str(self.pkl_file_map[idx]) if (self.pkl_file_map and idx in self.pkl_file_map) else None
+            
+            scene_name = scene_info[0] if scene_info else None
+            local_idx = scene_info[1] if scene_info else idx
+            
+            tasks.append((
+                idx, gt_traj, pred_traj, pkl_file_path, save_path,
+                scene_name, local_idx, bev_xlim, bev_ylim
+            ))
+        
+        # 使用多进程或单进程处理
+        if num_workers > 1:
+            print(f"使用 {num_workers} 个进程并行处理...")
+            success_count = 0
+            error_count = 0
+            
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = {executor.submit(_visualize_single_sample, task): task[0] for task in tasks}
+                
+                for future in tqdm(as_completed(futures), total=len(futures), desc="dual visualize", unit="img"):
+                    sample_idx, success, error_msg = future.result()
+                    if success:
+                        success_count += 1
+                    else:
+                        error_count += 1
+                        if error_msg:
+                            print(f"警告: 处理样本 {sample_idx} 失败: {error_msg[:100]}")
+            
+            print(f"完成: 成功 {success_count} 个, 失败 {error_count} 个")
+        else:
+            # 单进程处理（原始方式）
+            for idx in tqdm(filtered_indices, desc="dual visualize", unit="img"):
+                scene_info = self.get_scene_info(idx)
+                if scene_info and save_dir_path:
+                    scene_name, local_idx = scene_info
+                    scene_dir = save_dir_path / scene_name
+                    scene_dir.mkdir(parents=True, exist_ok=True)
+                    save_path = str(scene_dir / f"dual_view_{local_idx:06d}.png")
+                else:
+                    save_path = str(save_dir_path / f"dual_view_{idx:06d}.png") if save_dir_path else None
+                
+                self.visualize_dual_view(
+                    sample_idx=idx,
+                    save_path=save_path,
+                    bev_xlim=bev_xlim,
+                    bev_ylim=bev_ylim,
+                )
+
     def plot_error_statistics(self, save_path: Optional[str] = None):
         """
         绘制误差统计图
@@ -709,6 +768,137 @@ class TrajectoryAnalyzer:
             plt.show()
         
         plt.close()
+
+
+# 辅助函数：用于多进程处理单个样本的可视化
+def _visualize_single_sample(args_tuple):
+    """
+    多进程辅助函数：处理单个样本的可视化
+    
+    Args:
+        args_tuple: (sample_idx, gt_traj, pred_traj, pkl_file_path, save_path, 
+                    scene_name, local_idx, bev_xlim, bev_ylim)
+    
+    Returns:
+        (sample_idx, success, error_msg)
+    """
+    import matplotlib
+    matplotlib.use('Agg')  # 确保使用非交互式后端
+    import matplotlib.pyplot as plt
+    import cv2
+    import pickle
+    from pathlib import Path
+    import numpy as np
+    
+    try:
+        sample_idx, gt_traj, pred_traj, pkl_file_path, save_path, scene_name, local_idx, bev_xlim, bev_ylim = args_tuple
+        
+        # 加载图像
+        if pkl_file_path and Path(pkl_file_path).exists():
+            with open(pkl_file_path, "rb") as f:
+                data = pickle.load(f)
+            img_ref = data.get("his_cam_front", None)
+            if img_ref is None:
+                return (sample_idx, False, "pkl缺少 his_cam_front 字段")
+            if hasattr(img_ref, "numpy"):
+                img_ref = img_ref.numpy()
+            if isinstance(img_ref, bytes):
+                img_path = img_ref.decode("utf-8")
+            elif isinstance(img_ref, str):
+                img_path = img_ref
+            else:
+                return (sample_idx, False, f"his_cam_front 类型不支持: {type(img_ref)}")
+            if not Path(img_path).exists():
+                return (sample_idx, False, f"图像文件不存在: {img_path}")
+            img_bgr = cv2.imread(img_path)
+            if img_bgr is None:
+                return (sample_idx, False, f"无法读取图像: {img_path}")
+            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        else:
+            return (sample_idx, False, "pkl文件不存在")
+        
+        # 创建标题
+        if scene_name:
+            front_title = f"Front image (sample {sample_idx}, {scene_name}, step {local_idx})"
+        else:
+            front_title = f"Front image (sample {sample_idx})"
+        
+        # 创建图形
+        fig, axes = plt.subplots(
+            1, 2,
+            figsize=(16, 6),
+            gridspec_kw={'width_ratios': [1.6, 1.0]}
+        )
+        
+        # 左：前视图
+        axes[0].imshow(img_rgb)
+        axes[0].set_title(front_title)
+        axes[0].axis("off")
+        
+        # 右：BEV 轨迹，采用与上面一致的坐标约定：
+        #   纵轴：x（向上为正），横轴：y（向右为正，往左 y 变小）
+        axes[1].plot(gt_traj[:, 1], gt_traj[:, 0], "g-", linewidth=2, label="GT")
+        axes[1].plot(pred_traj[:, 1], pred_traj[:, 0], "r-", linewidth=2, label="Pred")
+        axes[1].scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
+        axes[1].scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
+        axes[1].scatter(gt_traj[0, 1], gt_traj[0, 0], color='green', s=100, marker='s', label='GT Start', zorder=5)
+        axes[1].scatter(pred_traj[0, 1], pred_traj[0, 0], color='red', s=100, marker='s', label='Pred Start', zorder=5)
+        
+        axes[1].set_xlabel("Y (right positive)")
+        axes[1].set_ylabel("X (up positive)")
+        
+        # 计算范围（仍基于原始 (x, y) 数值）
+        all_pts = np.concatenate([gt_traj, pred_traj], axis=0)
+        x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()  # 纵轴
+        y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()  # 横轴
+        margin_x = max(1.0, 0.1 * (x_max - x_min + 1e-6))
+        margin_y = max(1.0, 0.1 * (y_max - y_min + 1e-6))
+        
+        def _in_range(lim, data_min, data_max):
+            return not ((data_max < lim[0]) or (data_min > lim[1]))
+        
+        if bev_ylim and _in_range(bev_ylim, y_min, y_max):
+            axes[1].set_xlim(bev_ylim)
+        else:
+            axes[1].set_xlim(y_min - margin_y, y_max + margin_y)
+        
+        if bev_xlim and _in_range(bev_xlim, x_min, x_max):
+            axes[1].set_ylim(bev_xlim)
+        else:
+            axes[1].set_ylim(x_min - margin_x, x_max + margin_x)
+
+        # 横轴方向：向右 y 变大，向左 y 变小（标准方向，无需反转）
+
+        axes[1].set_aspect("equal")
+        axes[1].grid(True, alpha=0.3)
+        axes[1].legend()
+        axes[1].set_title("BEV Trajectory")
+        
+        # 轨迹坐标文本
+        gt_lines = [f"{i}: ({gt_traj[i, 0]:.2f}, {gt_traj[i, 1]:.2f})" for i in range(len(gt_traj))]
+        pred_lines = [f"{i}: ({pred_traj[i, 0]:.2f}, {pred_traj[i, 1]:.2f})" for i in range(len(pred_traj))]
+        gt_text = "GT points:\n" + "\n".join(gt_lines)
+        pred_text = "Pred points:\n" + "\n".join(pred_lines)
+        fig.text(
+            0.93, 0.35,
+            f"{gt_text}\n\n{pred_text}",
+            ha="left", va="center",
+            fontsize=8,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8)
+        )
+        
+        plt.tight_layout()
+        
+        # 确保保存目录存在
+        save_path_obj = Path(save_path)
+        save_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=150)
+        plt.close(fig)
+        
+        return (sample_idx, True, None)
+    except Exception as e:
+        import traceback
+        return (sample_idx, False, f"{str(e)}\n{traceback.format_exc()}")
 
 
 def main():
@@ -790,6 +980,12 @@ def main():
         default=None,
         help="限制可视化的场景数量（仅用于dual模式，None表示不限制，处理所有场景）"
     )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=1,
+        help="并行处理的进程数（仅用于dual模式，默认1表示单进程，大于1时使用多进程加速）"
+    )
     
     args = parser.parse_args()
     
@@ -845,6 +1041,7 @@ def main():
             bev_xlim=tuple(args.bev_xlim) if args.bev_xlim else None,
             bev_ylim=tuple(args.bev_ylim) if args.bev_ylim else None,
             max_scenes=args.num_scenes,
+            num_workers=args.num_workers,
         )
 
 

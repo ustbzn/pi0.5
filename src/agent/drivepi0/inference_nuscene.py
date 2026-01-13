@@ -262,7 +262,8 @@ class DrivePiZeroInferenceAgent:
                     
                     # 转换为 numpy 并存储
                     scene_pred_trajectories.append(pred_traj_real.cpu().numpy())
-                    scene_gt_trajectories.append(gt_traj_real.cpu().numpy())
+                    # gt_traj_real 是 numpy 数组，不需要调用 .cpu()
+                    scene_gt_trajectories.append(np.array(gt_traj_real))
                     
                 except Exception as e:
                     log.error(f"Error processing {pkl_file}: {e}")

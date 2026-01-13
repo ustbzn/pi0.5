@@ -172,36 +172,6 @@ class DrivePiZeroInferenceAgent:
         print(f"  theta: [{stats_data['theta'][0]:.6f}, {stats_data['theta'][1]:.6f}] (1%, 99%百分位数)")
         print(f"{'='*60}\n")
         
-        # 坐标系转换函数：交换 x 和 y
-        def swap_xy(traj):
-            """
-            交换 x 和 y 坐标: (x, y) -> (y, x)
-            
-            Args:
-                traj: 轨迹数组，形状为 [horizon, 2] 或 [N, horizon, 2]
-            
-            Returns:
-                转换后的轨迹，形状不变
-            """
-            if isinstance(traj, torch.Tensor):
-                traj_np = traj.cpu().numpy()
-                is_tensor = True
-            else:
-                traj_np = np.array(traj)
-                is_tensor = False
-            
-            # 保存原始形状
-            original_shape = traj_np.shape
-            traj_flat = traj_np.reshape(-1, 2)
-            
-            # 转换: (x, y) -> (y, x)
-            traj_transformed = np.stack([traj_flat[:, 1], traj_flat[:, 0]], axis=1)
-            traj_transformed = traj_transformed.reshape(original_shape)
-            
-            if is_tensor:
-                return torch.from_numpy(traj_transformed).to(traj.device if hasattr(traj, 'device') else 'cpu')
-            return traj_transformed
-        
         # 处理图像路径提取的辅助函数
         def extract_image_path(img_ref):
             """从不同格式的图像引用中提取路径字符串"""
@@ -268,119 +238,19 @@ class DrivePiZeroInferenceAgent:
                             # 如果是 Python 3 生成的 pickle，不需要 encoding 参数
                             all_data = pickle.load(f)
                     
-                    # ========== 1. 反转前：获取原始自车坐标系数据 ==========
-                    # 获取原始 GT 轨迹（自车坐标系 (x, y)）
-                    gt_trajectory_raw = normalize.prepare_traj(all_data)
-                    if len(gt_trajectory_raw.shape) == 3:
-                        gt_trajectory_raw = gt_trajectory_raw.squeeze(0)
-                    # 反归一化原始 GT 轨迹用于显示
-                    label_raw = gt_trajectory_raw.unsqueeze(0)
-                    x_label_raw, y_label_raw = normalize.infer_traj(label_raw)
-                    if isinstance(x_label_raw, np.ndarray):
-                        x_label_raw = torch.from_numpy(x_label_raw)
-                    if isinstance(y_label_raw, np.ndarray):
-                        y_label_raw = torch.from_numpy(y_label_raw)
-                    gt_traj_ego_before = torch.stack([x_label_raw, y_label_raw], dim=1).squeeze(0)
-                    if isinstance(gt_traj_ego_before, torch.Tensor):
-                        gt_traj_ego_before = gt_traj_ego_before.cpu().numpy()
-                    
-                    print(f"\n{'='*60}")
-                    print(f"处理文件: {pkl_file.name}")
-                    print(f"{'='*60}")
-                    print(f"[1] 反转前 - 自车坐标系 (x, y) - GT轨迹:")
-                    print(f"    形状: {gt_traj_ego_before.shape}")
-                    print(f"    x: {gt_traj_ego_before[:, 0]}")
-                    print(f"    y: {gt_traj_ego_before[:, 1]}")
-                    print(f"    目标点 (x_command_far, y_command_far): ({all_data['x_command_far'][-1]:.4f}, {all_data['y_command_far'][-1]:.4f})")
-                    
-                    # ========== 2. 反转后（推理前）：交换坐标系 ==========
-                    # 准备数据：将 x 和 y 进行交换 (x, y) -> (y, x)
-                    # 创建 all_data 的副本，交换坐标后用于模型输入
-                    all_data_swapped = {}
-                    for key, value in all_data.items():
-                        if key in ['x_command_far', 'y_command_far']:
-                            # 交换目标点坐标: (x, y) -> (y, x)
-                            if key == 'x_command_far':
-                                # x -> y (使用 y_command_far 的值)
-                                all_data_swapped['x_command_far'] = all_data['y_command_far'].copy()
-                            else:  # y_command_far
-                                # y -> x (使用 x_command_far 的值)
-                                all_data_swapped['y_command_far'] = all_data['x_command_far'].copy()
-                        elif key in ['fur_x', 'fur_y']:
-                            # 交换轨迹坐标: (x, y) -> (y, x)
-                            if key == 'fur_x':
-                                # x -> y (使用 fur_y 的值)
-                                all_data_swapped['fur_x'] = all_data['fur_y'].copy()
-                            else:  # fur_y
-                                # y -> x (使用 fur_x 的值)
-                                all_data_swapped['fur_y'] = all_data['fur_x'].copy()
-                        else:
-                            # 其他字段保持不变
-                            all_data_swapped[key] = value
-                    
-                    # 获取交换后的 GT 轨迹（交换坐标系 (y, x)）
-                    gt_trajectory_swapped = normalize.prepare_traj(all_data_swapped)
-                    if len(gt_trajectory_swapped.shape) == 3:
-                        gt_trajectory_swapped = gt_trajectory_swapped.squeeze(0)
-                    # 反归一化交换后的 GT 轨迹用于显示
-                    label_swapped = gt_trajectory_swapped.unsqueeze(0)
-                    x_label_swapped, y_label_swapped = normalize.infer_traj(label_swapped)
-                    if isinstance(x_label_swapped, np.ndarray):
-                        x_label_swapped = torch.from_numpy(x_label_swapped)
-                    if isinstance(y_label_swapped, np.ndarray):
-                        y_label_swapped = torch.from_numpy(y_label_swapped)
-                    gt_traj_swapped_before = torch.stack([x_label_swapped, y_label_swapped], dim=1).squeeze(0)
-                    if isinstance(gt_traj_swapped_before, torch.Tensor):
-                        gt_traj_swapped_before = gt_traj_swapped_before.cpu().numpy()
-                    
-                    print(f"[2] 反转后（推理前）- 交换坐标系 (y, x) - GT轨迹:")
-                    print(f"    形状: {gt_traj_swapped_before.shape}")
-                    print(f"    x (实际是y): {gt_traj_swapped_before[:, 0]}")
-                    print(f"    y (实际是x): {gt_traj_swapped_before[:, 1]}")
-                    print(f"    目标点 (x_command_far, y_command_far): ({all_data_swapped['x_command_far'][-1]:.4f}, {all_data_swapped['y_command_far'][-1]:.4f})")
-                    
-                    # 使用交换后的数据准备 state（模型输入）
-                    state = normalize.prepare_state(all_data_swapped)
-                    
-                    # 打印归一化后的 state
-                    print(f"[2.1] 归一化后的 state (交换坐标系 (y, x)):")
-                    print(f"    形状: {state.shape}")
-                    print(f"    state 内容 (speed, acc, ang_vel, theta, target_x, target_y):")
-                    if isinstance(state, torch.Tensor):
-                        state_np = state.cpu().numpy()
-                    else:
-                        state_np = state
-                    print(f"    {state_np}")
-                    
-                    # 获取归一化后的轨迹（用于显示）
-                    gt_trajectory_normalized = normalize.prepare_traj(all_data_swapped)
-                    if len(gt_trajectory_normalized.shape) == 3:
-                        gt_trajectory_normalized = gt_trajectory_normalized.squeeze(0)
-                    print(f"[2.2] 归一化后的轨迹 (交换坐标系 (y, x)):")
-                    print(f"    形状: {gt_trajectory_normalized.shape}")
-                    if isinstance(gt_trajectory_normalized, torch.Tensor):
-                        traj_norm_np = gt_trajectory_normalized.cpu().numpy()
-                    else:
-                        traj_norm_np = gt_trajectory_normalized
-                    print(f"    x (归一化，实际是y): {traj_norm_np[:, 0]}")
-                    print(f"    y (归一化，实际是x): {traj_norm_np[:, 1]}")
+                    # 准备数据
+                    state = normalize.prepare_state(all_data)
                     
                     data_dict = {}
-                    
                     image_front_path = extract_image_path(all_data['his_cam_front'])
                     data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
                     image_front_time_path = extract_image_path(all_data['his_cam_front_time'])
                     data_dict['image_front_history'] = image_normalization(image_front_time_path, (224, 224))
-                    
                     data_dict["language_instruction"] = "predict trajectory"
                     data_dict['state'] = state
                     
-                    # ========== 3. 推理过程 ==========
-                    print(f"[3] 推理过程 - 模型输入（交换坐标系 (y, x) 的归一化值）:")
-                    print(f"    开始推理...")
-                    # 推理（模型输入是交换后的坐标 (y, x)，输出也是 (y, x)）
-                    pred_trajectory = self.run(data_dict=data_dict)  # 应该是 [horizon, 2]
-                    print(f"    推理完成，输出形状: {pred_trajectory.shape}")
+                    # 推理
+                    pred_trajectory = self.run(data_dict=data_dict)
                     
                     # 确保 pred_trajectory 形状正确
                     if len(pred_trajectory.shape) == 1:
@@ -391,63 +261,28 @@ class DrivePiZeroInferenceAgent:
                     elif len(pred_trajectory.shape) == 2 and pred_trajectory.shape[0] != 10:
                         print(f"[WARNING] Unexpected pred_trajectory shape: {pred_trajectory.shape}, expected [10, 2]")
                     
-                    print(f"    推理输出（归一化值，交换坐标系 (y, x)）:")
-                    if len(pred_trajectory.shape) == 2:
-                        print(f"    x (归一化): {pred_trajectory[:, 0]}")
-                        print(f"    y (归一化): {pred_trajectory[:, 1]}")
-                    else:
-                        # 如果是一维数组，需要 reshape
-                        horizon = pred_trajectory.shape[0] // 2
-                        pred_reshaped = pred_trajectory.reshape(horizon, 2)
-                        print(f"    x (归一化): {pred_reshaped[:, 0]}")
-                        print(f"    y (归一化): {pred_reshaped[:, 1]}")
-                    
-                    # ========== 4. 推理后（反归一化）：交换坐标系 ==========
-                    # 反归一化预测轨迹（模型输出是在交换坐标系 (y, x) 下的归一化值）
+                    # 反归一化预测轨迹
                     pred = pred_trajectory.unsqueeze(0)
                     x_pred, y_pred = normalize.infer_traj(pred)
                     if isinstance(x_pred, np.ndarray):
                         x_pred = torch.from_numpy(x_pred)
                     if isinstance(y_pred, np.ndarray):
                         y_pred = torch.from_numpy(y_pred)
-                    # 模型输出是交换坐标系 (y, x)
-                    pred_traj_swapped = torch.stack([x_pred, y_pred], dim=1).squeeze(0)  # [horizon, 2] in (y, x)
-                    if isinstance(pred_traj_swapped, torch.Tensor):
-                        pred_traj_swapped_np = pred_traj_swapped.cpu().numpy()
-                    else:
-                        pred_traj_swapped_np = pred_traj_swapped
-                    
-                    print(f"[4] 推理后（反归一化）- 交换坐标系 (y, x) - 预测轨迹:")
-                    print(f"    形状: {pred_traj_swapped_np.shape}")
-                    print(f"    x (实际是y): {pred_traj_swapped_np[:, 0]}")
-                    print(f"    y (实际是x): {pred_traj_swapped_np[:, 1]}")
-                    
-                    # ========== 5. 反转后：转换回自车坐标系 ==========
-                    # 转换回原始坐标系: (y, x) -> (x, y)
-                    pred_traj_real = swap_xy(pred_traj_swapped)  # [horizon, 2] in (x, y)
+                    pred_traj_real = torch.stack([x_pred, y_pred], dim=1).squeeze(0)
                     if isinstance(pred_traj_real, torch.Tensor):
                         pred_traj_real = pred_traj_real.cpu().numpy()
                     
-                    print(f"[5] 反转后 - 自车坐标系 (x, y) - 最终预测轨迹:")
-                    print(f"    形状: {pred_traj_real.shape}")
-                    print(f"    x: {pred_traj_real[:, 0]}")
-                    print(f"    y: {pred_traj_real[:, 1]}")
-                    
-                    # 获取真实轨迹（保持在自车坐标系 (x, y)，不转换）
-                    # 注意：GT 轨迹使用原始的 all_data，不转换坐标系
+                    # 获取真实轨迹
                     gt_trajectory = normalize.prepare_traj(all_data)
                     if len(gt_trajectory.shape) == 3:
                         gt_trajectory = gt_trajectory.squeeze(0)
-                    
-                    # 反归一化真实轨迹（GT 是在自车坐标系 (x, y) 下的归一化值）
                     label = gt_trajectory.unsqueeze(0)
                     x_label, y_label = normalize.infer_traj(label)
                     if isinstance(x_label, np.ndarray):
                         x_label = torch.from_numpy(x_label)
                     if isinstance(y_label, np.ndarray):
                         y_label = torch.from_numpy(y_label)
-                    # GT 已经是自车坐标系 (x, y)，直接使用
-                    gt_traj_real = torch.stack([x_label, y_label], dim=1).squeeze(0)  # [horizon, 2] in (x, y)
+                    gt_traj_real = torch.stack([x_label, y_label], dim=1).squeeze(0)
                     if isinstance(gt_traj_real, torch.Tensor):
                         gt_traj_real = gt_traj_real.cpu().numpy()
                     
@@ -599,50 +434,20 @@ if __name__ == '__main__':
             except TypeError:
                 # 如果是 Python 3 生成的 pickle，不需要 encoding 参数
                 all_data = pickle.load(f)
-            # prepare state：将 x 和 y 进行交换 (x, y) -> (y, x)
-            # 使用推理 Agent 的 norm_mode，保持与 batch 推理一致
             normalize = Normalize.get_instance(statistic_path, norm_mode=inference_agent.norm_mode)
+            state = normalize.prepare_state(all_data)
             
-            # 创建 all_data 的副本，交换坐标后用于模型输入
-            all_data_swapped = {}
-            for key, value in all_data.items():
-                if key in ['x_command_far', 'y_command_far']:
-                    # 交换目标点坐标: (x, y) -> (y, x)
-                    if key == 'x_command_far':
-                        all_data_swapped['x_command_far'] = all_data['y_command_far'].copy()
-                    else:  # y_command_far
-                        all_data_swapped['y_command_far'] = all_data['x_command_far'].copy()
-                elif key in ['fur_x', 'fur_y']:
-                    # 交换轨迹坐标: (x, y) -> (y, x)
-                    if key == 'fur_x':
-                        all_data_swapped['fur_x'] = all_data['fur_y'].copy()
-                    else:  # fur_y
-                        all_data_swapped['fur_y'] = all_data['fur_x'].copy()
-                else:
-                    all_data_swapped[key] = value
-            
-            state = normalize.prepare_state(all_data_swapped)
-            # prepare 
             data_dict = {}
             image_front_path = extract_image_path(all_data['his_cam_front'])
             data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
-            # image_back_path = extract_image_path(all_data['his_cam_back'])
-            # data_dict['image_back'] = image_normalization(image_back_path, (224, 224))
             image_front_time_path = extract_image_path(all_data['his_cam_front_time'])
             data_dict['image_front_history'] = image_normalization(image_front_time_path, (224, 224))
-        
-            # prepare text
             data_dict["language_instruction"] = "predict trajectory"
-
             data_dict['state'] = state
+            
             trajectory = inference_agent.run(data_dict=data_dict)
-            
-            # 反归一化（模型输出是在交换坐标系 (y, x) 下的归一化值）
             x_pred, y_pred = normalize.infer_traj(trajectory)
-            
-            # 转换回原始坐标系 (x, y): (y, x) -> (x, y)
-            pred_traj_swapped = np.stack([x_pred, y_pred], axis=1)  # [horizon, 2] in (y, x)
-            pred_traj_ego = np.stack([pred_traj_swapped[:, 1], pred_traj_swapped[:, 0]], axis=1)  # [horizon, 2] in (x, y)
+            pred_traj_ego = np.stack([x_pred, y_pred], axis=1)
             
             print('x:', pred_traj_ego[:, 0])
             print('y:', pred_traj_ego[:, 1])
