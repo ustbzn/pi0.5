@@ -1,6 +1,7 @@
 <div align="center">   
 
 # Drive-π0
+
 </div>
 
 ## 数据文件结构
@@ -42,6 +43,7 @@ mogo-test/
 ## 数据生成
 文件名格式：`{scene_name}_step{number}.json`，**生成json文件[`python2.7`]**：
 > 注意：这里是python2的环境，其他均为python环境
+
 ```bash
 cd /D2/NXT/vlm/miaobinqi/DriveMoE/mogo-dataset-tools
 # - 替换指定的bag包路径
@@ -116,4 +118,4 @@ python src/utils/mogo_test/merge_images.py \
     --out datasets/mogo-test/video/20251210141637.mp4 \
     --fps 4
 ```
-> 当前可视化代码可能处理较慢，可使用 `src/utils/analyzing_traj.py`，含有多进程处理参数`--num_workers`
+> 当前可视化代码可能处理较慢，可使用 `src/utils/analyzing_traj.py`，含有多进程处理参数`--num_workers`.
