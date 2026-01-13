@@ -1,136 +1,71 @@
-"""
-Batch convert scene image folders into mp4 videos.
-
-Default behavior:
-    - Scan `visualizations/dual` for scene folders
-    - For each scene, merge all .png/.jpg images (natural-sorted) into a video
-    - Output videos into `visualizations` with filenames `<scene>.mp4`
-
-Usage examples:
-    # convert all scenes under visualizations/dual
-    python merge_images.py
-
-    # convert specific scenes
-    python merge_images.py --scene Accident_Town05_Route218_Weather10 --scene SceneB
-
-    # customize fps and output directory
-    python merge_images.py --fps 8 --out-dir /tmp/videos
-"""
-
 import argparse
-import re
-from pathlib import Path
-
+import os
 import cv2
 from tqdm import tqdm
-
-
-DEFAULT_DUAL_DIR = Path("/D2/NXT/vlm/miaobinqi/DriveMoE/visualizations/dual")
-DEFAULT_OUT_DIR = Path("/D2/NXT/vlm/miaobinqi/DriveMoE/visualizations/videos")
-
-
-def natural_sort_key(text: str):
-    # Split digits to achieve natural ordering: img2 < img10
-    return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", text)]
-
-
-def collect_images(scene_dir: Path):
-    exts = {".png", ".jpg", ".jpeg"}
-    imgs = [p for p in scene_dir.iterdir() if p.suffix.lower() in exts and p.is_file()]
-    imgs.sort(key=lambda p: natural_sort_key(p.name))
-    return imgs
-
-
-def scene_to_video(scene_dir: Path, out_dir: Path, fps: int = 10, codec: str = "mp4v"):
-    images = collect_images(scene_dir)
-    if not images:
-        print(f"[skip] No images found in {scene_dir}")
-        return
-
-    first = cv2.imread(str(images[0]))
-    if first is None:
-        print(f"[skip] Unable to read first image in {scene_dir}")
-        return
-    height, width = first.shape[:2]
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{scene_dir.name}.mp4"
-    writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*codec), fps, (width, height))
-
-    for img_path in tqdm(images, desc=f"{scene_dir.name}", unit="frame"):
-        frame = cv2.imread(str(img_path))
-        if frame is None:
-            print(f"[warn] failed to read {img_path}, skipping")
-            continue
-        if frame.shape[0] != height or frame.shape[1] != width:
-            frame = cv2.resize(frame, (width, height))
-        writer.write(frame)
-
-    writer.release()
-    print(f"[ok] {scene_dir.name} -> {out_path}")
-
-
-def find_scenes(dual_dir: Path):
-    return [p for p in dual_dir.iterdir() if p.is_dir()]
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Merge scene images into videos.")
+"""
+python /D2/NXT/vlm/miaobinqi/Senna/mogo_test/merge_images.py \
+    --img-dir /D2/NXT/vlm/miaobinqi/Senna/mogo_test/mogo_vis/2O-bags/20251210141637_test_nusc/pic \
+    --out /D2/NXT/vlm/miaobinqi/Senna/mogo_test/mogo_vis/2O-bags/20251210141637_test_nusc/output.mp4 \
+    --fps 8
+"""
+def main():
+    parser = argparse.ArgumentParser(description="将图片序列按顺序合并成视频")
     parser.add_argument(
-        "--dual-dir",
-        type=Path,
-        default=DEFAULT_DUAL_DIR,
-        help=f"Scene images root dir (default: {DEFAULT_DUAL_DIR})",
+        "--img-dir",
+        default="/D2/NXT/vlm/miaobinqi/output_eval/senna/eval_nuscene_all_fft_0915_1/images",
+        help="待合成图片所在目录",
     )
     parser.add_argument(
-        "--out-dir",
-        type=Path,
-        default=DEFAULT_OUT_DIR,
-        help=f"Output directory for videos (default: {DEFAULT_OUT_DIR})",
-    )
-    parser.add_argument(
-        "--scene",
-        action="append",
+        "--out",
         default=None,
-        help="Scene name to process; repeatable. If omitted, process all scenes.",
+        help="输出视频路径（默认与图片目录同级、名为 output.mp4）",
+    )
+    parser.add_argument(
+        "--num-images",
+        type=int,
+        default=None,
+        help="仅使用前 N 张图片进行合并；不填则使用全部图片",
     )
     parser.add_argument(
         "--fps",
         type=int,
         default=10,
-        help="Frames per second for output video (default: 10)",
+        help="输出视频帧率（默认 10）",
     )
-    parser.add_argument(
-        "--codec",
-        type=str,
-        default="mp4v",
-        help="FourCC codec (default: mp4v). Common alternatives: avc1, H264",
-    )
-    return parser.parse_args()
+    args = parser.parse_args()
 
+    img_dir = args.img_dir
+    out_dir = os.path.dirname(img_dir)
+    out_path = args.out or os.path.join(out_dir, "output.mp4")
 
-def main():
-    args = parse_args()
-    dual_dir: Path = args.dual_dir
-    out_dir: Path = args.out_dir
+    img_files = [f for f in os.listdir(img_dir) if f.lower().endswith((".jpg", ".png"))]
+    img_files.sort()
 
-    if args.scene:
-        targets = []
-        for name in args.scene:
-            path = dual_dir / name
-            if path.is_dir():
-                targets.append(path)
-            else:
-                print(f"[warn] scene not found: {path}")
-    else:
-        targets = find_scenes(dual_dir)
+    if not img_files:
+        raise ValueError("目录里没有找到图片！")
 
-    if not targets:
-        print(f"[error] No scenes to process under {dual_dir}")
-        return
+    if args.num_images is not None:
+        if args.num_images <= 0:
+            raise ValueError("--num-images 必须大于 0")
+        img_files = img_files[: args.num_images]
 
-    for scene_dir in tqdm(targets, desc="Processing scenes", unit="scene"):
-        scene_to_video(scene_dir, out_dir, fps=args.fps, codec=args.codec)
+    first_frame = cv2.imread(os.path.join(img_dir, img_files[0]))
+    h, w, _ = first_frame.shape
+
+    # 创建输出目录
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+
+    out = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), args.fps, (w, h))
+
+    print(f"开始合并 {len(img_files)} 张图片为视频...")
+    for file in tqdm(img_files, desc="处理图片", unit="张"):
+        frame = cv2.imread(os.path.join(img_dir, file))
+        if frame is None:
+            continue
+        out.write(frame)
+
+    out.release()
+    print(f"视频已保存: {out_path}")
 
 
 if __name__ == "__main__":
