@@ -1,8 +1,4 @@
-<div align="center">   
-
 # Drive-π0
-
-</div>
 
 ## 数据文件结构
 
