@@ -48,6 +48,7 @@ python2.7 parseRosBag-2O_py27.py /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags
 
 **转换为pkl文件[`python3`]：**
 ```bash
+# --skip-existing: 默认覆盖已存在的pkl文件
 python json_to_pkl.py /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags
 ```
 

@@ -911,30 +911,31 @@ class BagDataHandler:
             if path_prev:
                 cam_paths_prev[key] = path_prev
 
-        # 构建图像路径字段（存储为bytes，符合MD格式要求）
+        # 构建图像路径字段（存储为bytes）
         sample_data = {}
         
         # 当前帧图像路径（存储为bytes字符串）
-        # 注意：MD格式要求字段名为his_cam_front, his_cam_front_right等
-        # 但实际相机目录名为back, front, left, left_back, right, right_back
+        # 使用 his_cam_ 前缀 + 原始相机字段名称：back、front、left、left_back、right、right_back
         def safe_encode(path):
             """安全编码路径，如果为空则返回空bytes"""
             return path.encode('utf-8') if path else b''
         
+        # 当前帧图像路径，使用 his_cam_ 前缀 + 原始字段名
         sample_data['his_cam_front'] = safe_encode(cam_paths_current.get('front', ''))
-        sample_data['his_cam_front_right'] = safe_encode(cam_paths_current.get('right', ''))
-        sample_data['his_cam_front_left'] = safe_encode(cam_paths_current.get('left', ''))
+        sample_data['his_cam_right'] = safe_encode(cam_paths_current.get('right', ''))
+        sample_data['his_cam_left'] = safe_encode(cam_paths_current.get('left', ''))
         sample_data['his_cam_back'] = safe_encode(cam_paths_current.get('back', ''))
-        sample_data['his_cam_back_left'] = safe_encode(cam_paths_current.get('left_back', ''))
-        sample_data['his_cam_back_right'] = safe_encode(cam_paths_current.get('right_back', ''))
+        sample_data['his_cam_left_back'] = safe_encode(cam_paths_current.get('left_back', ''))
+        sample_data['his_cam_right_back'] = safe_encode(cam_paths_current.get('right_back', ''))
         
         # 前一帧图像路径（存储为bytes字符串）
+        # 使用 his_cam_ 前缀 + 原始字段名 + _time 后缀表示前一帧
         sample_data['his_cam_front_time'] = safe_encode(cam_paths_prev.get('front', ''))
-        sample_data['his_cam_front_right_time'] = safe_encode(cam_paths_prev.get('right', ''))
-        sample_data['his_cam_front_left_time'] = safe_encode(cam_paths_prev.get('left', ''))
+        sample_data['his_cam_right_time'] = safe_encode(cam_paths_prev.get('right', ''))
+        sample_data['his_cam_left_time'] = safe_encode(cam_paths_prev.get('left', ''))
         sample_data['his_cam_back_time'] = safe_encode(cam_paths_prev.get('back', ''))
-        sample_data['his_cam_back_left_time'] = safe_encode(cam_paths_prev.get('left_back', ''))
-        sample_data['his_cam_back_right_time'] = safe_encode(cam_paths_prev.get('right_back', ''))
+        sample_data['his_cam_left_back_time'] = safe_encode(cam_paths_prev.get('left_back', ''))
+        sample_data['his_cam_right_back_time'] = safe_encode(cam_paths_prev.get('right_back', ''))
 
         # 历史运动状态
         sample_data['his_speed'] = his_speed

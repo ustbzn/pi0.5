@@ -79,14 +79,22 @@ def deserialize_from_json(obj):
     else:
         return obj
 
-def convert_json_to_pkl(json_path, pkl_path):
+def convert_json_to_pkl(json_path, pkl_path, overwrite=True):
     """
     将单个JSON文件转换为PKL文件
     
     参数:
         json_path: JSON文件路径
         pkl_path: 输出PKL文件路径
+        overwrite: 如果PKL文件已存在，是否覆盖（默认True）
+    
+    返回:
+        True表示成功，False表示失败或跳过
     """
+    # 检查PKL文件是否已存在
+    if not overwrite and os.path.exists(pkl_path):
+        return False  # 跳过已存在的文件
+    
     try:
         # 读取JSON文件
         with open(json_path, 'r', encoding='utf-8') as f:
@@ -100,12 +108,16 @@ def convert_json_to_pkl(json_path, pkl_path):
         image_path_fields = [
             'his_cam_front',
             'his_cam_front_time',
+            'his_cam_right',
+            'his_cam_right_time',
+            'his_cam_left',
+            'his_cam_left_time',
             'his_cam_back',
             'his_cam_back_time',
-            'his_cam_front_left',
-            'his_cam_front_right',
-            'his_cam_back_left',
-            'his_cam_back_right',
+            'his_cam_left_back',
+            'his_cam_left_back_time',
+            'his_cam_right_back',
+            'his_cam_right_back_time',
             'skill_cam',
         ]
         
@@ -147,12 +159,13 @@ def convert_json_to_pkl(json_path, pkl_path):
         print("[ERROR] 转换失败 {}: {}".format(json_path, e))
         return False
 
-def process_bag_folder(bag_dir):
+def process_bag_folder(bag_dir, overwrite=True):
     """
     处理单个bag文件夹
     
     参数:
         bag_dir: bag文件夹路径
+        overwrite: 如果PKL文件已存在，是否覆盖（默认True）
     
     返回:
         成功转换的文件数量
@@ -188,13 +201,19 @@ def process_bag_folder(bag_dir):
     
     # 转换每个JSON文件
     success_count = 0
+    skipped_count = 0
     for json_path in json_files:
         filename = os.path.basename(json_path)
         pkl_filename = filename.replace('.json', '.pkl')
         pkl_path = os.path.join(pkl_dir, pkl_filename)
         
-        if convert_json_to_pkl(json_path, pkl_path):
+        if convert_json_to_pkl(json_path, pkl_path, overwrite=overwrite):
             success_count += 1
+        elif not overwrite and os.path.exists(pkl_path):
+            skipped_count += 1
+    
+    if skipped_count > 0:
+        print("[INFO] 跳过了 {} 个已存在的PKL文件".format(skipped_count))
     
     return success_count
 
@@ -207,8 +226,14 @@ def main():
         "bags_root_dir",
         help="bags 根目录路径（其下包含若干 bag 子目录，每个子目录下有 drivepi_json）"
     )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="如果PKL文件已存在，跳过转换（默认会覆盖已存在的文件）"
+    )
     args = parser.parse_args()
     bags_root_dir = args.bags_root_dir
+    overwrite = not args.skip_existing
 
     if not os.path.isdir(bags_root_dir):
         print("[ERROR] 目录不存在：{}".format(bags_root_dir))
@@ -238,7 +263,7 @@ def main():
         print("="*80)
         
         try:
-            count = process_bag_folder(bag_dir)
+            count = process_bag_folder(bag_dir, overwrite=overwrite)
             total_converted += count
             print("[INFO] 完成处理: {} (转换了 {} 个文件)".format(bag_dir, count))
         except Exception as e:
