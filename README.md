@@ -52,8 +52,6 @@ python2.7 parseRosBag-2O_py27.py /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags
 python json_to_pkl.py /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags
 ```
 
-> 如果要重新生成数据，需要删除之前文件：`find /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags -maxdepth 2 -type d -name "drivepi" -exec rm -rf {} +`
-
 **移动文件：**
 
 ```bash
