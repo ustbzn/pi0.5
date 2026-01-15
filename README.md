@@ -38,10 +38,10 @@ mogo-test/
 ```
 ## 数据生成
 文件名格式：`{scene_name}_step{number}.json`，**生成json文件[`python2.7`]**：
-> 注意：这里是python2的环境，其他均为python环境
+> 注意：这里是python2的环境，其他均为python3环境
 
 ```bash
-cd /D2/NXT/vlm/miaobinqi/DriveMoE/mogo-dataset-tools
+cd DriveMoE/mogo-dataset-tools
 # - 替换指定的bag包路径
 python2.7 parseRosBag-2O_py27.py /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags
 ```
@@ -67,7 +67,7 @@ python move_pkl_files.py \
 ```
 **生成归一化数据：**
 ```
-cd /D2/NXT/vlm/miaobinqi/DriveMoE
+cd DriveMoE
 python src/data_processing/get_statistics.py \
     --data_path datasets/mogo-test/train \
     --output_path datasets/mogo-test/statistics.json
