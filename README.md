@@ -1,4 +1,4 @@
-# Drive-π0
+# Driveπ0-MOGO
 
 ## 数据文件结构
 
@@ -114,3 +114,74 @@ python src/utils/mogo_test/merge_images.py \
     --fps 4
 ```
 > 当前可视化代码可能处理较慢，可使用 `src/utils/analyzing_traj.py`，含有多进程处理参数`--num_workers`.
+
+# Driveπ0-nuScenes
+
+## 数据生成
+> 需要替换 `drivepi_nusc_converter_train.sh` 其中nuscene-all数据集的路径，默认的是本地绝对路径：`/D2/NXT/vlm/dataset/nuScenes/nuscene-all/`
+
+```bash
+# nuScenes数据集的生成
+sh nuscene-dataset-tools/run_rest_parallel.sh
+# 根据文件名后缀划分成train和val两个文件夹
+python nuscene-dataset-tools/collect_split_json.py \
+    --base-dir /D2/NXT/vlm/miaobinqi/datasets/nuscene-train-pi0-all-0109-1 \
+    --out-dir  datasets/nuscene-0109
+# json文件转换成pkl文件
+python nuscene-dataset-tools/json_to_pkl_converter.py \
+  /D2/NXT/vlm/miaobinqi/DriveMoE/datasets/nuscene-0109/train_json \
+  --output datasets/nuscene-0109/train \
+  --recursive
+python nuscene-dataset-tools/json_to_pkl_converter.py \
+  /D2/NXT/vlm/miaobinqi/DriveMoE/datasets/nuscene-0109/val_json \
+  --output datasets/nuscene-0109/val \
+  --recursive
+```
+## 训练、推理、可视化
+**生成归一化数据：**
+
+```bash
+# 生成归一化数据, 更改输入输出路径
+sh script/data_preprocessing/get_statistics.sh
+```
+### 训练
+```bash
+# 1. 更改配置文件 base_nuscene.yaml
+# - run_name, 训练日志文件夹名
+# - norm_mode, 归一化方法
+# 2. 更改 train_drivepi0.sh 文件中的 SWANLAB_API_KEY
+sh script/training/train_drivepi0.sh
+```
+配置文件：`config/train/DrivePi0/base_nuscene.yaml`
+
+### 推理
+```bash
+# 推理得到轨迹数据，替换inference文件中的相关配置：
+# - 训练后模型的pt文件路径(base_nuscene.yaml)
+# - 归一化数据文件路径
+# - 输出文件目录
+CUDA_VISIBLE_DEVICES=0 python src/agent/drivepi0/inference_nuscene.py \
+    --mode batch \
+    --val_data_dir datasets/nuscene-0111/val \
+    --config_path config/inference/DrivePi0/base_nuscene.yaml \
+    --statistic_path datasets/nuscene-0111/statistics.json \
+    --output_dir datasets/nuscene-0111/inference/1_percentile_epoch40
+```
+
+### 可视化
+```bash
+# 可视化
+python src/utils/analyzing_traj.py \
+	--trajectory_dir datasets/nuscene-0111/inference/1_percentile_epoch40 \
+    --pkl_dir datasets/nuscene-0111/val \
+    --mode dual \
+    --bev_xlim -1 50 \
+    --bev_ylim -20 20 \
+    --output_dir datasets/nuscene-0111/visualizations/1_percentile_epoch40/dual \
+    --num_workers 8
+# 合并为视频
+python src/utils/merge_images.py \
+	--dual-dir datasets/nuscene-0111/visualizations/1_percentile_epoch40/dual \
+	--out-dir datasets/nuscene-0111/visualizations/1_percentile_epoch40/video \
+	--fps 5
+```
