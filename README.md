@@ -118,7 +118,7 @@ python src/utils/mogo_test/merge_images.py \
 # Driveπ0-nuScenes
 
 ## 数据生成
-> 需要替换 `drivepi_nusc_converter_train.sh` 其中nuscene-all数据集的路径，默认的是本地绝对路径：`/D2/NXT/vlm/dataset/nuScenes/nuscene-all/`
+> `drivepi_nusc_converter_train.sh` 其中需要nuscene-all数据集的路径，默认的是本地绝对路径：`/D2/NXT/vlm/dataset/nuScenes/nuscene-all/`
 
 ```bash
 # nuScenes数据集的生成
