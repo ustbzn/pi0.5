@@ -1,5 +1,11 @@
 # Driveπ0-MOGO
 
+根据文件名后缀train和val分成两个文件夹:
+
+* scene: train-850，val-150
+
+* sample: total-(29069-20=29049), train-23930，val-5119
+
 ## 数据文件结构
 
 初始数据目录：
