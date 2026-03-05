@@ -89,19 +89,19 @@ def build_rotation_matrix_from_yaw(yaw):
     
     return R
 
-def transform_global_to_local(global_pose, global_points, ego_rotation_matrix=None):
+def transform_global_to_local(ego_global_position, global_points, ego_rotation_matrix=None):
     """
     将全局坐标系下的点转换为局部坐标系（以ego为中心）
     
     参数:
-        global_pose: ego在全局坐标系下的位置 [x, y, z]
+        ego_global_position: ego在全局坐标系下的位置 [x, y, z]
         global_points: 全局坐标系下的点列表，每个点为 [x, y, z] 或 (x, y, z)
         ego_rotation_matrix: ego的旋转矩阵 (3x3)，如果为None则假设无旋转
     
     返回:
         local_points: 局部坐标系下的点列表
     """
-    global_pose = np.array(global_pose)
+    ego_global_position = np.array(ego_global_position)
     
     # 如果ego_rotation_matrix为None，使用单位矩阵（无旋转）
     if ego_rotation_matrix is None:
@@ -120,7 +120,7 @@ def transform_global_to_local(global_pose, global_points, ego_rotation_matrix=No
         point_global = np.array(point)
         
         # 平移到以ego为原点
-        point_relative = point_global - global_pose
+        point_relative = point_global - ego_global_position
         
         # 应用旋转（从全局坐标系旋转到局部坐标系）
         point_local = R_T.dot(point_relative)
@@ -161,13 +161,13 @@ class BagDataHandler:
         self.sampled_2hz_indices = []  # 原始索引，用于查找原始数据
 
         # 轨迹相关
-        self.trajectory_timestamps = []
-        self.trajectory_data = []  # 存储Trajectory对象
+        # self.trajectory_timestamps = []
+        # self.trajectory_data = []  # 存储Trajectory对象
 
         # 注意：ego旋转矩阵将从定位数据的yaw角度动态构建，不在这里预加载
 
-        # json文件夹，用于保存每个sample的json文件，命名为drivepi_json
-        self.json_samples_dir = os.path.join(self.output_dir, "drivepi_json")
+        # json文件夹，用于保存每个sample的json文件，命名为poutine_base_json
+        self.json_samples_dir = os.path.join(self.output_dir, "poutine_base_json")
         if not os.path.exists(self.json_samples_dir):
             try:
                 os.makedirs(self.json_samples_dir)
@@ -348,11 +348,11 @@ class BagDataHandler:
             current_time += sample_interval
         
         # 确保包含最后一个点
-        if self.sampled_2hz_indices and self.sampled_2hz_indices[-1] != len(self.valid_timestamps) - 1:
-            last_idx = len(self.valid_timestamps) - 1
-            self.sampled_2hz_timestamps.append(self.valid_timestamps[last_idx])
-            self.sampled_2hz_locations.append(self.valid_locations[last_idx])
-            self.sampled_2hz_indices.append(last_idx)
+        # if self.sampled_2hz_indices and self.sampled_2hz_indices[-1] != len(self.valid_timestamps) - 1:
+        #     last_idx = len(self.valid_timestamps) - 1
+        #     self.sampled_2hz_timestamps.append(self.valid_timestamps[last_idx])
+        #     self.sampled_2hz_locations.append(self.valid_locations[last_idx])
+        #     self.sampled_2hz_indices.append(last_idx)
         
         print("[INFO] 2Hz采样完成：原始点数 {}，采样后点数 {}".format(
             len(self.valid_timestamps), len(self.sampled_2hz_timestamps)))
@@ -593,14 +593,14 @@ class BagDataHandler:
         if not hasattr(self, "camera_group_by_front") or not self.camera_group_by_front:
             print("[WARN] generate_pkl_samples: camera_group_by_front 为空")
             return
-        
+
         if not self.valid_timestamps:
             print("[WARN] generate_pkl_samples: 定位数据为空")
             return
 
         # 获取scene_name（从bag_dir的basename获取）
         scene_name = os.path.basename(self.bag_dir)
-        
+
         # 提取scene ID（用于status字段，保持原有逻辑）
         bag_name = os.path.basename(self.bags_file_master)
         if bag_name.endswith('.bag'):
@@ -625,36 +625,37 @@ class BagDataHandler:
         sampled_times = self.sampled_2hz_timestamps
         start_time = sampled_times[0]
         end_time = sampled_times[-1]
-        
         print("[INFO] 开始生成JSON样本，基于2Hz采样数据，时间范围: {:.3f} - {:.3f}，共 {} 个采样点".format(
             start_time, end_time, len(sampled_times)))
 
         sample_idx = 0
-        # 跳过第一帧，从第二帧开始生成数据
+        # 跳过前8帧，从第9帧开始生成数据
         for idx, sampled_ts in enumerate(sampled_times):
-            if idx == 0:
-                # 跳过第一帧
+            if idx < 8: # 跳过前8帧
                 continue
+            if idx >= len(sampled_times) - 14:
+                break
+
             # 找到最接近采样时间的front帧（用于获取图像）
             sorted_front_times = sorted(self.camera_group_by_front.keys())
             if not sorted_front_times:
                 continue
-            
+
             front_idx = bisect.bisect_left(sorted_front_times, sampled_ts)
             if front_idx >= len(sorted_front_times):
                 front_idx = len(sorted_front_times) - 1
-            
+
             # 选择最接近的front时间戳
             if front_idx > 0:
                 if abs(sorted_front_times[front_idx - 1] - sampled_ts) < \
                    abs(sorted_front_times[front_idx] - sampled_ts):
                     front_idx -= 1
-            
+
             front_ts = sorted_front_times[front_idx]
-            
+
             # 生成该样本的数据（使用2Hz采样后的时间戳）
             sample_data = self._create_sample_data(sampled_ts, scene_id, sample_idx, front_ts_for_image=front_ts, scene_name=scene_name)
-            
+
             if sample_data is not None:
                 # 保存为单独的json文件，格式：{scene_name}_step{number}.json
                 json_filename = os.path.join(self.json_samples_dir, "{}_step{}.json".format(scene_name, sample_idx + 1))
@@ -674,7 +675,7 @@ class BagDataHandler:
     def _create_sample_data(self, current_ts, scene_id, step_id, front_ts_for_image=None, scene_name=None):
         """
         创建单个样本的数据。
-        
+
         参数:
             current_ts: 当前帧的时间戳（来自2Hz采样）
             scene_id: 场景ID
@@ -686,7 +687,7 @@ class BagDataHandler:
         loc_idx, loc_diff = self._find_nearest_loc_idx(current_ts, max_delta=0.1, use_2hz_sampled=True)
         if loc_idx is None:
             return None
-        
+
         # 从2Hz采样数据中获取定位信息
         if self.sampled_2hz_locations:
             current_loc = self.sampled_2hz_locations[loc_idx]
@@ -695,21 +696,33 @@ class BagDataHandler:
             # 回退到原始数据
             current_loc = self.valid_locations[loc_idx]
             current_ts_loc = self.valid_timestamps[loc_idx]
-        
+
+        if hasattr(current_loc, 'position') and current_loc.position:
+            ego_utm_x = current_loc.position.x
+            ego_utm_y = current_loc.position.y
+            ego_utm_z = current_loc.position.z
+        else:
+            return None
+
+        current_yaw = getattr(current_loc, "yaw", 0.0)
+
+        # 用于转换到当前帧的ego坐标系
+        ego_rotation_matrix = build_rotation_matrix_from_yaw(current_yaw)
+        ego_global_position = [ego_utm_x, ego_utm_y, ego_utm_z]
+
         # 用于获取图像的时间戳
         image_ts = front_ts_for_image if front_ts_for_image is not None else current_ts
 
-        # 收集历史5帧数据（4帧前 + 当前帧）
-        # 基于2Hz采样数据，每帧间隔0.5秒
-        history_window = 5
+        # 收集历史8帧数据 (基于2Hz采样数据，每帧间隔0.5秒)
+        history_window = 8
         history_interval = 0.5  # 2Hz采样，每帧间隔0.5秒
-        
+
         his_timestamps = []
         his_locations = []
-        
+
         # 使用2Hz采样后的数据查找历史帧
         for i in range(history_window):
-            hist_ts = current_ts_loc - (history_window - 1 - i) * history_interval
+            hist_ts = current_ts_loc - (history_window - i) * history_interval
             hist_idx, _ = self._find_nearest_loc_idx(hist_ts, max_delta=0.25, use_2hz_sampled=True)
             if hist_idx is not None:
                 if self.sampled_2hz_timestamps:
@@ -718,186 +731,78 @@ class BagDataHandler:
                 else:
                     his_timestamps.append(self.valid_timestamps[hist_idx])
                     his_locations.append(self.valid_locations[hist_idx])
-            else:
-                # 如果找不到，使用当前帧填充
-                his_timestamps.append(current_ts_loc)
-                his_locations.append(current_loc)
 
-        # 确保有5帧数据
-        while len(his_locations) < history_window:
-            his_locations.append(current_loc)
-            his_timestamps.append(current_ts_loc)
+        # 确保有8帧数据
+        if len(his_locations) < history_window:
+            return None
 
-        # 步骤1: 收集每帧的位置信息（UTM坐标）和旋转信息
-        frame_data = []
-        dt = history_interval  # 0.5秒
-        
-        # 获取当前帧的位置和旋转
-        if hasattr(current_loc, 'position') and current_loc.position:
-            current_pos = np.array([current_loc.position.x, current_loc.position.y, current_loc.position.z])
-        else:
-            current_pos = np.array([
-                current_loc.longitude if hasattr(current_loc, 'longitude') else 0.0,
-                current_loc.latitude if hasattr(current_loc, 'latitude') else 0.0,
-                current_loc.altitude if hasattr(current_loc, 'altitude') else 0.0
-            ])
-        current_yaw = getattr(current_loc, "yaw", 0.0)
-        
-        # 获取下一帧的位置（用于计算当前帧的速度和加速度）
-        next_pos = None
-        next_loc = None
-        if loc_idx + 1 < len(self.sampled_2hz_locations) if self.sampled_2hz_locations else loc_idx + 1 < len(self.valid_locations):
-            next_idx = loc_idx + 1
-            if self.sampled_2hz_locations:
-                next_loc = self.sampled_2hz_locations[next_idx]
+        his_trajectory_data = np.zeros((history_window, 2), dtype=np.float32)
+        for i in range(history_window):
+            # 获取位置（UTM坐标）
+            loc = his_locations[i]
+            if hasattr(loc, 'position') and loc.position:
+                loc_utm_x = loc.position.x
+                loc_utm_y = loc.position.y
+                loc_utm_z = loc.position.z
             else:
-                next_loc = self.valid_locations[next_idx]
-            
-            if hasattr(next_loc, 'position') and next_loc.position:
-                next_pos = np.array([next_loc.position.x, next_loc.position.y, next_loc.position.z])
-            else:
-                next_pos = np.array([
-                    next_loc.longitude if hasattr(next_loc, 'longitude') else 0.0,
-                    next_loc.latitude if hasattr(next_loc, 'latitude') else 0.0,
-                    next_loc.altitude if hasattr(next_loc, 'altitude') else 0.0
-                ])
-        
-        # 收集所有历史帧和当前帧的位置、旋转、速度数据
-        for i, loc in enumerate(his_locations):
+                return None
+
+            global_points = [[loc_utm_x, loc_utm_y, loc_utm_z]]
+            local_points = transform_global_to_local(ego_global_position, global_points, ego_rotation_matrix)
+            local_point_x = local_points[0][0]
+            local_point_y = local_points[0][1]
+
+            his_trajectory_data[i, 0] = local_point_x
+            his_trajectory_data[i, 1] = local_point_y
+
+        # 收集未来14帧数据 (基于2Hz采样数据，每帧间隔0.5秒)
+        future_window = 14
+        future_interval = 0.5  # 2Hz采样，每帧间隔0.5秒
+
+        future_timestamps = []
+        future_locations = []
+
+        # 使用2Hz采样后的数据查找未来帧
+        for i in range(future_window):
+            future_ts = current_ts_loc + (i + 1) * future_interval
+            future_idx, _ = self._find_nearest_loc_idx(future_ts, max_delta=0.25, use_2hz_sampled=True)
+            if future_idx is not None:
+                if self.sampled_2hz_timestamps:
+                    future_timestamps.append(self.sampled_2hz_timestamps[future_idx])
+                    future_locations.append(self.sampled_2hz_locations[future_idx])
+                else:
+                    future_timestamps.append(self.valid_timestamps[future_idx])
+                    future_locations.append(self.valid_locations[future_idx])
+
+        # 确保有14帧数据
+        if len(future_locations) < future_window:
+            return None
+
+        future_trajectory_data = np.zeros((future_window, 2), dtype=np.float32)
+        for i in range(future_locations):
+            loc = future_locations[i]
             # 获取位置（UTM坐标）
             if hasattr(loc, 'position') and loc.position:
-                pos = np.array([loc.position.x, loc.position.y, loc.position.z])
+                loc_utm_x = loc.position.x
+                loc_utm_y = loc.position.y
+                loc_utm_z = loc.position.z
             else:
-                pos = np.array([
-                    loc.longitude if hasattr(loc, 'longitude') else 0.0,
-                    loc.latitude if hasattr(loc, 'latitude') else 0.0,
-                    loc.altitude if hasattr(loc, 'altitude') else 0.0
-                ])
-            
-            yaw = getattr(loc, "yaw", 0.0)
-            
-            # 计算速度（通过位置差分）
-            if i + 1 < len(his_locations):
-                # 使用下一帧的位置计算速度
-                next_loc_frame = his_locations[i + 1]
-                if hasattr(next_loc_frame, 'position') and next_loc_frame.position:
-                    next_pos_frame = np.array([next_loc_frame.position.x, next_loc_frame.position.y, next_loc_frame.position.z])
-                else:
-                    next_pos_frame = np.array([
-                        next_loc_frame.longitude if hasattr(next_loc_frame, 'longitude') else 0.0,
-                        next_loc_frame.latitude if hasattr(next_loc_frame, 'latitude') else 0.0,
-                        next_loc_frame.altitude if hasattr(next_loc_frame, 'altitude') else 0.0
-                    ])
-                vel_global = (next_pos_frame - pos) / dt
-            elif i == len(his_locations) - 1 and next_pos is not None:
-                # 当前帧：使用下一帧位置计算速度
-                vel_global = (next_pos - pos) / dt
-            else:
-                vel_global = np.zeros(3)
-            
-            frame_data.append({
-                'pos': pos,
-                'yaw': yaw,
-                'vel_global': vel_global
-            })
-        
-        # 步骤2: 追加下一帧数据，用于计算当前帧的加速度
-        if next_pos is not None and next_loc is not None:
-            # 获取再下一帧的位置（用于计算下一帧的速度）
-            next_next_pos = None
-            if loc_idx + 2 < len(self.sampled_2hz_locations) if self.sampled_2hz_locations else loc_idx + 2 < len(self.valid_locations):
-                next_next_idx = loc_idx + 2
-                if self.sampled_2hz_locations:
-                    next_next_loc = self.sampled_2hz_locations[next_next_idx]
-                else:
-                    next_next_loc = self.valid_locations[next_next_idx]
-                
-                if hasattr(next_next_loc, 'position') and next_next_loc.position:
-                    next_next_pos = np.array([next_next_loc.position.x, next_next_loc.position.y, next_next_loc.position.z])
-                else:
-                    next_next_pos = np.array([
-                        next_next_loc.longitude if hasattr(next_next_loc, 'longitude') else 0.0,
-                        next_next_loc.latitude if hasattr(next_next_loc, 'latitude') else 0.0,
-                        next_next_loc.altitude if hasattr(next_next_loc, 'altitude') else 0.0
-                    ])
-            
-            if next_next_pos is not None:
-                vel_next = (next_next_pos - next_pos) / dt
-            else:
-                vel_next = (next_pos - current_pos) / dt
-            
-            next_yaw = getattr(next_loc, "yaw", current_yaw)
-            frame_data.append({
-                'pos': next_pos,
-                'yaw': next_yaw,
-                'vel_global': vel_next
-            })
-        
-        # 步骤3: 计算历史特征（his_speed, his_acceleration, his_angular_velocity, his_theta）
-        # 构建从全局坐标系到当前帧自车坐标系的旋转矩阵
-        ego_rotation_matrix = build_rotation_matrix_from_yaw(current_yaw)
-        rot_mat_global_to_ego = ego_rotation_matrix.T  # 从全局到自车的旋转矩阵（转置）
-        
-        # 初始化历史特征数组
-        his_speed = np.zeros(history_window, dtype=np.float32)
-        his_acceleration = np.zeros((history_window, 3), dtype=np.float32)  # 3维，包含x、y、z分量
-        his_angular_velocity = np.zeros((history_window, 3), dtype=np.float32)
-        his_theta = np.zeros(history_window, dtype=np.float32)
-        
-        for i in range(history_window):
-            frame = frame_data[i]
-            vel_global = frame['vel_global']
-            
-            # 字段1: his_speed - 计算速度大小（自车坐标系下的横向和纵向速度的模）
-            vel_ego = np.dot(rot_mat_global_to_ego, vel_global)
-            his_speed[i] = np.linalg.norm(vel_ego[:2])
-            
-            # 字段2: his_acceleration - 计算加速度（通过速度差分）
-            if i + 1 < len(frame_data):
-                # 有下一帧数据，使用下一帧的速度计算加速度
-                next_vel_global = frame_data[i + 1]['vel_global']
-                acc_global = (next_vel_global - vel_global) / dt
-                acc_ego = np.dot(rot_mat_global_to_ego, acc_global)
-                # 保留x、y、z三个分量
-                his_acceleration[i, 0] = acc_ego[0]
-                his_acceleration[i, 1] = acc_ego[1]
-                his_acceleration[i, 2] = acc_ego[2]
-            else:
-                # 理论上不应该到这里（因为已追加下一帧）
-                # 但为了安全起见，设为0
-                his_acceleration[i] = np.zeros(3)
+                return None
 
-            # 字段3: his_angular_velocity - 计算角速度（通过yaw角度差分）
-            def normalize_angle(angle):
-                """Normalize angle to [-pi, pi]"""
-                while angle > np.pi:
-                    angle -= 2 * np.pi
-                while angle < -np.pi:
-                    angle += 2 * np.pi
-                return angle
-            
-            if i + 1 < len(frame_data):
-                next_frame = frame_data[i + 1]
-                dyaw = normalize_angle(next_frame['yaw'] - frame['yaw'])
-                # 角速度只有yaw分量（绕Z轴旋转），roll和pitch为0
-                his_angular_velocity[i, 0] = 0.0  # roll
-                his_angular_velocity[i, 1] = 0.0  # pitch
-                his_angular_velocity[i, 2] = dyaw / dt  # yaw
-            else:
-                # 理论上不应该到这里
-                his_angular_velocity[i] = np.zeros(3)
-            
-            # 字段4: his_theta - 计算航向角（相对于当前帧的航向角变化）
-            if i == history_window - 1:  # 当前帧
-                his_theta[i] = 0.0
-            else:
-                his_theta[i] = normalize_angle(frame['yaw'] - current_yaw)
+            global_points = [[loc_utm_x, loc_utm_y, loc_utm_z]]
+            local_points = transform_global_to_local(ego_global_position, global_points, ego_rotation_matrix)
+            local_point_x = local_points[0][0]
+            local_point_y = local_points[0][1]
 
-        # 获取当前帧和前一帧的图像路径
+            future_trajectory_data[i, 0] = local_point_x
+            future_trajectory_data[i, 1] = local_point_y
+
+        # 获取3帧图像路径（当前帧和历史两帧）
         # 相机字段映射：back、front、left、left_back、right、right_back
         cam_paths_current = {}
-        cam_paths_prev = {}
-        
+        cam_paths_prev_1 = {}
+        cam_paths_prev_2 = {}
+
         cam_keys = ["back", "front", "left", "left_back", "right", "right_back"]
         for key in cam_keys:
             # 当前帧（使用image_ts获取图像）
@@ -905,213 +810,59 @@ class BagDataHandler:
             if path:
                 cam_paths_current[key] = path
             
-            # 前一帧（0.5秒前，基于2Hz采样）
-            prev_ts = image_ts - 0.5
-            path_prev = self._get_camera_path(key, prev_ts, max_delta=0.25)
-            if path_prev:
-                cam_paths_prev[key] = path_prev
+            # 前1帧（0.5秒前，基于2Hz采样）
+            prev_ts_1 = image_ts - 0.5
+            path_prev_1 = self._get_camera_path(key, prev_ts_1, max_delta=0.25)
+            if path_prev_1:
+                cam_paths_prev_1[key] = path_prev_1
+
+            # 前2帧（0.5秒前，基于2Hz采样）
+            prev_ts_2 = image_ts - 1.0
+            path_prev_2 = self._get_camera_path(key, prev_ts_2, max_delta=0.25)
+            if path_prev_2:
+                cam_paths_prev_2[key] = path_prev_2
 
         # 构建图像路径字段（存储为bytes）
         sample_data = {}
-        
+
         # 当前帧图像路径（存储为bytes字符串）
         # 使用 his_cam_ 前缀 + 原始相机字段名称：back、front、left、left_back、right、right_back
         def safe_encode(path):
             """安全编码路径，如果为空则返回空bytes"""
             return path.encode('utf-8') if path else b''
-        
-        # 当前帧图像路径，使用 his_cam_ 前缀 + 原始字段名
-        sample_data['his_cam_front'] = safe_encode(cam_paths_current.get('front', ''))
-        sample_data['his_cam_right'] = safe_encode(cam_paths_current.get('right', ''))
-        sample_data['his_cam_left'] = safe_encode(cam_paths_current.get('left', ''))
-        sample_data['his_cam_back'] = safe_encode(cam_paths_current.get('back', ''))
-        sample_data['his_cam_left_back'] = safe_encode(cam_paths_current.get('left_back', ''))
-        sample_data['his_cam_right_back'] = safe_encode(cam_paths_current.get('right_back', ''))
-        
-        # 前一帧图像路径（存储为bytes字符串）
-        # 使用 his_cam_ 前缀 + 原始字段名 + _time 后缀表示前一帧
-        sample_data['his_cam_front_time'] = safe_encode(cam_paths_prev.get('front', ''))
-        sample_data['his_cam_right_time'] = safe_encode(cam_paths_prev.get('right', ''))
-        sample_data['his_cam_left_time'] = safe_encode(cam_paths_prev.get('left', ''))
-        sample_data['his_cam_back_time'] = safe_encode(cam_paths_prev.get('back', ''))
-        sample_data['his_cam_left_back_time'] = safe_encode(cam_paths_prev.get('left_back', ''))
-        sample_data['his_cam_right_back_time'] = safe_encode(cam_paths_prev.get('right_back', ''))
+
+        # 当前帧图像路径，使用 cam_ 前缀 + 原始字段名
+        sample_data['cam_front'] = safe_encode(cam_paths_current.get('front', ''))
+        sample_data['cam_right'] = safe_encode(cam_paths_current.get('right', ''))
+        sample_data['cam_left'] = safe_encode(cam_paths_current.get('left', ''))
+        sample_data['cam_back'] = safe_encode(cam_paths_current.get('back', ''))
+        sample_data['cam_left_back'] = safe_encode(cam_paths_current.get('left_back', ''))
+        sample_data['cam_right_back'] = safe_encode(cam_paths_current.get('right_back', ''))
+
+        # 向前一帧图像路径，使用 cam_ 前缀 + 原始字段名 + _prev_1 后缀表示
+        sample_data['cam_front_prev_1'] = safe_encode(cam_paths_prev_1.get('front', ''))
+        sample_data['cam_right_prev_1'] = safe_encode(cam_paths_prev_1.get('right', ''))
+        sample_data['cam_left_prev_1'] = safe_encode(cam_paths_prev_1.get('left', ''))
+        sample_data['cam_back_prev_1'] = safe_encode(cam_paths_prev_1.get('back', ''))
+        sample_data['cam_left_back_prev_1'] = safe_encode(cam_paths_prev_1.get('left_back', ''))
+        sample_data['cam_right_back_prev_1'] = safe_encode(cam_paths_prev_1.get('right_back', ''))
+
+        # 向前两帧图像路径，使用 cam_ 前缀 + 原始字段名 + _prev_2 后缀表示
+        sample_data['cam_front_prev_2'] = safe_encode(cam_paths_prev_2.get('front', ''))
+        sample_data['cam_right_prev_2'] = safe_encode(cam_paths_prev_2.get('right', ''))
+        sample_data['cam_left_prev_2'] = safe_encode(cam_paths_prev_2.get('left', ''))
+        sample_data['cam_back_prev_2'] = safe_encode(cam_paths_prev_2.get('back', ''))
+        sample_data['cam_left_back_prev_2'] = safe_encode(cam_paths_prev_2.get('left_back', ''))
+        sample_data['cam_right_back_prev_2'] = safe_encode(cam_paths_prev_2.get('right_back', ''))
 
         # 历史运动状态
-        sample_data['his_speed'] = his_speed
-        sample_data['his_acceleration'] = his_acceleration
-        sample_data['his_angular_velocity'] = his_angular_velocity
-        sample_data['his_theta'] = his_theta
-
-        # 导航目标点（基于2Hz采样数据，3秒后对应6帧）
-        # 采用和未来帧坐标点相同的逻辑，直接基于2Hz采样数据生成
-        # 首先获取当前车辆UTM位置和航向
-        if hasattr(current_loc, 'position') and current_loc.position:
-            ego_utm_x = current_loc.position.x
-            ego_utm_y = current_loc.position.y
-            ego_utm_z = current_loc.position.z
-        else:
-            # fallback: 如果没有position字段，使用longitude/latitude/altitude
-            ego_utm_x = current_loc.longitude if hasattr(current_loc, 'longitude') else 0.0
-            ego_utm_y = current_loc.latitude if hasattr(current_loc, 'latitude') else 0.0
-            ego_utm_z = current_loc.altitude if hasattr(current_loc, 'altitude') else 0.0
-        
-        navi_x_ego = 0.0
-        navi_y_ego = 0.0
-        
-        # 3秒后对应6帧（3秒 / 0.5秒 = 6帧）
-        navi_frame_offset = 6
-        navi_target_time = current_ts_loc + navi_frame_offset * 0.5  # 3秒后
-        
-        # 查找最接近目标时间的定位数据（使用2Hz采样数据）
-        navi_loc_idx, _ = self._find_nearest_loc_idx(navi_target_time, max_delta=0.25, use_2hz_sampled=True)
-        
-        if navi_loc_idx is not None:
-            # 获取导航点的定位数据（优先使用2Hz采样数据）
-            if self.sampled_2hz_locations:
-                navi_loc = self.sampled_2hz_locations[navi_loc_idx]
-            else:
-                navi_loc = self.valid_locations[navi_loc_idx]
-            
-            # 获取导航点的UTM坐标
-            if hasattr(navi_loc, 'position') and navi_loc.position:
-                navi_utm_x = navi_loc.position.x
-                navi_utm_y = navi_loc.position.y
-                navi_utm_z = navi_loc.position.z
-            else:
-                navi_utm_x = navi_loc.longitude if hasattr(navi_loc, 'longitude') else ego_utm_x
-                navi_utm_y = navi_loc.latitude if hasattr(navi_loc, 'latitude') else ego_utm_y
-                navi_utm_z = navi_loc.altitude if hasattr(navi_loc, 'altitude') else ego_utm_z
-            
-            # 转换到当前帧的ego坐标系
-            ego_rotation_matrix = build_rotation_matrix_from_yaw(current_yaw)
-            global_pose = [ego_utm_x, ego_utm_y, ego_utm_z]
-            global_points = [[navi_utm_x, navi_utm_y, navi_utm_z]]
-            
-            local_points = transform_global_to_local(global_pose, global_points, ego_rotation_matrix)
-            navi_x_ego = local_points[0][0]
-            navi_y_ego = local_points[0][1]
-            
-            print("[DEBUG] 导航点：基于2Hz采样数据，3秒后（第{}帧）".format(navi_frame_offset))
-            print("[DEBUG] 导航点：UTM坐标 x={:.6f}, y={:.6f}, z={:.6f}".format(navi_utm_x, navi_utm_y, navi_utm_z))
-            print("[DEBUG] 导航点：自车坐标 x={:.6f}, y={:.6f}".format(navi_x_ego, navi_y_ego))
-        else:
-            print("[DEBUG] 导航点：未找到3秒后的定位数据（时间戳: {:.3f}）".format(navi_target_time))
-        
-        # 重复5次，交换x和y以对应加速度和角速度的分量
-        sample_data['x_command_far'] = np.array([navi_y_ego] * 5, dtype=np.float32)
-        sample_data['y_command_far'] = np.array([navi_x_ego] * 5, dtype=np.float32)
-
-        # 未来轨迹（7帧：当前帧 + 未来6帧）
-        # 按照2Hz采样，每帧间隔0.5秒，共3秒
-        future_horizon = 7
-        future_interval = 0.5  # 每帧间隔0.5秒
-        
-        fur_x = np.zeros((1, future_horizon), dtype=np.float32)
-        fur_y = np.zeros((1, future_horizon), dtype=np.float32)
-        
-        # 当前帧位置（自车坐标系下为0,0）
-        fur_x[0, 0] = 0.0
-        fur_y[0, 0] = 0.0
-        
-        # 从定位数据中获取未来帧的坐标，转换到当前帧的ego坐标系
-        # 构建当前帧的旋转矩阵（用于坐标转换）
-        ego_rotation_matrix = build_rotation_matrix_from_yaw(current_yaw)
-        global_pose = [ego_utm_x, ego_utm_y, ego_utm_z]
-        
-        # 打印全局坐标系下的所有点（用于调试）
-        print("\n[DEBUG] 全局坐标系下的点（UTM坐标）:")
-        print("  当前帧 (i=0): x={:.6f}, y={:.6f}, z={:.6f}".format(ego_utm_x, ego_utm_y, ego_utm_z))
-        
-        # 记录最后一个成功找到的未来帧坐标（用于填充找不到的帧）
-        last_found_utm_x = None
-        last_found_utm_y = None
-        last_found_utm_z = None
-        last_found_local_x = None
-        last_found_local_y = None
-        
-        for i in range(1, future_horizon):
-            # 目标时间：未来i*0.5秒
-            target_time = current_ts_loc + i * future_interval
-            
-            # 查找最接近目标时间的定位数据（使用2Hz采样数据）
-            target_loc_idx, _ = self._find_nearest_loc_idx(target_time, max_delta=0.25, use_2hz_sampled=True)
-            
-            if target_loc_idx is not None:
-                # 获取未来帧的定位数据（优先使用2Hz采样数据）
-                if self.sampled_2hz_locations:
-                    future_loc = self.sampled_2hz_locations[target_loc_idx]
-                else:
-                    future_loc = self.valid_locations[target_loc_idx]
-                
-                # 获取未来帧的UTM坐标
-                if hasattr(future_loc, 'position') and future_loc.position:
-                    future_utm_x = future_loc.position.x
-                    future_utm_y = future_loc.position.y
-                    future_utm_z = future_loc.position.z
-                else:
-                    future_utm_x = future_loc.longitude if hasattr(future_loc, 'longitude') else ego_utm_x
-                    future_utm_y = future_loc.latitude if hasattr(future_loc, 'latitude') else ego_utm_y
-                    future_utm_z = future_loc.altitude if hasattr(future_loc, 'altitude') else ego_utm_z
-                
-                # 保存最后一个成功找到的坐标
-                last_found_utm_x = future_utm_x
-                last_found_utm_y = future_utm_y
-                last_found_utm_z = future_utm_z
-                
-                print("  未来帧{} (i={}, t={:.3f}s): x={:.6f}, y={:.6f}, z={:.6f}".format(
-                    i, i, i * future_interval, future_utm_x, future_utm_y, future_utm_z))
-                
-                # 转换到当前帧的ego坐标系
-                global_points = [[future_utm_x, future_utm_y, future_utm_z]]
-                local_points = transform_global_to_local(global_pose, global_points, ego_rotation_matrix)
-                future_x_ego = local_points[0][0]
-                future_y_ego = local_points[0][1]
-                
-                # 保存最后一个成功找到的局部坐标
-                last_found_local_x = future_x_ego
-                last_found_local_y = future_y_ego
-                
-                # 交换x和y以对应加速度和角速度的分量
-                fur_x[0, i] = future_y_ego
-                fur_y[0, i] = future_x_ego
-            else:
-                # 如果找不到定位数据，使用最后一个成功找到的未来帧坐标
-                if last_found_utm_x is not None:
-                    print("  未来帧{} (i={}, t={:.3f}s): 未找到定位数据，使用最远未来帧 x={:.6f}, y={:.6f}, z={:.6f}".format(
-                        i, i, i * future_interval, last_found_utm_x, last_found_utm_y, last_found_utm_z))
-                    # 交换x和y以对应加速度和角速度的分量
-                    fur_x[0, i] = last_found_local_y
-                    fur_y[0, i] = last_found_local_x
-                else:
-                    # 如果没有任何未来帧找到，使用当前帧位置（保持为0）
-                    print("  未来帧{} (i={}, t={:.3f}s): 未找到定位数据，使用当前帧位置 x={:.6f}, y={:.6f}, z={:.6f}".format(
-                        i, i, i * future_interval, ego_utm_x, ego_utm_y, ego_utm_z))
-                    fur_x[0, i] = 0.0
-                    fur_y[0, i] = 0.0
-        
-        # 打印导航目标点的全局坐标（如果存在）
-        if 'navi_utm_x' in locals() and navi_x_ego != 0.0:
-            print("  导航目标点 (3秒后): x={:.6f}, y={:.6f}, z={:.6f}".format(
-                navi_utm_x, navi_utm_y, navi_utm_z))
-        
-        print("[DEBUG] 自车坐标系下的点（已交换x和y）:")
-        print("  当前帧 (i=0): x=0.000000, y=0.000000")
-        for i in range(1, future_horizon):
-            print("  未来帧{} (i={}): x={:.6f}, y={:.6f}".format(i, i, fur_x[0, i], fur_y[0, i]))
-        print("")
-        
-        # 交换fur_x和fur_y以对应加速度和角速度的分量
-        sample_data['fur_x'] = fur_x
-        sample_data['fur_y'] = fur_y
-
-        # status字段
-        sample_data['status'] = "scene-{}_step{}".format(scene_id, step_id + 1)
+        sample_data['his_trajectory'] = his_trajectory_data
+        sample_data['fur_trajectory'] = future_trajectory_data
 
         return sample_data
 
     def close(self):
-        """关闭已打开的 bag。"""
+        """关闭已打开的 bag"""
         if self.master_bag is not None:
             self.master_bag.close()
             self.master_bag = None
@@ -1130,7 +881,7 @@ class BagDataHandler:
         # 对定位数据进行2Hz采样
         self.sample_localization_2hz(sample_rate_hz=2.0)
         # 解析轨迹topic
-        self.parse_trajectory()
+        # self.parse_trajectory()
         # 生成pkl样本（基于2Hz采样数据）
         self.generate_pkl_samples(sample_rate_hz=2.0)
         # 关闭 bag
