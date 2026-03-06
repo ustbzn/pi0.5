@@ -166,6 +166,16 @@ class BagDataHandler:
 
         # 注意：ego旋转矩阵将从定位数据的yaw角度动态构建，不在这里预加载
 
+        # action_sequence.txt 保存人工标注的 meta action 及每个 action 对应的时间区间
+        # scenario_sequence.txt 保存人工标注的 meta action 及每个 action 对应的时间区间
+        # action/scenario sequence 文件路径
+        self.file_path_action_sequence = None
+        self.file_path_scenario_sequence = None
+
+        # action/scenario sequence 文件
+        self.file_action_sequence = None
+        self.file_scenario_sequence = None
+
         # json文件夹，用于保存每个sample的json文件，命名为poutine_base_json
         self.json_samples_dir = os.path.join(self.output_dir, "poutine_base_json")
         if not os.path.exists(self.json_samples_dir):
@@ -177,6 +187,9 @@ class BagDataHandler:
 
         self._check_and_find_bags()
         self._open_bags()
+
+        self._check_and_find_sequence_files()
+        self._open_sequence_files()
 
     # ---------------- internal helpers ----------------
     def _check_and_find_bags(self):
@@ -211,6 +224,68 @@ class BagDataHandler:
             if self.master_bag is not None:
                 self.master_bag.close()
             raise RuntimeError("打开Slave105 Bag失败：{}".format(e))
+
+    def _check_and_find_sequence_files(self):
+        """检查目录并查找 action_sequence.txt 和 scenario_sequence.txt 文件"""
+        if not os.path.isdir(self.bag_dir):
+            raise IOError("目录{}无效".format(self.bag_dir))
+
+        # 初始化文件路径为None
+        self.file_path_action_sequence = None
+        self.file_path_scenario_sequence = None
+
+        # 遍历目录查找目标文件
+        for filename in os.listdir(self.bag_dir):
+            fp = os.path.join(self.bag_dir, filename)
+            if filename == "action_sequence.txt":
+                self.file_path_action_sequence = fp
+            elif filename == "scenario_sequence.txt":
+                self.file_path_scenario_sequence = fp
+
+        # 打印查找结果
+        if self.file_path_action_sequence:
+            print("[INFO] action_sequence.txt 路径：{}".format(self.file_path_action_sequence))
+        else:
+            print("[WARN] 未找到 action_sequence.txt 文件")
+
+        if self.file_path_scenario_sequence:
+            print("[INFO] scenario_sequence.txt 路径：{}".format(self.file_path_scenario_sequence))
+        else:
+            print("[WARN] 未找到 scenario_sequence.txt 文件")
+
+    def _open_sequence_files(self):
+        """打开 action_sequence.txt 和 scenario_sequence.txt 文件"""
+        # 初始化文件对象为None
+        self.file_action_sequence = None
+        self.file_scenario_sequence = None
+
+        # 打开 action_sequence.txt
+        if self.file_path_action_sequence:
+            try:
+                self.file_action_sequence = open(self.file_path_action_sequence, 'r')
+                print("[INFO] 成功打开 action_sequence.txt：{}".format(self.file_path_action_sequence))
+            except Exception as e:
+                # 打开失败时清理已打开的文件
+                if self.file_action_sequence is not None:
+                    self.file_action_sequence.close()
+                    self.file_action_sequence = None
+                raise RuntimeError("打开 action_sequence.txt 失败：{}".format(e))
+        else:
+            print("[WARN] action_sequence.txt 文件路径为空，跳过打开")
+
+        # 打开 scenario_sequence.txt
+        if self.file_path_scenario_sequence:
+            try:
+                self.file_scenario_sequence = open(self.file_path_scenario_sequence, 'r')
+                print("[INFO] 成功打开 scenario_sequence.txt：{}".format(self.file_path_scenario_sequence))
+            except Exception as e:
+                # 打开失败时清理已打开的文件
+                if self.file_scenario_sequence is not None:
+                    self.file_scenario_sequence.close()
+                    self.file_scenario_sequence = None
+                raise RuntimeError("打开 scenario_sequence.txt 失败：{}".format(e))
+        else:
+            print("[WARN] scenario_sequence.txt 文件路径为空，跳过打开")
 
     # ---------------- public APIs ----------------
     def load_existing_cameras(self):
@@ -404,6 +479,254 @@ class BagDataHandler:
                 print("[WARN] 解析轨迹消息失败：{}".format(e))
 
         print("[INFO] 轨迹数据处理完成：有效数据{}条".format(len(self.trajectory_timestamps)))
+
+    def parse_action_sequence(self):
+        """
+        解析 action_sequence.txt 文件内容，返回动作类型与对应时间段的字典
+        空时间段的动作会被直接跳过，不加入字典
+        
+        返回格式:
+            {
+                "left_turn": [[0.5, 1.0], [1.5, 2.0]],
+                "straight": [[2.5, 3.0]]
+            }
+        
+        异常处理:
+            - 文件未打开/不存在时返回空字典
+            - 格式错误的行跳过并打印警告
+        """
+        action_dict = {}
+        
+        # 检查文件是否已打开
+        if self.file_action_sequence is None:
+            print("[WARN] action_sequence.txt 文件未打开，无法解析")
+            return action_dict
+        
+        try:
+            # 重置文件指针到开头
+            self.file_action_sequence.seek(0)
+            # 读取所有行并处理
+            lines = self.file_action_sequence.readlines()
+            
+            for line_num, line in enumerate(lines, 1):
+                # 去除空白字符和换行符
+                line = line.strip()
+                # 跳过空行和注释行
+                if not line or line.startswith('#'):
+                    continue
+                
+                # 去除行尾的逗号（处理示例中的逗号分隔格式）
+                line = line.rstrip(',').strip()
+                
+                # 分割动作类型和时间段部分（按第一个冒号分割）
+                if ':' not in line:
+                    print(f"[WARN] 第{line_num}行格式错误，无冒号分隔: {line}")
+                    continue
+                
+                action_type, time_str = line.split(':', 1)
+                action_type = action_type.strip()
+                time_str = time_str.strip()
+                
+                # 解析时间段列表
+                try:
+                    # 使用eval解析列表（安全场景下使用，因为是已知格式的标注文件）
+                    time_intervals = eval(time_str)
+                    
+                    # 验证格式：必须是列表，且每个元素是包含2个数字的列表
+                    valid_intervals = []
+                    if isinstance(time_intervals, list):
+                        for interval in time_intervals:
+                            if (isinstance(interval, list) and len(interval) == 2 and
+                                    all(isinstance(x, (int, float)) for x in interval)):
+                                # 确保起始时间 <= 结束时间
+                                start, end = sorted(interval)
+                                valid_intervals.append([start, end])
+                            else:
+                                print(f"[WARN] 第{line_num}行{action_type}的时间段格式无效: {interval}")
+                    
+                    # 核心调整：仅当有效时间段非空时，才加入字典
+                    if valid_intervals:
+                        action_dict[action_type] = valid_intervals
+                    # 空时间段则直接跳过，不加入字典
+                        
+                except Exception as e:
+                    print(f"[WARN] 第{line_num}行解析失败: {line}, 错误: {str(e)}")
+                    # 解析失败也跳过该动作，不加入字典
+        
+        except Exception as e:
+            print(f"[ERROR] 解析action_sequence.txt失败: {str(e)}")
+        
+        return action_dict
+
+    def match_action_by_timestamp(self, relative_ts, action_dict):
+        """
+        根据相对时间戳匹配对应的动作类型（action）
+        匹配规则：
+            1. 按action_dict的键遍历顺序（从前到后）检查每个动作的时间段
+            2. 若任意一个时间段包含该时间戳（start ≤ ts ≤ end），立即返回该动作名称
+            3. 未匹配到任何动作时返回默认值 "lane_keeping_and_centering"
+        
+        参数:
+            relative_ts: 待匹配的相对时间戳（float/int）
+            action_dict: 由parse_action_sequence生成的动作字典，格式如：
+                {
+                    "left_turn": [[0.5, 1.0], [1.5, 2.0]],
+                    "straight": [[2.5, 3.0]]
+                }
+        
+        返回:
+            str: 匹配到的第一个动作名称；未匹配返回 "lane_keeping_and_centering"
+        """
+        
+        if not isinstance(relative_ts, (int, float)):
+            print("[WARN] 时间戳格式非法，必须是数字类型: {}".format(relative_ts))
+            return "lane_keeping_and_centering"
+        
+        if not isinstance(action_dict, dict) or len(action_dict) == 0:
+            print("[WARN] 动作字典为空或格式非法")
+            return "lane_keeping_and_centering"
+        
+        # Python2.7 字典遍历：使用keys()保证顺序（需确保action_dict是有序插入的）
+        for action_name in action_dict.keys():
+            time_intervals = action_dict[action_name]
+            # 遍历当前动作的所有时间段
+            for interval in time_intervals:
+                start = min(interval[0], interval[1])
+                end = max(interval[0], interval[1])
+                
+                # 检查时间戳是否在当前时间段内
+                if start <= relative_ts <= end:
+                    # print("[INFO] 时间戳{}匹配到动作: {} (时间段: [{}, {}])".format(
+                    #     relative_ts, action_name, start, end))
+                    return action_name
+        
+        # 未匹配到任何动作时返回默认值
+        print("[INFO] 时间戳{}未匹配到任何动作，返回默认值: lane_keeping_and_centering".format(relative_ts))
+        return "lane_keeping_and_centering"
+
+    def parse_scenario_sequence(self):
+        """
+        解析 scenario_sequence.txt 文件内容，返回场景类型与对应时间段的字典
+        空时间段的场景会被直接跳过，不加入字典
+        
+        返回格式:
+            {
+                "scenario_1": [[1.0, 2.5], [3.0, 4.5]],
+                "scenario_2": [[5.0, 6.0]]
+            }
+        
+        异常处理:
+            - 文件未打开/不存在时返回空字典
+            - 格式错误的行跳过并打印警告
+        """
+        scenario_dict = {}
+        
+        # 检查文件是否已打开
+        if self.file_scenario_sequence is None:
+            print("[WARN] scenario_sequence.txt 文件未打开，无法解析")
+            return scenario_dict
+        
+        try:
+            # 重置文件指针到开头
+            self.file_scenario_sequence.seek(0)
+            # 读取所有行并处理
+            lines = self.file_scenario_sequence.readlines()
+            
+            for line_num, line in enumerate(lines, 1):
+                # 去除空白字符和换行符
+                line = line.strip()
+                # 跳过空行和注释行
+                if not line or line.startswith('#'):
+                    continue
+                
+                # 去除行尾的逗号（处理示例中的逗号分隔格式）
+                line = line.rstrip(',').strip()
+                
+                # 分割场景类型和时间段部分（按第一个冒号分割）
+                if ':' not in line:
+                    print(f"[WARN] 第{line_num}行格式错误，无冒号分隔: {line}")
+                    continue
+                
+                scenario_type, time_str = line.split(':', 1)
+                scenario_type = scenario_type.strip()
+                time_str = time_str.strip()
+                
+                # 解析时间段列表
+                try:
+                    # 使用eval解析列表（安全场景下使用，因为是已知格式的标注文件）
+                    time_intervals = eval(time_str)
+                    
+                    # 验证格式：必须是列表，且每个元素是包含2个数字的列表
+                    valid_intervals = []
+                    if isinstance(time_intervals, list):
+                        for interval in time_intervals:
+                            if (isinstance(interval, list) and len(interval) == 2 and
+                                    all(isinstance(x, (int, float)) for x in interval)):
+                                # 确保起始时间 <= 结束时间
+                                start, end = sorted(interval)
+                                valid_intervals.append([start, end])
+                            else:
+                                print(f"[WARN] 第{line_num}行{scenario_type}的时间段格式无效: {interval}")
+                    
+                    # 核心规则：仅当有效时间段非空时，才加入字典
+                    if valid_intervals:
+                        scenario_dict[scenario_type] = valid_intervals
+                    # 空时间段则直接跳过，不加入字典
+                        
+                except Exception as e:
+                    print(f"[WARN] 第{line_num}行解析失败: {line}, 错误: {str(e)}")
+                    # 解析失败也跳过该场景，不加入字典
+        
+        except Exception as e:
+            print(f"[ERROR] 解析scenario_sequence.txt失败: {str(e)}")
+        
+        return scenario_dict
+
+    def match_scenario_by_timestamp(self, relative_ts, scenario_dict):
+        """
+        根据相对时间戳匹配对应的场景类型（scenario）
+        匹配规则：
+            1. 按scenario_dict的键遍历顺序（从前到后）检查每个场景的时间段
+            2. 若任意一个时间段包含该时间戳（start ≤ ts ≤ end），立即返回该场景名称
+            3. 未匹配到任何场景时返回默认值 "lane_keep"
+        
+        参数:
+            relative_ts: 待匹配的相对时间戳（float/int）
+            scenario_dict: 由parse_scenario_sequence生成的场景字典，格式如：
+                {
+                    "scenario_1": [[0.5, 1.0], [1.5, 2.0]],
+                    "scenario_2": [[2.5, 3.0]]
+                }
+        
+        返回:
+            str: 匹配到的第一个场景名称；未匹配返回 "lane_keep"
+        """
+        
+        if not isinstance(relative_ts, (int, float)):
+            print("[WARN] 时间戳格式非法，必须是数字类型: {}".format(relative_ts))
+            return "lane_keep"
+        
+        if not isinstance(scenario_dict, dict) or len(scenario_dict) == 0:
+            print("[WARN] 场景字典为空或格式非法")
+            return "lane_keep"
+        
+        # Python2.7 字典遍历：使用keys()保证顺序（需确保scenario_dict是有序插入的）
+        for scenario_name in scenario_dict.keys():
+            time_intervals = scenario_dict[scenario_name]
+            # 遍历当前场景的所有时间段
+            for interval in time_intervals:
+                start = min(interval[0], interval[1])
+                end = max(interval[0], interval[1])
+                
+                # 检查时间戳是否在当前时间段内
+                if start <= relative_ts <= end:
+                    # print("[INFO] 时间戳{}匹配到场景: {} (时间段: [{}, {}])".format(
+                    #     relative_ts, scenario_name, start, end))
+                    return scenario_name
+        
+        # 未匹配到任何场景时返回默认值
+        print("[INFO] 时间戳{}未匹配到任何场景，返回默认值: lane_keep".format(relative_ts))
+        return "lane_keep"
 
     def align_camera_cache_by_front(self, max_delta=0.05):
         """
@@ -628,6 +951,10 @@ class BagDataHandler:
         print("[INFO] 开始生成JSON样本，基于2Hz采样数据，时间范围: {:.3f} - {:.3f}，共 {} 个采样点".format(
             start_time, end_time, len(sampled_times)))
 
+        # 获取 meta_action/scenario_type 与其对应时间段的字典
+        action_dict = self.parse_action_sequence()
+        scenario_dict = self.parse_scenario_sequence()
+
         sample_idx = 0
         # 跳过前8帧，从第9帧开始生成数据
         for idx, sampled_ts in enumerate(sampled_times):
@@ -654,7 +981,7 @@ class BagDataHandler:
             front_ts = sorted_front_times[front_idx]
 
             # 生成该样本的数据（使用2Hz采样后的时间戳）
-            sample_data = self._create_sample_data(sampled_ts, scene_id, sample_idx, front_ts_for_image=front_ts, scene_name=scene_name)
+            sample_data = self._create_sample_data(sampled_ts, action_dict, scenario_dict, front_ts_for_image=front_ts)
 
             if sample_data is not None:
                 # 保存为单独的json文件，格式：{scene_name}_step{number}.json
@@ -672,16 +999,15 @@ class BagDataHandler:
 
         print("[INFO] JSON样本生成完成：共 {} 个样本".format(sample_idx))
 
-    def _create_sample_data(self, current_ts, scene_id, step_id, front_ts_for_image=None, scene_name=None):
+    def _create_sample_data(self, current_ts, action_dict, scenario_dict, front_ts_for_image=None):
         """
         创建单个样本的数据。
 
         参数:
             current_ts: 当前帧的时间戳（来自2Hz采样）
-            scene_id: 场景ID
-            step_id: 步骤ID
+            action_dict: meta action 与持续时间段对应关系
+            scenario_dict: 场景类型与持续时间段对应关系
             front_ts_for_image: 用于获取图像的时间戳（如果为None则使用current_ts）
-            scene_name: 场景名称（用于文件名）
         """
         # 使用2Hz采样后的定位数据
         loc_idx, loc_diff = self._find_nearest_loc_idx(current_ts, max_delta=0.1, use_2hz_sampled=True)
@@ -822,6 +1148,11 @@ class BagDataHandler:
             if path_prev_2:
                 cam_paths_prev_2[key] = path_prev_2
 
+        # 获取 meta action 和 scenario type
+        relative_ts = current_ts - current_ts_loc[0]
+        meta_action = self.match_action_by_timestamp(relative_ts, action_dict)
+        scenario_type = self.match_scenario_by_timestamp(relative_ts, scenario_dict)
+
         # 构建图像路径字段（存储为bytes）
         sample_data = {}
 
@@ -859,6 +1190,9 @@ class BagDataHandler:
         sample_data['his_trajectory'] = his_trajectory_data
         sample_data['fur_trajectory'] = future_trajectory_data
 
+        sample_data['meta_action'] = meta_action
+        sample_data['scenario_type'] = scenario_type
+
         return sample_data
 
     def close(self):
@@ -869,6 +1203,14 @@ class BagDataHandler:
         if self.slave_105_bag is not None:
             self.slave_105_bag.close()
             self.slave_105_bag = None
+
+        # 关闭 sequence.txt 文件
+        if self.file_action_sequence is not None:
+            self.file_action_sequence.close()
+            self.file_action_sequence = None
+        if self.file_scenario_sequence is not None:
+            self.file_scenario_sequence.close()
+            self.file_scenario_sequence = None
 
     def run(self):
         # 主逻辑
