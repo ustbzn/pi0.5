@@ -13,6 +13,7 @@ import re
 import numpy as np
 import rosbag
 import base64
+import codecs
 from proto.common.localization_pb2 import Localization
 from proto.common.trajectory_pb2 import Trajectory, TrajectoryPoint
 from proto.common.sensor_meta_pb2 import RegisteredSensor
@@ -40,7 +41,7 @@ def serialize_for_json(obj):
     elif isinstance(obj, (bytes, bytearray)):
         return {
             '__bytes__': True,
-            'data': base64.b64encode(obj).decode('utf-8')
+            'data': base64.b64encode(obj)
         }
     elif isinstance(obj, (np.integer, np.floating)):
         return obj.item()
@@ -262,7 +263,7 @@ class BagDataHandler:
         # 打开 action_sequence.txt
         if self.file_path_action_sequence:
             try:
-                self.file_action_sequence = open(self.file_path_action_sequence, 'r')
+                self.file_action_sequence = codecs.open(self.file_path_action_sequence, 'r', encoding='utf-8')
                 print("[INFO] 成功打开 action_sequence.txt：{}".format(self.file_path_action_sequence))
             except Exception as e:
                 # 打开失败时清理已打开的文件
@@ -276,7 +277,7 @@ class BagDataHandler:
         # 打开 scenario_sequence.txt
         if self.file_path_scenario_sequence:
             try:
-                self.file_scenario_sequence = open(self.file_path_scenario_sequence, 'r')
+                self.file_scenario_sequence = codecs.open(self.file_path_scenario_sequence, 'r', encoding='utf-8')
                 print("[INFO] 成功打开 scenario_sequence.txt：{}".format(self.file_path_scenario_sequence))
             except Exception as e:
                 # 打开失败时清理已打开的文件
