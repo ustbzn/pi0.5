@@ -9,6 +9,7 @@ import os
 import pickle
 import json
 import bisect
+import math
 import re
 import numpy as np
 import rosbag
@@ -17,6 +18,9 @@ import codecs
 from proto.common.localization_pb2 import Localization
 from proto.common.trajectory_pb2 import Trajectory, TrajectoryPoint
 from proto.common.sensor_meta_pb2 import RegisteredSensor
+from proto.common.routing_pb2 import  RoutingRequest, RoutingResult, RoutePath, RouteRoad, RouteLink, RouteSection, RouteLane, RouteRoadLink
+from proto.common.hadmap_pb2 import LaneLink, LaneType
+from proto.common.geometry_pb2 import Point
 from google.protobuf import text_format
 
 # 计算header时间戳（秒）
@@ -160,6 +164,12 @@ class BagDataHandler:
         self.sampled_2hz_timestamps = []
         self.sampled_2hz_locations = []
         self.sampled_2hz_indices = []  # 原始索引，用于查找原始数据
+
+
+        # 存储解码后的RoutingResult对象
+        self.route_result = None
+        # 每个定位点的高阶意图列表（格式：[[动作, 距离, 车道起, 车道止], ...]）每个定位点包含2个高阶意图。如无则NONE
+        self.high_order_intent = []
 
         # 轨迹相关
         # self.trajectory_timestamps = []
@@ -432,6 +442,245 @@ class BagDataHandler:
         
         print("[INFO] 2Hz采样完成：原始点数 {}，采样后点数 {}".format(
             len(self.valid_timestamps), len(self.sampled_2hz_timestamps)))
+        
+
+
+
+
+    def parse_routing(self):
+        """
+        核心流程：解析路由→提取稀疏点→统计路口→匹配自车到路口的路径距离
+        关键索引逻辑（正序）：
+        - roadlink_idx 从小到大 → 实际行驶路径从近（自车）到远（前方）
+        - 目标roadlink_idx > 当前roadlink_idx → 目标在自车前方（有效）
+        """
+        # 基础配置
+        assert self.master_bag is not None, "master_bag未初始化！"
+        MAX_PATH_DISTANCE = 400.0  # 路径距离阈值（米）
+        MAX_MATCH_JUNCTION = 2     # 最多匹配2个路口
+
+        # 路口动作映射
+        ACTION_MAP = {
+            LaneType.LANE_TYPE_JuncTurnLeft: "turn left",
+            LaneType.LANE_TYPE_JuncStraight: "straight",
+            LaneType.LANE_TYPE_JuncTurnRight: "turn right",
+            LaneType.LANE_TYPE_Turn: "u turn"
+        }
+        target_lane_types = {
+            LaneType.LANE_TYPE_JuncTurnLeft,
+            LaneType.LANE_TYPE_JuncStraight,
+            LaneType.LANE_TYPE_JuncTurnRight,
+            LaneType.LANE_TYPE_Turn
+        }
+
+        # ========== 辅助函数 ==========
+        def get_junction_unique_id(lane_link):
+            """生成路口唯一标识（避免重复统计）"""
+            from_road = lane_link.from_road_pkid if lane_link.HasField("from_road_pkid") else 0
+            to_road = lane_link.to_road_pkid if lane_link.HasField("to_road_pkid") else 0
+            from_junc = lane_link.from_junction if lane_link.HasField("from_junction") else False
+            to_junc = lane_link.to_junction if lane_link.HasField("to_junction") else False
+            return f"{from_road}_{to_road}_{from_junc}_{to_junc}"
+ 
+        def calculate_path_distance(current_loc, tar_junction):
+            """
+            计算自车到目标roadlink的路径距离（正序索引逻辑）
+            :param current_loc: 自车当前位置（x/y）
+            :param tar_junction: 目标路口信息字典（含roadlink_idx/action等）
+            :return: 路径距离（米），无效返回nan
+            """
+            target_roadlink_idx = tar_junction["roadlink_idx"]
+            if not sparse_points or target_roadlink_idx not in roadlink_length_map:
+                return math.nan
+            
+            has_direction = False
+            dir_x, dir_y = 0.0, 0.0
+            if len(self.sampled_2hz_locations) >= 2:
+                prev_loc = self.sampled_2hz_locations[max(0, self.sampled_2hz_locations.index(current_loc)-1)]
+                dir_x = current_loc.x - prev_loc.x
+                dir_y = current_loc.y - prev_loc.y
+                dir_norm = math.hypot(dir_x, dir_y)
+                if dir_norm > 1e-6 and tar_junction["action"] != "u turn":
+                    dir_x /= dir_norm
+                    dir_y /= dir_norm
+                    has_direction = True
+            
+            closest_roadlink_idx = None
+            min_straight_dist = float('inf')
+            closest_roadlink_type = ""
+            for p in sparse_points:
+                dx = p["x"] - current_loc.x
+                dy = p["y"] - current_loc.y
+                if has_direction:
+                    dot_product = dir_x * dx + dir_y * dy   
+                    if dot_product <= 1e-6:  # 后方/侧后方点 → 跳过
+                        continue
+                
+                straight_dist = math.hypot(dx, dy)
+                if straight_dist < min_straight_dist:
+                    min_straight_dist = straight_dist
+                    closest_roadlink_idx = p["roadlink_idx"]
+                    closest_roadlink_type = p["type"]
+            
+            if closest_roadlink_idx is None:
+                return math.nan
+            
+            if target_roadlink_idx < closest_roadlink_idx and closest_roadlink_type == "route_road":
+                return math.nan
+            
+            if closest_roadlink_type == "route_link" and closest_roadlink_idx == target_roadlink_idx:
+                return 0.1
+            
+            current_road_end_point = next(
+                (p for p in sparse_points if p["type"] == "route_road" and p["roadlink_idx"] == closest_roadlink_idx),
+                None
+            )
+
+            current_offset = 0.0
+            if current_road_end_point:
+                dx = current_road_end_point["x"] - current_loc.x
+                dy = current_road_end_point["y"] - current_loc.y
+                current_offset = math.hypot(dx, dy)  # 自车到当前road终点的距离
+            
+            path_dist_sum = 0.0
+            for idx in range(closest_roadlink_idx + 1, target_roadlink_idx + 1):
+                if idx in roadlink_length_map:
+                    path_dist_sum += roadlink_length_map[idx]
+            
+            final_dist = current_offset + path_dist_sum
+            final_dist = max(0.0, final_dist)
+            if closest_roadlink_idx == target_roadlink_idx:
+                final_dist = current_offset
+
+            return final_dist
+
+        # ========== 第一步：解析路由数据 ==========
+        self.route_result = None
+        for topic, msg in self.master_bag.read_messages(topics=["/hadmap_engine/route_result_msg"]):
+            try:
+                route_roads = RoutingResult()  
+                route_roads.ParseFromString(msg.data)
+                self.route_result = route_roads
+                break 
+            except Exception as e:
+                print(f"[WARN] 解析路由消息失败：{str(e)}")
+
+        if not self.route_result:
+            print("[WARN] 未解析到有效路由数据")
+            empty_junction = [["None", math.nan, math.nan, math.nan], ["None", math.nan, math.nan, math.nan]]
+            self.high_order_intent = [empty_junction for _ in self.sampled_2hz_locations]
+            return
+
+        # ========== 第二步：正序提取稀疏点列 + 记录road长度 ==========
+        lane_junction_map = {}
+        sparse_points = []  # 局部变量（原self.sparse_points）
+        roadlink_length_map = {}  # 局部变量（原self.roadlink_length_map）
+
+        if not hasattr(self.route_result, "paths") or not self.route_result.paths:
+            print("[WARN] 路由数据中无有效路径")
+            empty_junction = [["None", math.nan, math.nan, math.nan], ["None", math.nan, math.nan, math.nan]]
+            self.high_order_intent = [empty_junction for _ in self.sampled_2hz_locations]
+            return
+
+        first_path = self.route_result.paths[0]
+        for roadlink_idx, roadlink in enumerate(first_path.route_roadlinks):
+            if roadlink.route_links and len(roadlink.route_links) > 0:
+                first_link = roadlink.route_links[0]
+                if first_link.geom and len(first_link.geom) > 0:
+                    link_last_point = first_link.geom[-1]
+                    sparse_points.append({
+                        "type": "route_link",
+                        "roadlink_idx": roadlink_idx,  
+                        "x": link_last_point.x,
+                        "y": link_last_point.y
+                    })
+
+            if roadlink.HasField("route_road") and roadlink.route_road.geom and len(roadlink.route_road.geom) > 0:
+                road_last_point = roadlink.route_road.geom[-1]
+                sparse_points.append({
+                    "type": "route_road",
+                    "roadlink_idx": roadlink_idx,
+                    "x": road_last_point.x,
+                    "y": road_last_point.y
+                })
+                roadlink_length_map[roadlink_idx] = roadlink.route_road.length if roadlink.route_road.HasField("length") else 0.0
+
+            for lane_link in roadlink.route_links:
+                if lane_link.type not in target_lane_types:
+                    continue
+
+                lane_id = lane_link.from_lane_id if lane_link.HasField("from_lane_id") else math.nan
+                junc_id = get_junction_unique_id(lane_link)
+
+                if junc_id not in lane_junction_map:
+                    first_geom = lane_link.geom[0] if lane_link.geom else Point()
+                    lane_junction_map[junc_id] = {
+                        "action": ACTION_MAP.get(lane_link.type, "unknown"),
+                        "x": first_geom.x,
+                        "y": first_geom.y,
+                        "lane_start": lane_id,
+                        "lane_end": lane_id,
+                        "roadlink_idx": roadlink_idx
+                    }
+                else:
+                    if not math.isnan(lane_id):
+                        junc_data = lane_junction_map[junc_id]
+                        junc_data["lane_start"] = min(junc_data["lane_start"], lane_id) if not math.isnan(junc_data["lane_start"]) else lane_id
+                        junc_data["lane_end"] = max(junc_data["lane_end"], lane_id) if not math.isnan(junc_data["lane_end"]) else lane_id
+
+        # ========== 第三步：封装路口信息（按正序索引排序） ==========
+        junction_list = []
+        for junc_data in lane_junction_map.values():
+            junction_list.append({
+                "action": junc_data["action"],
+                "x": junc_data["x"],
+                "y": junc_data["y"],
+                "lane_start": junc_data["lane_start"],
+                "lane_end": junc_data["lane_end"],
+                "roadlink_idx": junc_data["roadlink_idx"] 
+            })
+
+        junction_list.sort(key=lambda x: x["roadlink_idx"])
+
+        # ========== 第四步：匹配自车到路口的路径距离（正序逻辑） ==========
+        self.high_order_intent = []
+        for current_loc in self.sampled_2hz_locations:
+            matched_junctions = []
+            candidate_junctions = []
+
+            for junc in junction_list:
+                path_dist = calculate_path_distance(current_loc, junc)
+                
+                if math.isnan(path_dist) or path_dist > MAX_PATH_DISTANCE:
+                    continue
+                
+                candidate_junctions.append({
+                    "distance": round(path_dist, 1),
+                    "action": junc["action"],
+                    "lane_start": junc["lane_start"],
+                    "lane_end": junc["lane_end"]
+                })
+
+            candidate_junctions.sort(key=lambda x: x["distance"])
+            selected_junctions = candidate_junctions[:MAX_MATCH_JUNCTION]
+
+            for junc in selected_junctions:
+                matched_junctions.append([
+                    junc["action"],
+                    junc["distance"],
+                    junc["lane_start"],
+                    junc["lane_end"]
+                ])
+
+            empty_count = MAX_MATCH_JUNCTION - len(matched_junctions)
+            for _ in range(empty_count):
+                matched_junctions.append(["None", math.nan, math.nan, math.nan])
+
+            self.high_order_intent.append(matched_junctions)
+
+
+
+
 
     def parse_trajectory(self):
         """
@@ -1223,6 +1472,8 @@ class BagDataHandler:
         self.parse_localization()
         # 对定位数据进行2Hz采样
         self.sample_localization_2hz(sample_rate_hz=2.0)
+        # 解析高阶意图导航信息
+        self.parse_routing()
         # 解析轨迹topic
         # self.parse_trajectory()
         # 生成pkl样本（基于2Hz采样数据）
