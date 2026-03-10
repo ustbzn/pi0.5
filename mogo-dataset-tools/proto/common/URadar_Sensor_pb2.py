@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='chassis',
   syntax='proto2',
   serialized_options=None,
-  serialized_pb=_b('\n\x13URadar_Sensor.proto\x12\x07\x63hassis\x1a\x0cheader.proto\"\xc6\x01\n\x17UR_Sensor_Distance_Info\x12\x18\n\x10Right_Sensor_Dis\x18\x01 \x01(\r\x12\x1e\n\x16RightMiddle_Sensor_Dis\x18\x02 \x01(\r\x12\x1d\n\x15LeftMiddle_Sensor_Dis\x18\x03 \x01(\r\x12\x17\n\x0fLeft_Sensor_Dis\x18\x04 \x01(\r\x12\x1b\n\x13LeftSide_Sensor_Dis\x18\x05 \x01(\r\x12\x1c\n\x14RightSide_Sensor_Dis\x18\x06 \x01(\r\"\xc3\x01\n\x14UR_Sensor_Error_Flag\x12\x18\n\x10Right_Sensor_Err\x18\x01 \x01(\r\x12\x1e\n\x16RightMiddle_Sensor_Err\x18\x02 \x01(\r\x12\x1d\n\x15LeftMiddle_Sensor_Err\x18\x03 \x01(\r\x12\x17\n\x0fLeft_Sensor_Err\x18\x04 \x01(\r\x12\x1b\n\x13LeftSide_Sensor_Err\x18\x05 \x01(\r\x12\x1c\n\x14RightSide_Sensor_Err\x18\x06 \x01(\r\"\x89\x02\n\tUR_Sensor\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x32\n\x08UR_Front\x18\x02 \x01(\x0b\x32 .chassis.UR_Sensor_Distance_Info\x12\x31\n\x07UR_Rear\x18\x03 \x01(\x0b\x32 .chassis.UR_Sensor_Distance_Info\x12:\n\x13UR_Front_Error_Info\x18\x04 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Error_Flag\x12\x39\n\x12UR_Rear_Error_Info\x18\x05 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Error_Flag')
+  serialized_pb=_b('\n\x13URadar_Sensor.proto\x12\x07\x63hassis\x1a\x0cheader.proto\"\xc6\x01\n\x17UR_Sensor_Distance_Info\x12\x18\n\x10Right_Sensor_Dis\x18\x01 \x01(\r\x12\x1e\n\x16RightMiddle_Sensor_Dis\x18\x02 \x01(\r\x12\x1d\n\x15LeftMiddle_Sensor_Dis\x18\x03 \x01(\r\x12\x17\n\x0fLeft_Sensor_Dis\x18\x04 \x01(\r\x12\x1b\n\x13LeftSide_Sensor_Dis\x18\x05 \x01(\r\x12\x1c\n\x14RightSide_Sensor_Dis\x18\x06 \x01(\r\"\xc3\x01\n\x14UR_Sensor_Error_Flag\x12\x18\n\x10Right_Sensor_Err\x18\x01 \x01(\r\x12\x1e\n\x16RightMiddle_Sensor_Err\x18\x02 \x01(\r\x12\x1d\n\x15LeftMiddle_Sensor_Err\x18\x03 \x01(\r\x12\x17\n\x0fLeft_Sensor_Err\x18\x04 \x01(\r\x12\x1b\n\x13LeftSide_Sensor_Err\x18\x05 \x01(\r\x12\x1c\n\x14RightSide_Sensor_Err\x18\x06 \x01(\r\"C\n\x14UR_Sensor_Mount_Info\x12\r\n\x05pos_x\x18\x01 \x01(\x02\x12\r\n\x05pos_y\x18\x02 \x01(\x02\x12\r\n\x05\x61ngle\x18\x03 \x01(\x02\"\xe6\x02\n\x15UR_Sensor_Mount_Array\x12\x33\n\x0cRight_Sensor\x18\x01 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Mount_Info\x12\x39\n\x12RightMiddle_Sensor\x18\x02 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Mount_Info\x12\x38\n\x11LeftMiddle_Sensor\x18\x03 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Mount_Info\x12\x32\n\x0bLeft_Sensor\x18\x04 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Mount_Info\x12\x36\n\x0fLeftSide_Sensor\x18\x05 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Mount_Info\x12\x37\n\x10RightSide_Sensor\x18\x06 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Mount_Info\"\x82\x03\n\tUR_Sensor\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x32\n\x08UR_Front\x18\x02 \x01(\x0b\x32 .chassis.UR_Sensor_Distance_Info\x12\x31\n\x07UR_Rear\x18\x03 \x01(\x0b\x32 .chassis.UR_Sensor_Distance_Info\x12:\n\x13UR_Front_Error_Info\x18\x04 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Error_Flag\x12\x39\n\x12UR_Rear_Error_Info\x18\x05 \x01(\x0b\x32\x1d.chassis.UR_Sensor_Error_Flag\x12;\n\x13UR_Front_Mount_Info\x18\x06 \x01(\x0b\x32\x1e.chassis.UR_Sensor_Mount_Array\x12:\n\x12UR_Rear_Mount_Info\x18\x07 \x01(\x0b\x32\x1e.chassis.UR_Sensor_Mount_Array')
   ,
   dependencies=[header__pb2.DESCRIPTOR,])
 
@@ -159,6 +159,117 @@ _UR_SENSOR_ERROR_FLAG = _descriptor.Descriptor(
 )
 
 
+_UR_SENSOR_MOUNT_INFO = _descriptor.Descriptor(
+  name='UR_Sensor_Mount_Info',
+  full_name='chassis.UR_Sensor_Mount_Info',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='pos_x', full_name='chassis.UR_Sensor_Mount_Info.pos_x', index=0,
+      number=1, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='pos_y', full_name='chassis.UR_Sensor_Mount_Info.pos_y', index=1,
+      number=2, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='angle', full_name='chassis.UR_Sensor_Mount_Info.angle', index=2,
+      number=3, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=445,
+  serialized_end=512,
+)
+
+
+_UR_SENSOR_MOUNT_ARRAY = _descriptor.Descriptor(
+  name='UR_Sensor_Mount_Array',
+  full_name='chassis.UR_Sensor_Mount_Array',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='Right_Sensor', full_name='chassis.UR_Sensor_Mount_Array.Right_Sensor', index=0,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='RightMiddle_Sensor', full_name='chassis.UR_Sensor_Mount_Array.RightMiddle_Sensor', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='LeftMiddle_Sensor', full_name='chassis.UR_Sensor_Mount_Array.LeftMiddle_Sensor', index=2,
+      number=3, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='Left_Sensor', full_name='chassis.UR_Sensor_Mount_Array.Left_Sensor', index=3,
+      number=4, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='LeftSide_Sensor', full_name='chassis.UR_Sensor_Mount_Array.LeftSide_Sensor', index=4,
+      number=5, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='RightSide_Sensor', full_name='chassis.UR_Sensor_Mount_Array.RightSide_Sensor', index=5,
+      number=6, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=515,
+  serialized_end=873,
+)
+
+
 _UR_SENSOR = _descriptor.Descriptor(
   name='UR_Sensor',
   full_name='chassis.UR_Sensor',
@@ -201,6 +312,20 @@ _UR_SENSOR = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='UR_Front_Mount_Info', full_name='chassis.UR_Sensor.UR_Front_Mount_Info', index=5,
+      number=6, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='UR_Rear_Mount_Info', full_name='chassis.UR_Sensor.UR_Rear_Mount_Info', index=6,
+      number=7, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -213,17 +338,27 @@ _UR_SENSOR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=446,
-  serialized_end=711,
+  serialized_start=876,
+  serialized_end=1262,
 )
 
+_UR_SENSOR_MOUNT_ARRAY.fields_by_name['Right_Sensor'].message_type = _UR_SENSOR_MOUNT_INFO
+_UR_SENSOR_MOUNT_ARRAY.fields_by_name['RightMiddle_Sensor'].message_type = _UR_SENSOR_MOUNT_INFO
+_UR_SENSOR_MOUNT_ARRAY.fields_by_name['LeftMiddle_Sensor'].message_type = _UR_SENSOR_MOUNT_INFO
+_UR_SENSOR_MOUNT_ARRAY.fields_by_name['Left_Sensor'].message_type = _UR_SENSOR_MOUNT_INFO
+_UR_SENSOR_MOUNT_ARRAY.fields_by_name['LeftSide_Sensor'].message_type = _UR_SENSOR_MOUNT_INFO
+_UR_SENSOR_MOUNT_ARRAY.fields_by_name['RightSide_Sensor'].message_type = _UR_SENSOR_MOUNT_INFO
 _UR_SENSOR.fields_by_name['header'].message_type = header__pb2._HEADER
 _UR_SENSOR.fields_by_name['UR_Front'].message_type = _UR_SENSOR_DISTANCE_INFO
 _UR_SENSOR.fields_by_name['UR_Rear'].message_type = _UR_SENSOR_DISTANCE_INFO
 _UR_SENSOR.fields_by_name['UR_Front_Error_Info'].message_type = _UR_SENSOR_ERROR_FLAG
 _UR_SENSOR.fields_by_name['UR_Rear_Error_Info'].message_type = _UR_SENSOR_ERROR_FLAG
+_UR_SENSOR.fields_by_name['UR_Front_Mount_Info'].message_type = _UR_SENSOR_MOUNT_ARRAY
+_UR_SENSOR.fields_by_name['UR_Rear_Mount_Info'].message_type = _UR_SENSOR_MOUNT_ARRAY
 DESCRIPTOR.message_types_by_name['UR_Sensor_Distance_Info'] = _UR_SENSOR_DISTANCE_INFO
 DESCRIPTOR.message_types_by_name['UR_Sensor_Error_Flag'] = _UR_SENSOR_ERROR_FLAG
+DESCRIPTOR.message_types_by_name['UR_Sensor_Mount_Info'] = _UR_SENSOR_MOUNT_INFO
+DESCRIPTOR.message_types_by_name['UR_Sensor_Mount_Array'] = _UR_SENSOR_MOUNT_ARRAY
 DESCRIPTOR.message_types_by_name['UR_Sensor'] = _UR_SENSOR
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
@@ -240,6 +375,20 @@ UR_Sensor_Error_Flag = _reflection.GeneratedProtocolMessageType('UR_Sensor_Error
   # @@protoc_insertion_point(class_scope:chassis.UR_Sensor_Error_Flag)
   ))
 _sym_db.RegisterMessage(UR_Sensor_Error_Flag)
+
+UR_Sensor_Mount_Info = _reflection.GeneratedProtocolMessageType('UR_Sensor_Mount_Info', (_message.Message,), dict(
+  DESCRIPTOR = _UR_SENSOR_MOUNT_INFO,
+  __module__ = 'URadar_Sensor_pb2'
+  # @@protoc_insertion_point(class_scope:chassis.UR_Sensor_Mount_Info)
+  ))
+_sym_db.RegisterMessage(UR_Sensor_Mount_Info)
+
+UR_Sensor_Mount_Array = _reflection.GeneratedProtocolMessageType('UR_Sensor_Mount_Array', (_message.Message,), dict(
+  DESCRIPTOR = _UR_SENSOR_MOUNT_ARRAY,
+  __module__ = 'URadar_Sensor_pb2'
+  # @@protoc_insertion_point(class_scope:chassis.UR_Sensor_Mount_Array)
+  ))
+_sym_db.RegisterMessage(UR_Sensor_Mount_Array)
 
 UR_Sensor = _reflection.GeneratedProtocolMessageType('UR_Sensor', (_message.Message,), dict(
   DESCRIPTOR = _UR_SENSOR,

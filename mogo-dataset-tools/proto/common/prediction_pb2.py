@@ -3,6 +3,7 @@
 
 import sys
 _b=sys.version_info[0]<3 and (lambda x:x) or (lambda x:x.encode('latin1'))
+from google.protobuf.internal import enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from google.protobuf import reflection as _reflection
@@ -21,10 +22,115 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='prediction',
   syntax='proto2',
   serialized_options=None,
-  serialized_pb=_b('\n\x10prediction.proto\x12\nprediction\x1a\x0cheader.proto\x1a\x0egeometry.proto\"\x96\x01\n\x0cGaussianInfo\x12\x0f\n\x07sigma_x\x18\x01 \x01(\x01\x12\x0f\n\x07sigma_y\x18\x02 \x01(\x01\x12\x13\n\x0b\x63orrelation\x18\x03 \x01(\x01\x12\x18\n\x10\x61rea_probability\x18\x04 \x01(\x01\x12\x11\n\tellipse_a\x18\x05 \x01(\x01\x12\x11\n\tellipse_b\x18\x06 \x01(\x01\x12\x0f\n\x07theta_a\x18\x07 \x01(\x01\"\xcd\x01\n\tPathPoint\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\x12\x0b\n\x03yaw\x18\x04 \x01(\x01\x12\x16\n\x0evelocity_theta\x18\x05 \x01(\x01\x12/\n\rgaussian_info\x18\x06 \x01(\x0b\x32\x18.prediction.GaussianInfo\x12\x0f\n\x07\x61\x63\x63um_s\x18\x07 \x01(\x01\x12\x15\n\rrelative_time\x18\x08 \x01(\x01\x12\t\n\x01v\x18\t \x01(\x01\x12\n\n\x02vx\x18\n \x01(\x01\x12\n\n\x02vy\x18\x0b \x01(\x01\"h\n\nTrajectory\x12\x12\n\nconfidence\x18\x01 \x01(\x01\x12)\n\npath_point\x18\x02 \x03(\x0b\x32\x15.prediction.PathPoint\x12\x1b\n\x13original_confidence\x18\x03 \x01(\x01\"l\n\x0cTrajectories\x12\x30\n\x10\x63utin_trajectory\x18\x01 \x01(\x0b\x32\x16.prediction.Trajectory\x12*\n\ntrajectory\x18\x02 \x03(\x0b\x32\x16.prediction.Trajectory\"\xef\x01\n\x0eObstacleIntent\x12\x35\n\x04type\x18\x01 \x01(\x0e\x32\x1f.prediction.ObstacleIntent.Type:\x06\x43OMMON\x12\x19\n\x11\x63ommon_confidence\x18\x02 \x01(\x01\x12\x18\n\x10\x63utin_confidence\x18\x03 \x01(\x01\x12\x1a\n\x12jaywalk_confidence\x18\x04 \x01(\x01\x12\x1b\n\x13\x65gobrake_confidence\x18\x05 \x01(\x01\"8\n\x04Type\x12\n\n\x06\x43OMMON\x10\x00\x12\t\n\x05\x43UTIN\x10\x01\x12\x0b\n\x07JAYWALK\x10\x02\x12\x0c\n\x08\x45GOBRAKE\x10\x03\"\xd0\x01\n\x13ObstacleLonDecision\x12:\n\x04type\x18\x01 \x01(\x0e\x32$.prediction.ObstacleLonDecision.Type:\x06IGNORE\x12\x19\n\x11ignore_confidence\x18\x02 \x01(\x01\x12\x1b\n\x13overtake_confidence\x18\x03 \x01(\x01\x12\x18\n\x10yield_confidence\x18\x04 \x01(\x01\"+\n\x04Type\x12\n\n\x06IGNORE\x10\x00\x12\x0c\n\x08OVERTAKE\x10\x01\x12\t\n\x05YIELD\x10\x02\"\xc8\x01\n\x13ObstacleLatDecision\x12:\n\x04type\x18\x01 \x01(\x0e\x32$.prediction.ObstacleLatDecision.Type:\x06IGNORE\x12\x19\n\x11ignore_confidence\x18\x02 \x01(\x01\x12\x17\n\x0fleft_confidence\x18\x03 \x01(\x01\x12\x18\n\x10right_confidence\x18\x04 \x01(\x01\"\'\n\x04Type\x12\n\n\x06IGNORE\x10\x00\x12\x08\n\x04LEFT\x10\x01\x12\t\n\x05RIGHT\x10\x02\"~\n\x10ObstacleDecision\x12\x34\n\x0blonDecision\x18\x01 \x01(\x0b\x32\x1f.prediction.ObstacleLonDecision\x12\x34\n\x0bLatDecision\x18\x02 \x01(\x0b\x32\x1f.prediction.ObstacleLatDecision\"\xf4\x01\n\x10PredictionObject\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x0c\n\x04type\x18\x02 \x01(\x05\x12 \n\x05shape\x18\x03 \x01(\x0b\x32\x11.geometry.Vector3\x12.\n\x0ctrajectories\x18\x04 \x01(\x0b\x32\x18.prediction.Trajectories\x12*\n\x06intent\x18\x05 \x01(\x0b\x32\x1a.prediction.ObstacleIntent\x12.\n\x08\x64\x65\x63ision\x18\x06 \x01(\x0b\x32\x1c.prediction.ObstacleDecision\x12\x18\n\x10prediction_count\x18\x07 \x01(\x05\"k\n\x11PredictionObjects\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x36\n\x10predictionObject\x18\x02 \x03(\x0b\x32\x1c.prediction.PredictionObject\"\xac\x01\n\x0bmTrajectory\x12\x15\n\rm_probability\x18\x01 \x01(\x02\x12.\n\x15prediction_trajectory\x18\x02 \x03(\x0b\x32\x0f.geometry.Point\x12(\n\x0fprediction_pose\x18\x03 \x03(\x0b\x32\x0f.geometry.Point\x12,\n\x13prediction_velocity\x18\x04 \x03(\x0b\x32\x0f.geometry.Point\"\xdc\x01\n\x11mPredictionObject\x12\r\n\x05m_nid\x18\x01 \x01(\x03\x12\x12\n\nm_nquality\x18\x02 \x01(\x05\x12\x11\n\tclasstype\x18\x03 \x01(\x05\x12\x17\n\x0fm_preconfidence\x18\x04 \x01(\x05\x12\x0e\n\x06\x63ut_in\x18\x05 \x01(\x02\x12\x17\n\x0fprediction_info\x18\x06 \x03(\x02\x12+\n\ntrajectory\x18\x07 \x03(\x0b\x32\x17.prediction.mTrajectory\x12\"\n\x07objsize\x18\x08 \x01(\x0b\x32\x11.geometry.Vector3\"\\\n\x0emTrajectoryApp\x12*\n\x11trajectory_points\x18\x01 \x03(\x0b\x32\x0f.geometry.Point\x12\x1e\n\x16prediction_probability\x18\x02 \x01(\x02\"\x96\x01\n\x14mPredictionObjectApp\x12\r\n\x05m_nid\x18\x01 \x01(\x03\x12\x11\n\tclasstype\x18\x02 \x01(\x05\x12\x14\n\x0cis_ai_output\x18\x03 \x01(\x08\x12\x0b\n\x03yaw\x18\x04 \x01(\x01\x12\x39\n\x15prediction_trajectory\x18\x05 \x03(\x0b\x32\x1a.prediction.mTrajectoryApp\"\xdd\x01\n\x12mPredictionObjects\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x0f\n\x07m_nnum0\x18\x02 \x01(\x05\x12\x13\n\x0b\x61llcyclenum\x18\x03 \x01(\x03\x12\x0f\n\x07m_ftime\x18\x04 \x01(\x01\x12\x0f\n\x07\x66\x64\x65ltat\x18\x05 \x01(\x01\x12+\n\x04objs\x18\x06 \x03(\x0b\x32\x1d.prediction.mPredictionObject\x12\x32\n\x08objs_app\x18\x07 \x03(\x0b\x32 .prediction.mPredictionObjectApp')
+  serialized_pb=_b('\n\x10prediction.proto\x12\nprediction\x1a\x0cheader.proto\x1a\x0egeometry.proto\"\x96\x01\n\x0cGaussianInfo\x12\x0f\n\x07sigma_x\x18\x01 \x01(\x01\x12\x0f\n\x07sigma_y\x18\x02 \x01(\x01\x12\x13\n\x0b\x63orrelation\x18\x03 \x01(\x01\x12\x18\n\x10\x61rea_probability\x18\x04 \x01(\x01\x12\x11\n\tellipse_a\x18\x05 \x01(\x01\x12\x11\n\tellipse_b\x18\x06 \x01(\x01\x12\x0f\n\x07theta_a\x18\x07 \x01(\x01\"\xf2\x01\n\tPathPoint\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\t\n\x01z\x18\x03 \x01(\x01\x12\x0b\n\x03yaw\x18\x04 \x01(\x01\x12\x16\n\x0evelocity_theta\x18\x05 \x01(\x01\x12/\n\rgaussian_info\x18\x06 \x01(\x0b\x32\x18.prediction.GaussianInfo\x12\x0f\n\x07\x61\x63\x63um_s\x18\x07 \x01(\x01\x12\x15\n\rrelative_time\x18\x08 \x01(\x01\x12\t\n\x01v\x18\t \x01(\x01\x12\n\n\x02vx\x18\n \x01(\x01\x12\n\n\x02vy\x18\x0b \x01(\x01\x12#\n\ncenter_vcs\x18\x0c \x01(\x0b\x32\x0f.geometry.Point\"h\n\nTrajectory\x12\x12\n\nconfidence\x18\x01 \x01(\x01\x12)\n\npath_point\x18\x02 \x03(\x0b\x32\x15.prediction.PathPoint\x12\x1b\n\x13original_confidence\x18\x03 \x01(\x01\"l\n\x0cTrajectories\x12\x30\n\x10\x63utin_trajectory\x18\x01 \x01(\x0b\x32\x16.prediction.Trajectory\x12*\n\ntrajectory\x18\x02 \x03(\x0b\x32\x16.prediction.Trajectory\"\xef\x01\n\x0eObstacleIntent\x12\x35\n\x04type\x18\x01 \x01(\x0e\x32\x1f.prediction.ObstacleIntent.Type:\x06\x43OMMON\x12\x19\n\x11\x63ommon_confidence\x18\x02 \x01(\x01\x12\x18\n\x10\x63utin_confidence\x18\x03 \x01(\x01\x12\x1a\n\x12jaywalk_confidence\x18\x04 \x01(\x01\x12\x1b\n\x13\x65gobrake_confidence\x18\x05 \x01(\x01\"8\n\x04Type\x12\n\n\x06\x43OMMON\x10\x00\x12\t\n\x05\x43UTIN\x10\x01\x12\x0b\n\x07JAYWALK\x10\x02\x12\x0c\n\x08\x45GOBRAKE\x10\x03\"\xd0\x01\n\x13ObstacleLonDecision\x12:\n\x04type\x18\x01 \x01(\x0e\x32$.prediction.ObstacleLonDecision.Type:\x06IGNORE\x12\x19\n\x11ignore_confidence\x18\x02 \x01(\x01\x12\x1b\n\x13overtake_confidence\x18\x03 \x01(\x01\x12\x18\n\x10yield_confidence\x18\x04 \x01(\x01\"+\n\x04Type\x12\n\n\x06IGNORE\x10\x00\x12\x0c\n\x08OVERTAKE\x10\x01\x12\t\n\x05YIELD\x10\x02\"\xc8\x01\n\x13ObstacleLatDecision\x12:\n\x04type\x18\x01 \x01(\x0e\x32$.prediction.ObstacleLatDecision.Type:\x06IGNORE\x12\x19\n\x11ignore_confidence\x18\x02 \x01(\x01\x12\x17\n\x0fleft_confidence\x18\x03 \x01(\x01\x12\x18\n\x10right_confidence\x18\x04 \x01(\x01\"\'\n\x04Type\x12\n\n\x06IGNORE\x10\x00\x12\x08\n\x04LEFT\x10\x01\x12\t\n\x05RIGHT\x10\x02\"~\n\x10ObstacleDecision\x12\x34\n\x0blonDecision\x18\x01 \x01(\x0b\x32\x1f.prediction.ObstacleLonDecision\x12\x34\n\x0bLatDecision\x18\x02 \x01(\x0b\x32\x1f.prediction.ObstacleLatDecision\"\xda\x02\n\x10PredictionObject\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x0c\n\x04type\x18\x02 \x01(\x05\x12 \n\x05shape\x18\x03 \x01(\x0b\x32\x11.geometry.Vector3\x12.\n\x0ctrajectories\x18\x04 \x01(\x0b\x32\x18.prediction.Trajectories\x12*\n\x06intent\x18\x05 \x01(\x0b\x32\x1a.prediction.ObstacleIntent\x12.\n\x08\x64\x65\x63ision\x18\x06 \x01(\x0b\x32\x1c.prediction.ObstacleDecision\x12\x18\n\x10prediction_count\x18\x07 \x01(\x05\x12\x10\n\x08pcpt_age\x18\x08 \x01(\x05\x12(\n\x0fpcpt_center_utm\x18\t \x01(\x0b\x32\x0f.geometry.Point\x12(\n\x0fpcpt_center_vcs\x18\n \x01(\x0b\x32\x0f.geometry.Point\"k\n\x11PredictionObjects\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x36\n\x10predictionObject\x18\x02 \x03(\x0b\x32\x1c.prediction.PredictionObject\"\xac\x01\n\x0bmTrajectory\x12\x15\n\rm_probability\x18\x01 \x01(\x02\x12.\n\x15prediction_trajectory\x18\x02 \x03(\x0b\x32\x0f.geometry.Point\x12(\n\x0fprediction_pose\x18\x03 \x03(\x0b\x32\x0f.geometry.Point\x12,\n\x13prediction_velocity\x18\x04 \x03(\x0b\x32\x0f.geometry.Point\"\xdc\x01\n\x11mPredictionObject\x12\r\n\x05m_nid\x18\x01 \x01(\x03\x12\x12\n\nm_nquality\x18\x02 \x01(\x05\x12\x11\n\tclasstype\x18\x03 \x01(\x05\x12\x17\n\x0fm_preconfidence\x18\x04 \x01(\x05\x12\x0e\n\x06\x63ut_in\x18\x05 \x01(\x02\x12\x17\n\x0fprediction_info\x18\x06 \x03(\x02\x12+\n\ntrajectory\x18\x07 \x03(\x0b\x32\x17.prediction.mTrajectory\x12\"\n\x07objsize\x18\x08 \x01(\x0b\x32\x11.geometry.Vector3\"\\\n\x0emTrajectoryApp\x12*\n\x11trajectory_points\x18\x01 \x03(\x0b\x32\x0f.geometry.Point\x12\x1e\n\x16prediction_probability\x18\x02 \x01(\x02\"\x96\x01\n\x14mPredictionObjectApp\x12\r\n\x05m_nid\x18\x01 \x01(\x03\x12\x11\n\tclasstype\x18\x02 \x01(\x05\x12\x14\n\x0cis_ai_output\x18\x03 \x01(\x08\x12\x0b\n\x03yaw\x18\x04 \x01(\x01\x12\x39\n\x15prediction_trajectory\x18\x05 \x03(\x0b\x32\x1a.prediction.mTrajectoryApp\"\xdd\x01\n\x12mPredictionObjects\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x0f\n\x07m_nnum0\x18\x02 \x01(\x05\x12\x13\n\x0b\x61llcyclenum\x18\x03 \x01(\x03\x12\x0f\n\x07m_ftime\x18\x04 \x01(\x01\x12\x0f\n\x07\x66\x64\x65ltat\x18\x05 \x01(\x01\x12+\n\x04objs\x18\x06 \x03(\x0b\x32\x1d.prediction.mPredictionObject\x12\x32\n\x08objs_app\x18\x07 \x03(\x0b\x32 .prediction.mPredictionObjectApp\"s\n\x11TrajectoryMetrics\x12\x0e\n\x06\x61\x64\x65_3s\x18\x01 \x01(\x02\x12\x0e\n\x06\x66\x64\x65_3s\x18\x02 \x01(\x02\x12\x0e\n\x06\x61\x64\x65_5s\x18\x03 \x01(\x02\x12\x0e\n\x06\x66\x64\x65_5s\x18\x04 \x01(\x02\x12\x0e\n\x06\x61\x64\x65_8s\x18\x05 \x01(\x02\x12\x0e\n\x06\x66\x64\x65_8s\x18\x06 \x01(\x02\"\x92\x01\n\rIntentMetrics\x12\x30\n\x10predicted_intent\x18\x01 \x01(\x0e\x32\x16.prediction.IntentType\x12)\n\tgt_intent\x18\x02 \x01(\x0e\x32\x16.prediction.IntentType\x12\x13\n\x0bprobability\x18\x03 \x01(\x02\x12\x0f\n\x07\x63orrect\x18\x04 \x01(\x08\"\xc1\x01\n\x17ObjectPredictionMetrics\x12\x11\n\tobject_id\x18\x01 \x01(\x03\x12\x35\n\x0bobject_type\x18\x02 \x01(\x0e\x32 .prediction.PredictionObjectType\x12\x31\n\ntrajectory\x18\x03 \x01(\x0b\x32\x1d.prediction.TrajectoryMetrics\x12)\n\x06intent\x18\x04 \x01(\x0b\x32\x19.prediction.IntentMetrics\"\xb1\x01\n\x1b\x41ggregatedTrajectoryMetrics\x12\x14\n\x0cobject_count\x18\x01 \x01(\r\x12\x13\n\x0b\x61\x64\x65_3s_mean\x18\x02 \x01(\x02\x12\x13\n\x0b\x66\x64\x65_3s_mean\x18\x03 \x01(\x02\x12\x13\n\x0b\x61\x64\x65_5s_mean\x18\x04 \x01(\x02\x12\x13\n\x0b\x66\x64\x65_5s_mean\x18\x05 \x01(\x02\x12\x13\n\x0b\x61\x64\x65_8s_mean\x18\x06 \x01(\x02\x12\x13\n\x0b\x66\x64\x65_8s_mean\x18\x07 \x01(\x02\"\xbe\x01\n\x17PredictionOnlineMetrics\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12;\n\x0eobject_metrics\x18\x02 \x03(\x0b\x32#.prediction.ObjectPredictionMetrics\x12\x46\n\x15\x61ggregated_trajectory\x18\x03 \x01(\x0b\x32\'.prediction.AggregatedTrajectoryMetrics*n\n\nIntentType\x12\x12\n\x0eINTENT_UNKNOWN\x10\x00\x12\x11\n\rINTENT_CUT_IN\x10\x01\x12\x10\n\x0cINTENT_YIELD\x10\x02\x12\x13\n\x0fINTENT_OVERTAKE\x10\x03\x12\x12\n\x0eINTENT_JAYWALK\x10\x04*\x90\x01\n\x14PredictionObjectType\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x0e\n\nPEDESTRIAN\x10\x01\x12\t\n\x05RIDER\x10\x02\x12\x0c\n\x08TRICYCLE\x10\x03\x12\x07\n\x03\x43\x41R\x10\x04\x12\t\n\x05TRUCK\x10\x05\x12\x07\n\x03\x42US\x10\x06\x12\t\n\x05TRAIN\x10\x07\x12\x0f\n\x0bTRAFFICCONE\x10\x08\x12\t\n\x05\x46\x45NCE\x10\t')
   ,
   dependencies=[header__pb2.DESCRIPTOR,geometry__pb2.DESCRIPTOR,])
 
+_INTENTTYPE = _descriptor.EnumDescriptor(
+  name='IntentType',
+  full_name='prediction.IntentType',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='INTENT_UNKNOWN', index=0, number=0,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='INTENT_CUT_IN', index=1, number=1,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='INTENT_YIELD', index=2, number=2,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='INTENT_OVERTAKE', index=3, number=3,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='INTENT_JAYWALK', index=4, number=4,
+      serialized_options=None,
+      type=None),
+  ],
+  containing_type=None,
+  serialized_options=None,
+  serialized_start=3622,
+  serialized_end=3732,
+)
+_sym_db.RegisterEnumDescriptor(_INTENTTYPE)
+
+IntentType = enum_type_wrapper.EnumTypeWrapper(_INTENTTYPE)
+_PREDICTIONOBJECTTYPE = _descriptor.EnumDescriptor(
+  name='PredictionObjectType',
+  full_name='prediction.PredictionObjectType',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='UNKNOWN', index=0, number=0,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='PEDESTRIAN', index=1, number=1,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='RIDER', index=2, number=2,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='TRICYCLE', index=3, number=3,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='CAR', index=4, number=4,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='TRUCK', index=5, number=5,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='BUS', index=6, number=6,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='TRAIN', index=7, number=7,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='TRAFFICCONE', index=8, number=8,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='FENCE', index=9, number=9,
+      serialized_options=None,
+      type=None),
+  ],
+  containing_type=None,
+  serialized_options=None,
+  serialized_start=3735,
+  serialized_end=3879,
+)
+_sym_db.RegisterEnumDescriptor(_PREDICTIONOBJECTTYPE)
+
+PredictionObjectType = enum_type_wrapper.EnumTypeWrapper(_PREDICTIONOBJECTTYPE)
+INTENT_UNKNOWN = 0
+INTENT_CUT_IN = 1
+INTENT_YIELD = 2
+INTENT_OVERTAKE = 3
+INTENT_JAYWALK = 4
+UNKNOWN = 0
+PEDESTRIAN = 1
+RIDER = 2
+TRICYCLE = 3
+CAR = 4
+TRUCK = 5
+BUS = 6
+TRAIN = 7
+TRAFFICCONE = 8
+FENCE = 9
 
 
 _OBSTACLEINTENT_TYPE = _descriptor.EnumDescriptor(
@@ -52,8 +158,8 @@ _OBSTACLEINTENT_TYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=823,
-  serialized_end=879,
+  serialized_start=860,
+  serialized_end=916,
 )
 _sym_db.RegisterEnumDescriptor(_OBSTACLEINTENT_TYPE)
 
@@ -78,8 +184,8 @@ _OBSTACLELONDECISION_TYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=1047,
-  serialized_end=1090,
+  serialized_start=1084,
+  serialized_end=1127,
 )
 _sym_db.RegisterEnumDescriptor(_OBSTACLELONDECISION_TYPE)
 
@@ -104,8 +210,8 @@ _OBSTACLELATDECISION_TYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=1254,
-  serialized_end=1293,
+  serialized_start=1291,
+  serialized_end=1330,
 )
 _sym_db.RegisterEnumDescriptor(_OBSTACLELATDECISION_TYPE)
 
@@ -267,6 +373,13 @@ _PATHPOINT = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='center_vcs', full_name='prediction.PathPoint.center_vcs', index=11,
+      number=12, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -280,7 +393,7 @@ _PATHPOINT = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=216,
-  serialized_end=421,
+  serialized_end=458,
 )
 
 
@@ -324,8 +437,8 @@ _TRAJECTORY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=423,
-  serialized_end=527,
+  serialized_start=460,
+  serialized_end=564,
 )
 
 
@@ -362,8 +475,8 @@ _TRAJECTORIES = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=529,
-  serialized_end=637,
+  serialized_start=566,
+  serialized_end=674,
 )
 
 
@@ -422,8 +535,8 @@ _OBSTACLEINTENT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=640,
-  serialized_end=879,
+  serialized_start=677,
+  serialized_end=916,
 )
 
 
@@ -475,8 +588,8 @@ _OBSTACLELONDECISION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=882,
-  serialized_end=1090,
+  serialized_start=919,
+  serialized_end=1127,
 )
 
 
@@ -528,8 +641,8 @@ _OBSTACLELATDECISION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1093,
-  serialized_end=1293,
+  serialized_start=1130,
+  serialized_end=1330,
 )
 
 
@@ -566,8 +679,8 @@ _OBSTACLEDECISION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1295,
-  serialized_end=1421,
+  serialized_start=1332,
+  serialized_end=1458,
 )
 
 
@@ -627,6 +740,27 @@ _PREDICTIONOBJECT = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='pcpt_age', full_name='prediction.PredictionObject.pcpt_age', index=7,
+      number=8, type=5, cpp_type=1, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='pcpt_center_utm', full_name='prediction.PredictionObject.pcpt_center_utm', index=8,
+      number=9, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='pcpt_center_vcs', full_name='prediction.PredictionObject.pcpt_center_vcs', index=9,
+      number=10, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -639,8 +773,8 @@ _PREDICTIONOBJECT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1424,
-  serialized_end=1668,
+  serialized_start=1461,
+  serialized_end=1807,
 )
 
 
@@ -677,8 +811,8 @@ _PREDICTIONOBJECTS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1670,
-  serialized_end=1777,
+  serialized_start=1809,
+  serialized_end=1916,
 )
 
 
@@ -729,8 +863,8 @@ _MTRAJECTORY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1780,
-  serialized_end=1952,
+  serialized_start=1919,
+  serialized_end=2091,
 )
 
 
@@ -809,8 +943,8 @@ _MPREDICTIONOBJECT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1955,
-  serialized_end=2175,
+  serialized_start=2094,
+  serialized_end=2314,
 )
 
 
@@ -847,8 +981,8 @@ _MTRAJECTORYAPP = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2177,
-  serialized_end=2269,
+  serialized_start=2316,
+  serialized_end=2408,
 )
 
 
@@ -906,8 +1040,8 @@ _MPREDICTIONOBJECTAPP = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2272,
-  serialized_end=2422,
+  serialized_start=2411,
+  serialized_end=2561,
 )
 
 
@@ -979,11 +1113,300 @@ _MPREDICTIONOBJECTS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2425,
-  serialized_end=2646,
+  serialized_start=2564,
+  serialized_end=2785,
+)
+
+
+_TRAJECTORYMETRICS = _descriptor.Descriptor(
+  name='TrajectoryMetrics',
+  full_name='prediction.TrajectoryMetrics',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='ade_3s', full_name='prediction.TrajectoryMetrics.ade_3s', index=0,
+      number=1, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='fde_3s', full_name='prediction.TrajectoryMetrics.fde_3s', index=1,
+      number=2, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='ade_5s', full_name='prediction.TrajectoryMetrics.ade_5s', index=2,
+      number=3, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='fde_5s', full_name='prediction.TrajectoryMetrics.fde_5s', index=3,
+      number=4, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='ade_8s', full_name='prediction.TrajectoryMetrics.ade_8s', index=4,
+      number=5, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='fde_8s', full_name='prediction.TrajectoryMetrics.fde_8s', index=5,
+      number=6, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=2787,
+  serialized_end=2902,
+)
+
+
+_INTENTMETRICS = _descriptor.Descriptor(
+  name='IntentMetrics',
+  full_name='prediction.IntentMetrics',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='predicted_intent', full_name='prediction.IntentMetrics.predicted_intent', index=0,
+      number=1, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='gt_intent', full_name='prediction.IntentMetrics.gt_intent', index=1,
+      number=2, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='probability', full_name='prediction.IntentMetrics.probability', index=2,
+      number=3, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='correct', full_name='prediction.IntentMetrics.correct', index=3,
+      number=4, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=2905,
+  serialized_end=3051,
+)
+
+
+_OBJECTPREDICTIONMETRICS = _descriptor.Descriptor(
+  name='ObjectPredictionMetrics',
+  full_name='prediction.ObjectPredictionMetrics',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='object_id', full_name='prediction.ObjectPredictionMetrics.object_id', index=0,
+      number=1, type=3, cpp_type=2, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='object_type', full_name='prediction.ObjectPredictionMetrics.object_type', index=1,
+      number=2, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='trajectory', full_name='prediction.ObjectPredictionMetrics.trajectory', index=2,
+      number=3, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='intent', full_name='prediction.ObjectPredictionMetrics.intent', index=3,
+      number=4, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=3054,
+  serialized_end=3247,
+)
+
+
+_AGGREGATEDTRAJECTORYMETRICS = _descriptor.Descriptor(
+  name='AggregatedTrajectoryMetrics',
+  full_name='prediction.AggregatedTrajectoryMetrics',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='object_count', full_name='prediction.AggregatedTrajectoryMetrics.object_count', index=0,
+      number=1, type=13, cpp_type=3, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='ade_3s_mean', full_name='prediction.AggregatedTrajectoryMetrics.ade_3s_mean', index=1,
+      number=2, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='fde_3s_mean', full_name='prediction.AggregatedTrajectoryMetrics.fde_3s_mean', index=2,
+      number=3, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='ade_5s_mean', full_name='prediction.AggregatedTrajectoryMetrics.ade_5s_mean', index=3,
+      number=4, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='fde_5s_mean', full_name='prediction.AggregatedTrajectoryMetrics.fde_5s_mean', index=4,
+      number=5, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='ade_8s_mean', full_name='prediction.AggregatedTrajectoryMetrics.ade_8s_mean', index=5,
+      number=6, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='fde_8s_mean', full_name='prediction.AggregatedTrajectoryMetrics.fde_8s_mean', index=6,
+      number=7, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=3250,
+  serialized_end=3427,
+)
+
+
+_PREDICTIONONLINEMETRICS = _descriptor.Descriptor(
+  name='PredictionOnlineMetrics',
+  full_name='prediction.PredictionOnlineMetrics',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='header', full_name='prediction.PredictionOnlineMetrics.header', index=0,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='object_metrics', full_name='prediction.PredictionOnlineMetrics.object_metrics', index=1,
+      number=2, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='aggregated_trajectory', full_name='prediction.PredictionOnlineMetrics.aggregated_trajectory', index=2,
+      number=3, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=3430,
+  serialized_end=3620,
 )
 
 _PATHPOINT.fields_by_name['gaussian_info'].message_type = _GAUSSIANINFO
+_PATHPOINT.fields_by_name['center_vcs'].message_type = geometry__pb2._POINT
 _TRAJECTORY.fields_by_name['path_point'].message_type = _PATHPOINT
 _TRAJECTORIES.fields_by_name['cutin_trajectory'].message_type = _TRAJECTORY
 _TRAJECTORIES.fields_by_name['trajectory'].message_type = _TRAJECTORY
@@ -999,6 +1422,8 @@ _PREDICTIONOBJECT.fields_by_name['shape'].message_type = geometry__pb2._VECTOR3
 _PREDICTIONOBJECT.fields_by_name['trajectories'].message_type = _TRAJECTORIES
 _PREDICTIONOBJECT.fields_by_name['intent'].message_type = _OBSTACLEINTENT
 _PREDICTIONOBJECT.fields_by_name['decision'].message_type = _OBSTACLEDECISION
+_PREDICTIONOBJECT.fields_by_name['pcpt_center_utm'].message_type = geometry__pb2._POINT
+_PREDICTIONOBJECT.fields_by_name['pcpt_center_vcs'].message_type = geometry__pb2._POINT
 _PREDICTIONOBJECTS.fields_by_name['header'].message_type = header__pb2._HEADER
 _PREDICTIONOBJECTS.fields_by_name['predictionObject'].message_type = _PREDICTIONOBJECT
 _MTRAJECTORY.fields_by_name['prediction_trajectory'].message_type = geometry__pb2._POINT
@@ -1011,6 +1436,14 @@ _MPREDICTIONOBJECTAPP.fields_by_name['prediction_trajectory'].message_type = _MT
 _MPREDICTIONOBJECTS.fields_by_name['header'].message_type = header__pb2._HEADER
 _MPREDICTIONOBJECTS.fields_by_name['objs'].message_type = _MPREDICTIONOBJECT
 _MPREDICTIONOBJECTS.fields_by_name['objs_app'].message_type = _MPREDICTIONOBJECTAPP
+_INTENTMETRICS.fields_by_name['predicted_intent'].enum_type = _INTENTTYPE
+_INTENTMETRICS.fields_by_name['gt_intent'].enum_type = _INTENTTYPE
+_OBJECTPREDICTIONMETRICS.fields_by_name['object_type'].enum_type = _PREDICTIONOBJECTTYPE
+_OBJECTPREDICTIONMETRICS.fields_by_name['trajectory'].message_type = _TRAJECTORYMETRICS
+_OBJECTPREDICTIONMETRICS.fields_by_name['intent'].message_type = _INTENTMETRICS
+_PREDICTIONONLINEMETRICS.fields_by_name['header'].message_type = header__pb2._HEADER
+_PREDICTIONONLINEMETRICS.fields_by_name['object_metrics'].message_type = _OBJECTPREDICTIONMETRICS
+_PREDICTIONONLINEMETRICS.fields_by_name['aggregated_trajectory'].message_type = _AGGREGATEDTRAJECTORYMETRICS
 DESCRIPTOR.message_types_by_name['GaussianInfo'] = _GAUSSIANINFO
 DESCRIPTOR.message_types_by_name['PathPoint'] = _PATHPOINT
 DESCRIPTOR.message_types_by_name['Trajectory'] = _TRAJECTORY
@@ -1026,6 +1459,13 @@ DESCRIPTOR.message_types_by_name['mPredictionObject'] = _MPREDICTIONOBJECT
 DESCRIPTOR.message_types_by_name['mTrajectoryApp'] = _MTRAJECTORYAPP
 DESCRIPTOR.message_types_by_name['mPredictionObjectApp'] = _MPREDICTIONOBJECTAPP
 DESCRIPTOR.message_types_by_name['mPredictionObjects'] = _MPREDICTIONOBJECTS
+DESCRIPTOR.message_types_by_name['TrajectoryMetrics'] = _TRAJECTORYMETRICS
+DESCRIPTOR.message_types_by_name['IntentMetrics'] = _INTENTMETRICS
+DESCRIPTOR.message_types_by_name['ObjectPredictionMetrics'] = _OBJECTPREDICTIONMETRICS
+DESCRIPTOR.message_types_by_name['AggregatedTrajectoryMetrics'] = _AGGREGATEDTRAJECTORYMETRICS
+DESCRIPTOR.message_types_by_name['PredictionOnlineMetrics'] = _PREDICTIONONLINEMETRICS
+DESCRIPTOR.enum_types_by_name['IntentType'] = _INTENTTYPE
+DESCRIPTOR.enum_types_by_name['PredictionObjectType'] = _PREDICTIONOBJECTTYPE
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 GaussianInfo = _reflection.GeneratedProtocolMessageType('GaussianInfo', (_message.Message,), dict(
@@ -1132,6 +1572,41 @@ mPredictionObjects = _reflection.GeneratedProtocolMessageType('mPredictionObject
   # @@protoc_insertion_point(class_scope:prediction.mPredictionObjects)
   ))
 _sym_db.RegisterMessage(mPredictionObjects)
+
+TrajectoryMetrics = _reflection.GeneratedProtocolMessageType('TrajectoryMetrics', (_message.Message,), dict(
+  DESCRIPTOR = _TRAJECTORYMETRICS,
+  __module__ = 'prediction_pb2'
+  # @@protoc_insertion_point(class_scope:prediction.TrajectoryMetrics)
+  ))
+_sym_db.RegisterMessage(TrajectoryMetrics)
+
+IntentMetrics = _reflection.GeneratedProtocolMessageType('IntentMetrics', (_message.Message,), dict(
+  DESCRIPTOR = _INTENTMETRICS,
+  __module__ = 'prediction_pb2'
+  # @@protoc_insertion_point(class_scope:prediction.IntentMetrics)
+  ))
+_sym_db.RegisterMessage(IntentMetrics)
+
+ObjectPredictionMetrics = _reflection.GeneratedProtocolMessageType('ObjectPredictionMetrics', (_message.Message,), dict(
+  DESCRIPTOR = _OBJECTPREDICTIONMETRICS,
+  __module__ = 'prediction_pb2'
+  # @@protoc_insertion_point(class_scope:prediction.ObjectPredictionMetrics)
+  ))
+_sym_db.RegisterMessage(ObjectPredictionMetrics)
+
+AggregatedTrajectoryMetrics = _reflection.GeneratedProtocolMessageType('AggregatedTrajectoryMetrics', (_message.Message,), dict(
+  DESCRIPTOR = _AGGREGATEDTRAJECTORYMETRICS,
+  __module__ = 'prediction_pb2'
+  # @@protoc_insertion_point(class_scope:prediction.AggregatedTrajectoryMetrics)
+  ))
+_sym_db.RegisterMessage(AggregatedTrajectoryMetrics)
+
+PredictionOnlineMetrics = _reflection.GeneratedProtocolMessageType('PredictionOnlineMetrics', (_message.Message,), dict(
+  DESCRIPTOR = _PREDICTIONONLINEMETRICS,
+  __module__ = 'prediction_pb2'
+  # @@protoc_insertion_point(class_scope:prediction.PredictionOnlineMetrics)
+  ))
+_sym_db.RegisterMessage(PredictionOnlineMetrics)
 
 
 # @@protoc_insertion_point(module_scope)

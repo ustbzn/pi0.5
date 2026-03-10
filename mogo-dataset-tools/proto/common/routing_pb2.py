@@ -23,7 +23,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='hadmap',
   syntax='proto2',
   serialized_options=None,
-  serialized_pb=_b('\n\rrouting.proto\x12\x06hadmap\x1a\x0egeometry.proto\x1a\x0cheader.proto\x1a\x0chadmap.proto\"d\n\x0fGlobalTrajState\x12\x0f\n\x07line_id\x18\x01 \x02(\x04\x12\x0f\n\x07md5_sum\x18\x02 \x02(\t\x12\r\n\x05is_ok\x18\x03 \x02(\x08\x12\x0e\n\x06reason\x18\x04 \x01(\t\x12\x10\n\x08order_id\x18\x05 \x01(\t\"E\n\x12StartPilotResponse\x12\x0f\n\x07line_id\x18\x01 \x01(\x04\x12\x0e\n\x06status\x18\x02 \x01(\x05\x12\x0e\n\x06reason\x18\x03 \x01(\t\"\x86\x01\n\x08Waypoint\x12\n\n\x02id\x18\x01 \x01(\t\x12\t\n\x01s\x18\x02 \x01(\x01\x12\x1d\n\x04pose\x18\x03 \x01(\x0b\x32\x0f.geometry.Point\x12\r\n\x05theta\x18\x04 \x01(\x01\x12\x0f\n\x07station\x18\x05 \x01(\x08\x12$\n\x0bpos_lon_lat\x18\x06 \x01(\x0b\x32\x0f.geometry.Point\"\xba\x04\n\x0eRoutingRequest\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x0b\n\x03map\x18\x02 \x01(\t\x12\x0f\n\x07\x66\x65\x61ture\x18\x03 \x01(\t\x12\x1f\n\x05start\x18\x04 \x01(\x0b\x32\x10.hadmap.Waypoint\x12\x1d\n\x03\x65nd\x18\x05 \x01(\x0b\x32\x10.hadmap.Waypoint\x12\"\n\x08waypoint\x18\x06 \x03(\x0b\x32\x10.hadmap.Waypoint\x12\x12\n\nspeedlimit\x18\x07 \x01(\x01\x12\x11\n\tstartName\x18\x08 \x01(\t\x12\x0f\n\x07\x65ndName\x18\t \x01(\t\x12\x13\n\x0bvehicleType\x18\n \x01(\x05\x12\x13\n\x0b\x62us_routeid\x18\x0b \x01(\r\x12\x15\n\rbus_routename\x18\x0c \x01(\t\x12\x0e\n\x06lineid\x18\r \x01(\x04\x12\x12\n\x04\x64pqp\x18\x0e \x01(\x08:\x04true\x12\x1c\n\rexist_xy_flag\x18\x0f \x01(\x08:\x05\x66\x61lse\x12$\n\x0bstart_point\x18\x10 \x01(\x0b\x32\x0f.geometry.Point\x12\"\n\tend_point\x18\x11 \x01(\x0b\x32\x0f.geometry.Point\x12\x10\n\x08traj_md5\x18\x12 \x01(\t\x12&\n\x0c\x62lack_points\x18\x14 \x03(\x0b\x32\x10.hadmap.Waypoint\x12\x17\n\x0fstation_request\x18\x15 \x01(\x08\x12\x1c\n\x14\x66irst_autopilot_flag\x18\x16 \x01(\x08\x12\x10\n\x08order_id\x18\x17 \x01(\t\"\xd5\x01\n\tRouteLane\x12\x11\n\troad_pkid\x18\x01 \x01(\x04\x12\x12\n\nsection_id\x18\x02 \x01(\r\x12\x0f\n\x07lane_id\x18\x03 \x01(\x05\x12\x0c\n\x04name\x18\x04 \x01(\t\x12\x13\n\x0bspeed_limit\x18\x05 \x01(\r\x12\x13\n\x0brecommended\x18\x06 \x01(\x08\x12\x0c\n\x04rank\x18\x07 \x01(\x05\x12\x14\n\x0cpassable_dis\x18\x08 \x01(\x01\x12\x1f\n\x06points\x18\t \x03(\x0b\x32\x0f.geometry.Point\x12\x13\n\x0b\x64is_to_goal\x18\n \x01(\x01\"<\n\x0cRouteSection\x12\n\n\x02id\x18\x01 \x01(\r\x12 \n\x05lanes\x18\x02 \x03(\x0b\x32\x11.hadmap.RouteLane\"\x95\x01\n\tRouteRoad\x12\x0c\n\x04pkid\x18\x01 \x01(\x04\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06length\x18\x03 \x01(\x02\x12\x13\n\x0bsection_num\x18\x04 \x01(\r\x12\x1f\n\x06points\x18\x05 \x03(\x0b\x32\x0f.geometry.Point\x12&\n\x08sections\x18\x06 \x03(\x0b\x32\x14.hadmap.RouteSection\"\xc2\x01\n\tRouteLink\x12\x0c\n\x04pkid\x18\x01 \x01(\x04\x12\x16\n\x0e\x66rom_road_pkid\x18\x02 \x01(\x04\x12\x17\n\x0f\x66rom_section_id\x18\x03 \x01(\r\x12\x14\n\x0c\x66rom_lane_id\x18\x04 \x01(\x05\x12\x14\n\x0cto_road_pkid\x18\x05 \x01(\x04\x12\x15\n\rto_section_id\x18\x06 \x01(\r\x12\x12\n\nto_lane_id\x18\x07 \x01(\x05\x12\x1f\n\x06points\x18\x08 \x03(\x0b\x32\x0f.geometry.Point\"X\n\rRouteRoadLink\x12 \n\nroute_road\x18\x01 \x01(\x0b\x32\x0c.hadmap.Road\x12%\n\x0broute_links\x18\x02 \x03(\x0b\x32\x10.hadmap.LaneLink\"\xc0\x01\n\tRoutePath\x12\x10\n\x08\x64istance\x18\x01 \x01(\x01\x12\x0c\n\x04time\x18\x02 \x01(\x01\x12\x13\n\x0bmin_weights\x18\x03 \x01(\r\x12&\n\x0broute_roads\x18\x04 \x03(\x0b\x32\x11.hadmap.RouteRoad\x12&\n\x0broute_links\x18\x05 \x03(\x0b\x32\x11.hadmap.RouteLink\x12.\n\x0froute_roadlinks\x18\x06 \x03(\x0b\x32\x15.hadmap.RouteRoadLink\"\xf4\x01\n\rRoutingResult\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x0f\n\x07version\x18\x02 \x01(\t\x12+\n\x0broute_state\x18\x03 \x01(\x0e\x32\x16.hadmap.LoadRouteState\x12\x1f\n\x05start\x18\x04 \x01(\x0b\x32\x10.hadmap.Waypoint\x12\x1d\n\x03\x65nd\x18\x05 \x01(\x0b\x32\x10.hadmap.Waypoint\x12#\n\twaypoints\x18\x06 \x03(\x0b\x32\x10.hadmap.Waypoint\x12 \n\x05paths\x18\x07 \x03(\x0b\x32\x11.hadmap.RoutePath*y\n\x0eLoadRouteState\x12\x12\n\x0eLoad_file_Succ\x10\x00\x12\x12\n\x0eLoad_file_Fail\x10\x01\x12\x15\n\x11Load_file_Unknown\x10\x02\x12\x0b\n\x07RP_Succ\x10\x03\x12\x0b\n\x07RP_Fail\x10\x04\x12\x0e\n\nRP_Unknown\x10\x05')
+  serialized_pb=_b('\n\rrouting.proto\x12\x06hadmap\x1a\x0egeometry.proto\x1a\x0cheader.proto\x1a\x0chadmap.proto\"}\n\x0fGlobalTrajState\x12\x0f\n\x07line_id\x18\x01 \x02(\x04\x12\x0f\n\x07md5_sum\x18\x02 \x02(\t\x12\r\n\x05is_ok\x18\x03 \x02(\x08\x12\x0e\n\x06reason\x18\x04 \x01(\t\x12\x10\n\x08order_id\x18\x05 \x01(\t\x12\x17\n\x0funready_reasons\x18\x06 \x03(\r\"E\n\x12StartPilotResponse\x12\x0f\n\x07line_id\x18\x01 \x01(\x04\x12\x0e\n\x06status\x18\x02 \x01(\x05\x12\x0e\n\x06reason\x18\x03 \x01(\t\"\x86\x01\n\x08Waypoint\x12\n\n\x02id\x18\x01 \x01(\t\x12\t\n\x01s\x18\x02 \x01(\x01\x12\x1d\n\x04pose\x18\x03 \x01(\x0b\x32\x0f.geometry.Point\x12\r\n\x05theta\x18\x04 \x01(\x01\x12\x0f\n\x07station\x18\x05 \x01(\x08\x12$\n\x0bpos_lon_lat\x18\x06 \x01(\x0b\x32\x0f.geometry.Point\"\xd2\x04\n\x0eRoutingRequest\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x0b\n\x03map\x18\x02 \x01(\t\x12\x0f\n\x07\x66\x65\x61ture\x18\x03 \x01(\t\x12\x1f\n\x05start\x18\x04 \x01(\x0b\x32\x10.hadmap.Waypoint\x12\x1d\n\x03\x65nd\x18\x05 \x01(\x0b\x32\x10.hadmap.Waypoint\x12\"\n\x08waypoint\x18\x06 \x03(\x0b\x32\x10.hadmap.Waypoint\x12\x12\n\nspeedlimit\x18\x07 \x01(\x01\x12\x11\n\tstartName\x18\x08 \x01(\t\x12\x0f\n\x07\x65ndName\x18\t \x01(\t\x12\x13\n\x0bvehicleType\x18\n \x01(\x05\x12\x13\n\x0b\x62us_routeid\x18\x0b \x01(\r\x12\x15\n\rbus_routename\x18\x0c \x01(\t\x12\x0e\n\x06lineid\x18\r \x01(\x04\x12\x12\n\x04\x64pqp\x18\x0e \x01(\x08:\x04true\x12\x1c\n\rexist_xy_flag\x18\x0f \x01(\x08:\x05\x66\x61lse\x12$\n\x0bstart_point\x18\x10 \x01(\x0b\x32\x0f.geometry.Point\x12\"\n\tend_point\x18\x11 \x01(\x0b\x32\x0f.geometry.Point\x12\x10\n\x08traj_md5\x18\x12 \x01(\t\x12&\n\x0c\x62lack_points\x18\x14 \x03(\x0b\x32\x10.hadmap.Waypoint\x12\x17\n\x0fstation_request\x18\x15 \x01(\x08\x12\x1c\n\x14\x66irst_autopilot_flag\x18\x16 \x01(\x08\x12\x10\n\x08order_id\x18\x17 \x01(\t\x12\x16\n\x0estart_pos_type\x18\x18 \x01(\x05\"\xd5\x01\n\tRouteLane\x12\x11\n\troad_pkid\x18\x01 \x01(\x04\x12\x12\n\nsection_id\x18\x02 \x01(\r\x12\x0f\n\x07lane_id\x18\x03 \x01(\x05\x12\x0c\n\x04name\x18\x04 \x01(\t\x12\x13\n\x0bspeed_limit\x18\x05 \x01(\r\x12\x13\n\x0brecommended\x18\x06 \x01(\x08\x12\x0c\n\x04rank\x18\x07 \x01(\x05\x12\x14\n\x0cpassable_dis\x18\x08 \x01(\x01\x12\x1f\n\x06points\x18\t \x03(\x0b\x32\x0f.geometry.Point\x12\x13\n\x0b\x64is_to_goal\x18\n \x01(\x01\"<\n\x0cRouteSection\x12\n\n\x02id\x18\x01 \x01(\r\x12 \n\x05lanes\x18\x02 \x03(\x0b\x32\x11.hadmap.RouteLane\"\x95\x01\n\tRouteRoad\x12\x0c\n\x04pkid\x18\x01 \x01(\x04\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06length\x18\x03 \x01(\x02\x12\x13\n\x0bsection_num\x18\x04 \x01(\r\x12\x1f\n\x06points\x18\x05 \x03(\x0b\x32\x0f.geometry.Point\x12&\n\x08sections\x18\x06 \x03(\x0b\x32\x14.hadmap.RouteSection\"\xc2\x01\n\tRouteLink\x12\x0c\n\x04pkid\x18\x01 \x01(\x04\x12\x16\n\x0e\x66rom_road_pkid\x18\x02 \x01(\x04\x12\x17\n\x0f\x66rom_section_id\x18\x03 \x01(\r\x12\x14\n\x0c\x66rom_lane_id\x18\x04 \x01(\x05\x12\x14\n\x0cto_road_pkid\x18\x05 \x01(\x04\x12\x15\n\rto_section_id\x18\x06 \x01(\r\x12\x12\n\nto_lane_id\x18\x07 \x01(\x05\x12\x1f\n\x06points\x18\x08 \x03(\x0b\x32\x0f.geometry.Point\"X\n\rRouteRoadLink\x12 \n\nroute_road\x18\x01 \x01(\x0b\x32\x0c.hadmap.Road\x12%\n\x0broute_links\x18\x02 \x03(\x0b\x32\x10.hadmap.LaneLink\"\xc0\x01\n\tRoutePath\x12\x10\n\x08\x64istance\x18\x01 \x01(\x01\x12\x0c\n\x04time\x18\x02 \x01(\x01\x12\x13\n\x0bmin_weights\x18\x03 \x01(\r\x12&\n\x0broute_roads\x18\x04 \x03(\x0b\x32\x11.hadmap.RouteRoad\x12&\n\x0broute_links\x18\x05 \x03(\x0b\x32\x11.hadmap.RouteLink\x12.\n\x0froute_roadlinks\x18\x06 \x03(\x0b\x32\x15.hadmap.RouteRoadLink\"\xf4\x01\n\rRoutingResult\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x0f\n\x07version\x18\x02 \x01(\t\x12+\n\x0broute_state\x18\x03 \x01(\x0e\x32\x16.hadmap.LoadRouteState\x12\x1f\n\x05start\x18\x04 \x01(\x0b\x32\x10.hadmap.Waypoint\x12\x1d\n\x03\x65nd\x18\x05 \x01(\x0b\x32\x10.hadmap.Waypoint\x12#\n\twaypoints\x18\x06 \x03(\x0b\x32\x10.hadmap.Waypoint\x12 \n\x05paths\x18\x07 \x03(\x0b\x32\x11.hadmap.RoutePath*y\n\x0eLoadRouteState\x12\x12\n\x0eLoad_file_Succ\x10\x00\x12\x12\n\x0eLoad_file_Fail\x10\x01\x12\x15\n\x11Load_file_Unknown\x10\x02\x12\x0b\n\x07RP_Succ\x10\x03\x12\x0b\n\x07RP_Fail\x10\x04\x12\x0e\n\nRP_Unknown\x10\x05')
   ,
   dependencies=[geometry__pb2.DESCRIPTOR,header__pb2.DESCRIPTOR,hadmap__pb2.DESCRIPTOR,])
 
@@ -60,8 +60,8 @@ _LOADROUTESTATE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=2111,
-  serialized_end=2232,
+  serialized_start=2160,
+  serialized_end=2281,
 )
 _sym_db.RegisterEnumDescriptor(_LOADROUTESTATE)
 
@@ -117,6 +117,13 @@ _GLOBALTRAJSTATE = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='unready_reasons', full_name='hadmap.GlobalTrajState.unready_reasons', index=5,
+      number=6, type=13, cpp_type=3, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -130,7 +137,7 @@ _GLOBALTRAJSTATE = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=69,
-  serialized_end=169,
+  serialized_end=194,
 )
 
 
@@ -174,8 +181,8 @@ _STARTPILOTRESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=171,
-  serialized_end=240,
+  serialized_start=196,
+  serialized_end=265,
 )
 
 
@@ -240,8 +247,8 @@ _WAYPOINT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=243,
-  serialized_end=377,
+  serialized_start=268,
+  serialized_end=402,
 )
 
 
@@ -406,6 +413,13 @@ _ROUTINGREQUEST = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='start_pos_type', full_name='hadmap.RoutingRequest.start_pos_type', index=22,
+      number=24, type=5, cpp_type=1, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -418,8 +432,8 @@ _ROUTINGREQUEST = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=380,
-  serialized_end=950,
+  serialized_start=405,
+  serialized_end=999,
 )
 
 
@@ -512,8 +526,8 @@ _ROUTELANE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=953,
-  serialized_end=1166,
+  serialized_start=1002,
+  serialized_end=1215,
 )
 
 
@@ -550,8 +564,8 @@ _ROUTESECTION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1168,
-  serialized_end=1228,
+  serialized_start=1217,
+  serialized_end=1277,
 )
 
 
@@ -616,8 +630,8 @@ _ROUTEROAD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1231,
-  serialized_end=1380,
+  serialized_start=1280,
+  serialized_end=1429,
 )
 
 
@@ -696,8 +710,8 @@ _ROUTELINK = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1383,
-  serialized_end=1577,
+  serialized_start=1432,
+  serialized_end=1626,
 )
 
 
@@ -734,8 +748,8 @@ _ROUTEROADLINK = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1579,
-  serialized_end=1667,
+  serialized_start=1628,
+  serialized_end=1716,
 )
 
 
@@ -800,8 +814,8 @@ _ROUTEPATH = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1670,
-  serialized_end=1862,
+  serialized_start=1719,
+  serialized_end=1911,
 )
 
 
@@ -873,8 +887,8 @@ _ROUTINGRESULT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1865,
-  serialized_end=2109,
+  serialized_start=1914,
+  serialized_end=2158,
 )
 
 _WAYPOINT.fields_by_name['pose'].message_type = geometry__pb2._POINT

@@ -21,7 +21,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='perception.base',
   syntax='proto2',
   serialized_options=None,
-  serialized_pb=_b('\n\x11sensor_meta.proto\x12\x0fperception.base\x1a\x0egeometry.proto\"[\n\tExtrinsic\x12&\n\x0btranslation\x18\x01 \x01(\x0b\x32\x11.geometry.Point3D\x12&\n\x08rotation\x18\x02 \x01(\x0b\x32\x14.geometry.Quaternion\":\n\tIntrinsic\x12\r\n\x05width\x18\x01 \x01(\x05\x12\x0e\n\x06height\x18\x02 \x01(\x05\x12\x0e\n\x06matrix\x18\x03 \x03(\x01\"R\n\x10RegisteredSensor\x12\x30\n\x0bsensor_info\x18\x01 \x03(\x0b\x32\x1b.perception.base.SensorInfo\x12\x0c\n\x04\x62\x61se\x18\x02 \x01(\t\"#\n\tDistcoeff\x12\x16\n\x0e\x64istort_matrix\x18\x01 \x03(\x01\"\x14\n\x02Xi\x12\x0e\n\x06matrix\x18\x01 \x03(\x01\"\xe7\x02\n\nSensorInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12>\n\x04type\x18\x02 \x01(\x0e\x32\x1b.perception.base.SensorType:\x13UNKNOWN_SENSOR_TYPE\x12>\n\x0borientation\x18\x03 \x01(\x0e\x32\".perception.base.SensorOrientation:\x05\x46RONT\x12\r\n\x05topic\x18\x04 \x01(\t\x12\x0e\n\x06\x64\x65vice\x18\x05 \x01(\t\x12-\n\textrinsic\x18\x06 \x01(\x0b\x32\x1a.perception.base.Extrinsic\x12-\n\tintrinsic\x18\x07 \x01(\x0b\x32\x1a.perception.base.Intrinsic\x12-\n\tdistcoeff\x18\x08 \x01(\x0b\x32\x1a.perception.base.Distcoeff\x12\x1f\n\x02xi\x18\t \x01(\x0b\x32\x13.perception.base.Xi*\xef\x04\n\nSensorType\x12 \n\x13UNKNOWN_SENSOR_TYPE\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01\x12\x08\n\x04GNSS\x10\x00\x12\x0e\n\nCAMERA_6MM\x10\x01\x12\x0f\n\x0b\x43\x41MERA_12MM\x10\x02\x12\x0c\n\x08\x43T_RADAR\x10\x03\x12\x0f\n\x0bLSLIDAR_C16\x10\x04\x12\x0f\n\x0bLSLIDAR_C32\x10\x05\x12\x0e\n\nLSLIDAR_CH\x10\x06\x12\x11\n\rLIVOX_HORIZON\x10\x07\x12\x0e\n\nHESAI_XT32\x10\x08\x12\x0f\n\x0bVELODYNE_64\x10\t\x12\x0e\n\nSENSING_30\x10\n\x12\x0e\n\nSENSING_60\x10\x0b\x12\x0f\n\x0bSENSING_120\x10\x0c\x12\r\n\tHESAI_128\x10\r\x12\x0e\n\nRSLIDAR_80\x10\x0e\x12\x16\n\x12\x43ONTI_RADAR_ARS408\x10\x0f\x12\x16\n\x12\x43ONTI_RADAR_SRR308\x10\x10\x12\x07\n\x03V2X\x10\x12\x12\x0b\n\x07OBU_RSM\x10\x13\x12\t\n\x05VIDAR\x10\x14\x12\x11\n\rCAMERA_6MM_3d\x10\x15\x12\x12\n\x0e\x43\x41MERA_12MM_3d\x10\x16\x12\x11\n\rSENSING_30_3d\x10\x17\x12\x11\n\rSENSING_60_3d\x10\x18\x12\x12\n\x0eSENSING_120_3d\x10\x19\x12\x0f\n\x0bRSLIDAR_SM1\x10\x1a\x12\x10\n\x0cZVISIONLIDAR\x10\x1e\x12\x0e\n\nRSLIDAR_M1\x10\x1f\x12\x1b\n\x17INNOVUSION_FALCON_LIDAR\x10 \x12\x12\n\x0eRSLIDAR_HELIOS\x10!\x12\x0f\n\x0bSENSING_190\x10\"\x12\x10\n\x0cHESAI_AT_128\x10#\x12\x17\n\x13LGRX_RADAR_ASRR403T\x10$*\xe2\x01\n\x11SensorOrientation\x12\t\n\x05\x46RONT\x10\x00\x12\x10\n\x0cLEFT_FORWARD\x10\x01\x12\x08\n\x04LEFT\x10\x02\x12\x11\n\rLEFT_BACKWARD\x10\x03\x12\x08\n\x04REAR\x10\x04\x12\x12\n\x0eRIGHT_BACKWARD\x10\x05\x12\t\n\x05RIGHT\x10\x06\x12\x11\n\rRIGHT_FORWARD\x10\x07\x12\r\n\tPANORAMIC\x10\x08\x12\n\n\x06MIDDLE\x10\t\x12\x0e\n\nFRONT_DOWN\x10\n\x12\r\n\tLEFT_DOWN\x10\x0b\x12\x0e\n\nRIGHT_DOWN\x10\x0c\x12\r\n\tREAR_DOWN\x10\r')
+  serialized_pb=_b('\n\x11sensor_meta.proto\x12\x0fperception.base\x1a\x0egeometry.proto\"4\n\rMountPosition\x12\t\n\x01x\x18\x01 \x01(\x01\x12\t\n\x01y\x18\x02 \x01(\x01\x12\r\n\x05\x61ngle\x18\x03 \x01(\x01\"\xb2\x02\n\x05Mount\x12-\n\x05right\x18\x01 \x01(\x0b\x32\x1e.perception.base.MountPosition\x12,\n\x04left\x18\x02 \x01(\x0b\x32\x1e.perception.base.MountPosition\x12\x33\n\x0brightMiddle\x18\x03 \x01(\x0b\x32\x1e.perception.base.MountPosition\x12\x32\n\nleftMiddle\x18\x04 \x01(\x0b\x32\x1e.perception.base.MountPosition\x12\x30\n\x08leftSide\x18\x05 \x01(\x0b\x32\x1e.perception.base.MountPosition\x12\x31\n\trightSide\x18\x06 \x01(\x0b\x32\x1e.perception.base.MountPosition\"[\n\tExtrinsic\x12&\n\x0btranslation\x18\x01 \x01(\x0b\x32\x11.geometry.Point3D\x12&\n\x08rotation\x18\x02 \x01(\x0b\x32\x14.geometry.Quaternion\":\n\tIntrinsic\x12\r\n\x05width\x18\x01 \x01(\x05\x12\x0e\n\x06height\x18\x02 \x01(\x05\x12\x0e\n\x06matrix\x18\x03 \x03(\x01\"R\n\x10RegisteredSensor\x12\x30\n\x0bsensor_info\x18\x01 \x03(\x0b\x32\x1b.perception.base.SensorInfo\x12\x0c\n\x04\x62\x61se\x18\x02 \x01(\t\"#\n\tDistcoeff\x12\x16\n\x0e\x64istort_matrix\x18\x01 \x03(\x01\"\x14\n\x02Xi\x12\x0e\n\x06matrix\x18\x01 \x03(\x01\"\x8e\x03\n\nSensorInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12>\n\x04type\x18\x02 \x01(\x0e\x32\x1b.perception.base.SensorType:\x13UNKNOWN_SENSOR_TYPE\x12>\n\x0borientation\x18\x03 \x01(\x0e\x32\".perception.base.SensorOrientation:\x05\x46RONT\x12\r\n\x05topic\x18\x04 \x01(\t\x12\x0e\n\x06\x64\x65vice\x18\x05 \x01(\t\x12-\n\textrinsic\x18\x06 \x01(\x0b\x32\x1a.perception.base.Extrinsic\x12-\n\tintrinsic\x18\x07 \x01(\x0b\x32\x1a.perception.base.Intrinsic\x12-\n\tdistcoeff\x18\x08 \x01(\x0b\x32\x1a.perception.base.Distcoeff\x12\x1f\n\x02xi\x18\t \x01(\x0b\x32\x13.perception.base.Xi\x12%\n\x05mount\x18\n \x01(\x0b\x32\x16.perception.base.Mount*\x83\x05\n\nSensorType\x12 \n\x13UNKNOWN_SENSOR_TYPE\x10\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01\x12\x08\n\x04GNSS\x10\x00\x12\x0e\n\nCAMERA_6MM\x10\x01\x12\x0f\n\x0b\x43\x41MERA_12MM\x10\x02\x12\x0c\n\x08\x43T_RADAR\x10\x03\x12\x0f\n\x0bLSLIDAR_C16\x10\x04\x12\x0f\n\x0bLSLIDAR_C32\x10\x05\x12\x0e\n\nLSLIDAR_CH\x10\x06\x12\x11\n\rLIVOX_HORIZON\x10\x07\x12\x0e\n\nHESAI_XT32\x10\x08\x12\x0f\n\x0bVELODYNE_64\x10\t\x12\x0e\n\nSENSING_30\x10\n\x12\x0e\n\nSENSING_60\x10\x0b\x12\x0f\n\x0bSENSING_120\x10\x0c\x12\r\n\tHESAI_128\x10\r\x12\x0e\n\nRSLIDAR_80\x10\x0e\x12\x16\n\x12\x43ONTI_RADAR_ARS408\x10\x0f\x12\x16\n\x12\x43ONTI_RADAR_SRR308\x10\x10\x12\x07\n\x03V2X\x10\x12\x12\x0b\n\x07OBU_RSM\x10\x13\x12\t\n\x05VIDAR\x10\x14\x12\x11\n\rCAMERA_6MM_3d\x10\x15\x12\x12\n\x0e\x43\x41MERA_12MM_3d\x10\x16\x12\x11\n\rSENSING_30_3d\x10\x17\x12\x11\n\rSENSING_60_3d\x10\x18\x12\x12\n\x0eSENSING_120_3d\x10\x19\x12\x0f\n\x0bRSLIDAR_SM1\x10\x1a\x12\x10\n\x0cZVISIONLIDAR\x10\x1e\x12\x0e\n\nRSLIDAR_M1\x10\x1f\x12\x1b\n\x17INNOVUSION_FALCON_LIDAR\x10 \x12\x12\n\x0eRSLIDAR_HELIOS\x10!\x12\x0f\n\x0bSENSING_190\x10\"\x12\x10\n\x0cHESAI_AT_128\x10#\x12\x17\n\x13LGRX_RADAR_ASRR403T\x10$\x12\x12\n\x0eUDAS_ULT_RADAR\x10%*\xe2\x01\n\x11SensorOrientation\x12\t\n\x05\x46RONT\x10\x00\x12\x10\n\x0cLEFT_FORWARD\x10\x01\x12\x08\n\x04LEFT\x10\x02\x12\x11\n\rLEFT_BACKWARD\x10\x03\x12\x08\n\x04REAR\x10\x04\x12\x12\n\x0eRIGHT_BACKWARD\x10\x05\x12\t\n\x05RIGHT\x10\x06\x12\x11\n\rRIGHT_FORWARD\x10\x07\x12\r\n\tPANORAMIC\x10\x08\x12\n\n\x06MIDDLE\x10\t\x12\x0e\n\nFRONT_DOWN\x10\n\x12\r\n\tLEFT_DOWN\x10\x0b\x12\x0e\n\nRIGHT_DOWN\x10\x0c\x12\r\n\tREAR_DOWN\x10\r')
   ,
   dependencies=[geometry__pb2.DESCRIPTOR,])
 
@@ -167,11 +167,15 @@ _SENSORTYPE = _descriptor.EnumDescriptor(
       name='LGRX_RADAR_ASRR403T', index=33, number=36,
       serialized_options=None,
       type=None),
+    _descriptor.EnumValueDescriptor(
+      name='UDAS_ULT_RADAR', index=34, number=37,
+      serialized_options=None,
+      type=None),
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=713,
-  serialized_end=1336,
+  serialized_start=1115,
+  serialized_end=1758,
 )
 _sym_db.RegisterEnumDescriptor(_SENSORTYPE)
 
@@ -241,8 +245,8 @@ _SENSORORIENTATION = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=1339,
-  serialized_end=1565,
+  serialized_start=1761,
+  serialized_end=1987,
 )
 _sym_db.RegisterEnumDescriptor(_SENSORORIENTATION)
 
@@ -281,6 +285,7 @@ RSLIDAR_HELIOS = 33
 SENSING_190 = 34
 HESAI_AT_128 = 35
 LGRX_RADAR_ASRR403T = 36
+UDAS_ULT_RADAR = 37
 FRONT = 0
 LEFT_FORWARD = 1
 LEFT = 2
@@ -296,6 +301,117 @@ LEFT_DOWN = 11
 RIGHT_DOWN = 12
 REAR_DOWN = 13
 
+
+
+_MOUNTPOSITION = _descriptor.Descriptor(
+  name='MountPosition',
+  full_name='perception.base.MountPosition',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='x', full_name='perception.base.MountPosition.x', index=0,
+      number=1, type=1, cpp_type=5, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='y', full_name='perception.base.MountPosition.y', index=1,
+      number=2, type=1, cpp_type=5, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='angle', full_name='perception.base.MountPosition.angle', index=2,
+      number=3, type=1, cpp_type=5, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=54,
+  serialized_end=106,
+)
+
+
+_MOUNT = _descriptor.Descriptor(
+  name='Mount',
+  full_name='perception.base.Mount',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='right', full_name='perception.base.Mount.right', index=0,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='left', full_name='perception.base.Mount.left', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='rightMiddle', full_name='perception.base.Mount.rightMiddle', index=2,
+      number=3, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='leftMiddle', full_name='perception.base.Mount.leftMiddle', index=3,
+      number=4, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='leftSide', full_name='perception.base.Mount.leftSide', index=4,
+      number=5, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='rightSide', full_name='perception.base.Mount.rightSide', index=5,
+      number=6, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=109,
+  serialized_end=415,
+)
 
 
 _EXTRINSIC = _descriptor.Descriptor(
@@ -331,8 +447,8 @@ _EXTRINSIC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=54,
-  serialized_end=145,
+  serialized_start=417,
+  serialized_end=508,
 )
 
 
@@ -376,8 +492,8 @@ _INTRINSIC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=147,
-  serialized_end=205,
+  serialized_start=510,
+  serialized_end=568,
 )
 
 
@@ -414,8 +530,8 @@ _REGISTEREDSENSOR = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=207,
-  serialized_end=289,
+  serialized_start=570,
+  serialized_end=652,
 )
 
 
@@ -445,8 +561,8 @@ _DISTCOEFF = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=291,
-  serialized_end=326,
+  serialized_start=654,
+  serialized_end=689,
 )
 
 
@@ -476,8 +592,8 @@ _XI = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=328,
-  serialized_end=348,
+  serialized_start=691,
+  serialized_end=711,
 )
 
 
@@ -551,6 +667,13 @@ _SENSORINFO = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='mount', full_name='perception.base.SensorInfo.mount', index=9,
+      number=10, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -563,10 +686,16 @@ _SENSORINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=351,
-  serialized_end=710,
+  serialized_start=714,
+  serialized_end=1112,
 )
 
+_MOUNT.fields_by_name['right'].message_type = _MOUNTPOSITION
+_MOUNT.fields_by_name['left'].message_type = _MOUNTPOSITION
+_MOUNT.fields_by_name['rightMiddle'].message_type = _MOUNTPOSITION
+_MOUNT.fields_by_name['leftMiddle'].message_type = _MOUNTPOSITION
+_MOUNT.fields_by_name['leftSide'].message_type = _MOUNTPOSITION
+_MOUNT.fields_by_name['rightSide'].message_type = _MOUNTPOSITION
 _EXTRINSIC.fields_by_name['translation'].message_type = geometry__pb2._POINT3D
 _EXTRINSIC.fields_by_name['rotation'].message_type = geometry__pb2._QUATERNION
 _REGISTEREDSENSOR.fields_by_name['sensor_info'].message_type = _SENSORINFO
@@ -576,6 +705,9 @@ _SENSORINFO.fields_by_name['extrinsic'].message_type = _EXTRINSIC
 _SENSORINFO.fields_by_name['intrinsic'].message_type = _INTRINSIC
 _SENSORINFO.fields_by_name['distcoeff'].message_type = _DISTCOEFF
 _SENSORINFO.fields_by_name['xi'].message_type = _XI
+_SENSORINFO.fields_by_name['mount'].message_type = _MOUNT
+DESCRIPTOR.message_types_by_name['MountPosition'] = _MOUNTPOSITION
+DESCRIPTOR.message_types_by_name['Mount'] = _MOUNT
 DESCRIPTOR.message_types_by_name['Extrinsic'] = _EXTRINSIC
 DESCRIPTOR.message_types_by_name['Intrinsic'] = _INTRINSIC
 DESCRIPTOR.message_types_by_name['RegisteredSensor'] = _REGISTEREDSENSOR
@@ -585,6 +717,20 @@ DESCRIPTOR.message_types_by_name['SensorInfo'] = _SENSORINFO
 DESCRIPTOR.enum_types_by_name['SensorType'] = _SENSORTYPE
 DESCRIPTOR.enum_types_by_name['SensorOrientation'] = _SENSORORIENTATION
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
+
+MountPosition = _reflection.GeneratedProtocolMessageType('MountPosition', (_message.Message,), dict(
+  DESCRIPTOR = _MOUNTPOSITION,
+  __module__ = 'sensor_meta_pb2'
+  # @@protoc_insertion_point(class_scope:perception.base.MountPosition)
+  ))
+_sym_db.RegisterMessage(MountPosition)
+
+Mount = _reflection.GeneratedProtocolMessageType('Mount', (_message.Message,), dict(
+  DESCRIPTOR = _MOUNT,
+  __module__ = 'sensor_meta_pb2'
+  # @@protoc_insertion_point(class_scope:perception.base.Mount)
+  ))
+_sym_db.RegisterMessage(Mount)
 
 Extrinsic = _reflection.GeneratedProtocolMessageType('Extrinsic', (_message.Message,), dict(
   DESCRIPTOR = _EXTRINSIC,

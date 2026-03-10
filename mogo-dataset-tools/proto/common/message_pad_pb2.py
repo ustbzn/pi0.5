@@ -21,7 +21,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='mogo.telematics.pad',
   syntax='proto3',
   serialized_options=None,
-  serialized_pb=_b('\n\x11message_pad.proto\x12\x13mogo.telematics.pad\x1a\x0egeometry.proto\"\x1c\n\x0c\x42yteArrayMsg\x12\x0c\n\x04\x64\x61ta\x18\x01 \x01(\x0c\"9\n\x1b\x43loudRegulatoryWarningInner\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x0c\n\x04\x64\x65sc\x18\x02 \x01(\t\"k\n\x16\x43loudRegulatoryWarning\x12Q\n\x17\x63loudRegulatoryWarnings\x18\x01 \x03(\x0b\x32\x30.mogo.telematics.pad.CloudRegulatoryWarningInner\"I\n\x0f\x43ollisionReport\x12\x11\n\tlongitude\x18\x01 \x01(\x01\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x11\n\ttimestamp\x18\x03 \x01(\x01\"2\n\x14\x43\x61ptureImgOnTakeOver\x12\x0c\n\x04uuid\x18\x01 \x01(\r\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\"\x87\x01\n\x06Header\x12\r\n\x05msgID\x18\x01 \x01(\x04\x12\x31\n\x07msgType\x18\x02 \x01(\x0e\x32 .mogo.telematics.pad.MessageType\x12\x11\n\ttimestamp\x18\x03 \x01(\x01\x12\x17\n\x0fsourceTimestamp\x18\x04 \x01(\x01\x12\x0f\n\x07needAck\x18\x05 \x01(\r\"#\n\x11ImgUploadCloudCmd\x12\x0e\n\x06\x65nable\x18\x01 \x01(\x08\"*\n\x18ImgUploadCloudStatusResp\x12\x0e\n\x06\x65nable\x18\x01 \x01(\x08\"\x1d\n\x0bReceivedAck\x12\x0e\n\x06msgids\x18\x01 \x03(\x04\"\xea\x01\n\rV2nCrossSpeed\x12\x1a\n\x12speed_straight_min\x18\x01 \x01(\r\x12\x1a\n\x12speed_straight_max\x18\x02 \x01(\r\x12\x16\n\x0espeed_left_min\x18\x03 \x01(\r\x12\x16\n\x0espeed_left_max\x18\x04 \x01(\r\x12\x17\n\x0fspeed_right_min\x18\x05 \x01(\r\x12\x17\n\x0fspeed_right_max\x18\x06 \x01(\r\x12\x11\n\tmax_speed\x18\x07 \x01(\r\x12\x12\n\nmax_status\x18\x08 \x01(\r\x12\x0b\n\x03lng\x18\t \x01(\x01\x12\x0b\n\x03lat\x18\n \x01(\x01\"^\n\rCloudLinkAddr\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x11\n\tdirection\x18\x02 \x01(\r\x12\x0e\n\x06\x64omain\x18\x03 \x01(\t\x12\x0c\n\x04port\x18\x04 \x01(\r\x12\x0e\n\x06\x65nable\x18\x05 \x01(\x08\"@\n\x0b\x43loudConfig\x12\x31\n\x05\x61\x64\x64rs\x18\x01 \x03(\x0b\x32\".mogo.telematics.pad.CloudLinkAddr\"|\n\rV2nCongestion\x12\x10\n\x08msg_time\x18\x01 \x01(\x04\x12\x10\n\x08msg_name\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x61ta_source\x18\x03 \x01(\r\x12\x32\n\x05infos\x18\x04 \x03(\x0b\x32#.mogo.telematics.pad.CongestionInfo\"\x1f\n\x03Geo\x12\x0b\n\x03lon\x18\x01 \x01(\x01\x12\x0b\n\x03lat\x18\x02 \x01(\x01\"\x81\x01\n\x10\x45ventLocationGeo\x12\x10\n\x08startLng\x18\x01 \x01(\x01\x12\x10\n\x08startLat\x18\x02 \x01(\x01\x12\x0e\n\x06\x65ndLng\x18\x03 \x01(\x01\x12\x0e\n\x06\x65ndLat\x18\x04 \x01(\x01\x12)\n\x07regions\x18\x05 \x03(\x0b\x32\x18.mogo.telematics.pad.Geo\"]\n\nTimePeriod\x12\x12\n\nstart_time\x18\x01 \x01(\x04\x12\x10\n\x08\x65nd_time\x18\x02 \x01(\x04\x12\x13\n\x0bupdate_time\x18\x03 \x01(\x04\x12\x14\n\x0c\x63onfirm_time\x18\x04 \x01(\x04\"\xef\x02\n\x0e\x43ongestionInfo\x12\x13\n\x0b\x64\x61ta_status\x18\x01 \x01(\r\x12\x34\n\x0btime_period\x18\x02 \x01(\x0b\x32\x1f.mogo.telematics.pad.TimePeriod\x12\x41\n\x12\x65vent_location_geo\x18\x03 \x01(\x0b\x32%.mogo.telematics.pad.EventLocationGeo\x12\x14\n\x0cimg_file_key\x18\x04 \x03(\t\x12\x12\n\nevent_type\x18\x05 \x01(\r\x12\x10\n\x08msg_uuid\x18\x06 \x01(\t\x12\x18\n\x10\x63ongestion_level\x18\x07 \x01(\r\x12\x0f\n\x07lane_no\x18\x08 \x01(\r\x12\x17\n\x0f\x63ongestion_type\x18\t \x01(\r\x12\x0f\n\x07\x62\x65\x61ring\x18\n \x01(\x01\x12\x0b\n\x03lon\x18\x0b \x01(\x01\x12\x0b\n\x03lat\x18\x0c \x01(\x01\x12\x11\n\tvideo_url\x18\r \x01(\t\x12\x11\n\tcamera_ip\x18\x0e \x01(\t\"\x82\x02\n\x05\x45vent\x12\x11\n\tchannelId\x18\x01 \x01(\r\x12\r\n\x05rcuId\x18\x02 \x01(\x04\x12\x31\n\teventType\x18\x03 \x01(\x0e\x32\x1e.mogo.telematics.pad.EventType\x12\x12\n\nconfidence\x18\x04 \x01(\r\x12\x10\n\x08gnssType\x18\x05 \x01(\r\x12\x11\n\tlongitude\x18\x06 \x01(\x01\x12\x10\n\x08latitude\x18\x07 \x01(\x01\x12\x11\n\ttimestamp\x18\x08 \x01(\x04\x12\x0f\n\x07\x65ventId\x18\t \x01(\t\x12\x0c\n\x04\x65xts\x18\n \x01(\t\x12\x14\n\x0ctargetIdsLen\x18\x0b \x01(\r\x12\x11\n\ttargetIds\x18\x0c \x03(\t\"\xd4\x01\n\x0fTrajectoryPoint\x12\x11\n\tlongitude\x18\x01 \x01(\x01\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x10\n\x08\x61ltitude\x18\x03 \x01(\x01\x12\x0c\n\x04time\x18\x04 \x01(\x01\x12\x10\n\x08velocity\x18\x05 \x01(\x01\x12\x14\n\x0c\x61\x63\x63\x65leration\x18\x06 \x01(\x01\x12\r\n\x05theta\x18\x07 \x01(\x01\x12\r\n\x05kappa\x18\x08 \x01(\x01\x12\x16\n\x0e\x61\x63\x63umulatedDis\x18\t \x01(\x01\x12\x1e\n\x16reversedAccumulatedDis\x18\n \x01(\x01\"B\n\nTrajectory\x12\x34\n\x06points\x18\x01 \x03(\x0b\x32$.mogo.telematics.pad.TrajectoryPoint\"\'\n\tSubSource\x12\x0e\n\x06source\x18\x01 \x01(\r\x12\n\n\x02id\x18\x02 \x01(\t\"S\n\rTrackedSource\x12\x0e\n\x06source\x18\x01 \x01(\r\x12\x32\n\nsub_source\x18\x02 \x03(\x0b\x32\x1e.mogo.telematics.pad.SubSource\"\x81\x05\n\rTrackedObject\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x11\n\tlongitude\x18\x02 \x01(\x01\x12\x10\n\x08latitude\x18\x03 \x01(\x01\x12\x10\n\x08\x61ltitude\x18\x04 \x01(\x01\x12\x12\n\nsystemTime\x18\x05 \x01(\x01\x12\x15\n\rsatelliteTime\x18\x06 \x01(\x01\x12\x0c\n\x04uuid\x18\x07 \x01(\r\x12\r\n\x05\x63\x61rID\x18\x08 \x01(\t\x12\r\n\x05\x63olor\x18\t \x01(\t\x12\x0f\n\x07heading\x18\n \x01(\x01\x12\r\n\x05speed\x18\x0b \x01(\x01\x12\x11\n\tdrawLevel\x18\x0c \x01(\r\x12\x12\n\ndriverTime\x18\r \x01(\x01\x12:\n\x0etracked_source\x18\x0e \x03(\x0b\x32\".mogo.telematics.pad.TrackedSource\x12.\n\x07polygon\x18\x0f \x03(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x1f\n\x06\x63\x65nter\x18\x10 \x01(\x0b\x32\x0f.geometry.Point\x12?\n\radd_attribute\x18\x11 \x01(\x0e\x32(.mogo.telematics.pad.AdditionalAttribute\x12\r\n\x05\x61ngle\x18\x12 \x01(\x01\x12\x11\n\timage_url\x18\x13 \x03(\t\x12\x11\n\tvideo_url\x18\x14 \x01(\t\x12\x11\n\tcamera_ip\x18\x15 \x01(\t\x12\x19\n\x11\x64\x65tect_start_time\x18\x16 \x01(\x04\x12\x10\n\x08v2x_uuid\x18\x17 \x01(\t\x12\x0e\n\x06roadId\x18\x18 \x01(\t\x12\x0f\n\x07laneNum\x18\x19 \x01(\x05\x12\x16\n\x0esuggestedLanes\x18\x1a \x01(\x08\x12\x11\n\tarrowType\x18\x1b \x01(\x05\"d\n\x10LocalizationInfo\x12\r\n\x05stamp\x18\x01 \x01(\x01\x12\x11\n\tlongitude\x18\x02 \x01(\x02\x12\x10\n\x08latitude\x18\x03 \x01(\x02\x12\x0b\n\x03\x61lt\x18\x04 \x01(\x02\x12\x0f\n\x07heading\x18\x05 \x01(\x02\"\x8e\x01\n\rBlindAreaData\x12\x17\n\x0f\x61ngleResolution\x18\x01 \x01(\x02\x12\x11\n\tdistances\x18\x02 \x03(\x05\x12?\n\x10localizationInfo\x18\x03 \x01(\x0b\x32%.mogo.telematics.pad.LocalizationInfo\x12\x10\n\x08maxRange\x18\x04 \x01(\x02\"\x95\x01\n\x0eTrackedObjects\x12\x30\n\x04objs\x18\x01 \x03(\x0b\x32\".mogo.telematics.pad.TrackedObject\x12\x39\n\rblindAreaData\x18\x02 \x01(\x0b\x32\".mogo.telematics.pad.BlindAreaData\x12\x16\n\x0e\x63ollision_risk\x18\x03 \x01(\r\"\xcd\x01\n\x08GnssInfo\x12\x11\n\tlongitude\x18\x01 \x01(\x01\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x10\n\x08\x61ltitude\x18\x03 \x01(\x01\x12\x0f\n\x07heading\x18\x04 \x01(\x01\x12\x14\n\x0c\x61\x63\x63\x65leration\x18\x05 \x01(\x01\x12\x0f\n\x07yawRate\x18\x06 \x01(\x01\x12\x11\n\tgnssSpeed\x18\x07 \x01(\x01\x12\x14\n\x0cvehicleSpeed\x18\x08 \x01(\x01\x12\x15\n\rsatelliteTime\x18\t \x01(\x01\x12\x12\n\nsystemTime\x18\n \x01(\x01\"\x81\x01\n\x0e\x41utopilotState\x12\r\n\x05state\x18\x01 \x01(\r\x12\x0e\n\x06\x63\x61mera\x18\x02 \x01(\r\x12\r\n\x05radar\x18\x03 \x01(\r\x12\x0b\n\x03rtk\x18\x04 \x01(\r\x12\x15\n\rautopilotMode\x18\x05 \x01(\r\x12\r\n\x05speed\x18\x06 \x01(\x01\x12\x0e\n\x06reason\x18\x07 \x01(\t\",\n\x0ePlanningObject\x12\x0c\n\x04uuid\x18\x01 \x01(\r\x12\x0c\n\x04type\x18\x02 \x01(\r\"D\n\x0fPlanningObjects\x12\x31\n\x04objs\x18\x01 \x03(\x0b\x32#.mogo.telematics.pad.PlanningObject\"\x85\x02\n\x04Line\x12\x0e\n\x06lineId\x18\x01 \x01(\x04\x12\x0f\n\x07trajUrl\x18\x02 \x01(\t\x12\x0f\n\x07trajMd5\x18\x03 \x01(\t\x12\x0f\n\x07stopUrl\x18\x04 \x01(\t\x12\x0f\n\x07stopMd5\x18\x05 \x01(\t\x12\x11\n\ttimestamp\x18\x06 \x01(\x04\x12\x14\n\x0cvehicleModel\x18\x07 \x01(\t\x12\x14\n\x0ctrajUrl_dpqp\x18\x08 \x01(\t\x12\x14\n\x0ctrajMd5_dpqp\x18\t \x01(\t\x12\x14\n\x0cstopUrl_dpqp\x18\n \x01(\t\x12\x14\n\x0cstopMd5_dpqp\x18\x0b \x01(\t\x12\x16\n\x0etimestamp_dpqp\x18\x0c \x01(\x04\x12\x10\n\x08lineName\x18\r \x01(\t\"\x99\x01\n\x15TrajectoryDownloadReq\x12\'\n\x04line\x18\x01 \x01(\x0b\x32\x19.mogo.telematics.pad.Line\x12\x0e\n\x06source\x18\x02 \x01(\r\x12\x14\n\x0c\x64ownloadType\x18\x03 \x01(\r\x12\x31\n\trouteInfo\x18\x04 \x01(\x0b\x32\x1e.mogo.telematics.pad.RouteInfo\"%\n\x0c\x42\x61sicInfoReq\x12\x15\n\rcertification\x18\x01 \x01(\x0c\"f\n\rBasicInfoResp\x12\n\n\x02sn\x18\x01 \x01(\t\x12\x13\n\x0b\x65nvironment\x18\x02 \x01(\r\x12\x0c\n\x04role\x18\x03 \x01(\r\x12\x0f\n\x07version\x18\x04 \x01(\t\x12\x15\n\rcertification\x18\x05 \x01(\x0c\"c\n\x08Location\x12\x11\n\tlongitude\x18\x01 \x01(\x01\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x10\n\x08\x61ltitude\x18\x03 \x01(\x01\x12\x0f\n\x07heading\x18\x04 \x01(\x01\x12\x0f\n\x07station\x18\x05 \x01(\x08\"\x9e\x03\n\tRouteInfo\x12\x34\n\rstartLocation\x18\x01 \x01(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x11\n\tstartName\x18\x02 \x01(\t\x12\x32\n\x0b\x65ndLocation\x18\x03 \x01(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x0f\n\x07\x65ndName\x18\x04 \x01(\t\x12\x30\n\twayPoints\x18\x05 \x03(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x12\n\nspeedLimit\x18\x06 \x01(\x01\x12\x13\n\x0bvehicleType\x18\x07 \x01(\r\x12\x14\n\x0cisSpeakVoice\x18\x08 \x01(\x08\x12\x0f\n\x07routeID\x18\t \x01(\r\x12\x11\n\trouteName\x18\n \x01(\t\x12\'\n\x04line\x18\x0b \x01(\x0b\x32\x19.mogo.telematics.pad.Line\x12\x32\n\x0b\x62lackPoints\x18\x0c \x03(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x11\n\tisStation\x18\r \x01(\x08\"9\n\x07\x43mdInfo\x12\x1c\n\x14\x66irst_autopilot_flag\x18\x01 \x01(\x08\x12\x10\n\x08order_id\x18\x02 \x01(\t\"\xa9\x01\n\x13SetAutopilotModeReq\x12\x0c\n\x04mode\x18\x01 \x01(\r\x12\x0e\n\x06source\x18\x02 \x01(\r\x12\x31\n\trouteInfo\x18\x03 \x01(\x0b\x32\x1e.mogo.telematics.pad.RouteInfo\x12\x11\n\tsessionId\x18\x04 \x01(\x04\x12.\n\x08\x63md_info\x18\x05 \x01(\x0b\x32\x1c.mogo.telematics.pad.CmdInfo\" \n\x0eSetDemoModeReq\x12\x0e\n\x06\x65nable\x18\x01 \x01(\r\"\x0e\n\x0c\x43\x61rConfigReq\"\x9f\x02\n\rCarConfigResp\x12\x13\n\x0b\x64ockVersion\x18\x01 \x01(\t\x12\x13\n\x0bplateNumber\x18\x02 \x01(\t\x12\x12\n\nmacAddress\x18\x03 \x01(\t\x12=\n\x0fprotocolVersion\x18\x04 \x01(\x0e\x32$.mogo.telematics.pad.ProtocolVersion\x12\x12\n\nspeedLimit\x18\x05 \x01(\x01\x12\x15\n\rmaxSpeedLimit\x18\x06 \x01(\x01\x12\x17\n\x0fminAcceleration\x18\x07 \x01(\x01\x12\x17\n\x0fmaxAcceleration\x18\x08 \x01(\x01\x12\x0f\n\x07\x63\x61rType\x18\t \x01(\t\x12\x12\n\nsubCarType\x18\n \x01(\t\x12\x0f\n\x07vinCode\x18\x0b \x01(\t\"N\n\x0bRecordCause\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x10\n\x08\x66ilename\x18\x02 \x01(\t\x12\x0e\n\x06reason\x18\x03 \x01(\t\x12\x10\n\x08reasonID\x18\x04 \x01(\t\"~\n\nRecordData\x12\n\n\x02id\x18\x01 \x01(\r\x12\x10\n\x08\x64uration\x18\x02 \x01(\r\x12\x0c\n\x04type\x18\x03 \x01(\r\x12\x10\n\x08isRecord\x18\x04 \x01(\x08\x12\x0f\n\x07sustain\x18\x05 \x01(\x08\x12\x11\n\tbduration\x18\x06 \x01(\r\x12\x0e\n\x06topics\x18\x07 \x03(\t\"*\n\x14SetAutopilotSpeedReq\x12\x12\n\nspeedLimit\x18\x01 \x01(\x01\"\x0f\n\rGlobalPathReq\"R\n\x0eGlobalPathResp\x12\x30\n\twayPoints\x18\x01 \x03(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x0e\n\x06lineId\x18\x02 \x01(\x04\"D\n\x12TrafficLightStatus\x12\x0f\n\x07phaseNo\x18\x01 \x01(\t\x12\r\n\x05\x63olor\x18\x02 \x01(\t\x12\x0e\n\x06remain\x18\x03 \x01(\x05\"\xb9\x01\n\x12TrafficLightDetail\x12\x35\n\x04left\x18\x01 \x01(\x0b\x32\'.mogo.telematics.pad.TrafficLightStatus\x12\x34\n\x03mid\x18\x02 \x01(\x0b\x32\'.mogo.telematics.pad.TrafficLightStatus\x12\x36\n\x05right\x18\x03 \x01(\x0b\x32\'.mogo.telematics.pad.TrafficLightStatus\"\x83\x02\n\x10TrafficLightData\x12\x0f\n\x07\x63rossID\x18\x01 \x01(\t\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x11\n\tlongitude\x18\x03 \x01(\x01\x12\x0f\n\x07heading\x18\x04 \x01(\t\x12\x11\n\tdirection\x18\x05 \x01(\t\x12\x0f\n\x07lightId\x18\x06 \x01(\x05\x12\x0e\n\x06laneNo\x18\x07 \x01(\x05\x12\x0f\n\x07\x61rrowNo\x18\x08 \x01(\x05\x12\x13\n\x0b\x66lashYellow\x18\t \x01(\x05\x12;\n\nlaneDetail\x18\n \x01(\x0b\x32\'.mogo.telematics.pad.TrafficLightDetail\x12\x11\n\ttimestamp\x18\x0b \x01(\x04\"C\n\x04Warn\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\r\n\x05level\x18\x03 \x01(\r\x12\r\n\x05value\x18\x04 \x01(\t\"Z\n\x13\x41rrivalNotification\x12\x0f\n\x07\x63\x61rType\x18\x01 \x01(\r\x12\x32\n\x0b\x65ndLocation\x18\x02 \x01(\x0b\x32\x1d.mogo.telematics.pad.Location\"Q\n\x0cSystemCmdReq\x12\x33\n\x07\x63mdType\x18\x01 \x01(\x0e\x32\".mogo.telematics.pad.SystemCmdType\x12\x0c\n\x04node\x18\x02 \x01(\r\"\x10\n\x0eStatusQueryReq\" \n\x0eSetRainModeReq\x12\x0e\n\x06\x65nable\x18\x01 \x01(\r\"U\n\x13RecordDataConfigReq\x12\x0f\n\x07reqType\x18\x01 \x01(\r\x12\x12\n\nrecordType\x18\x02 \x01(\r\x12\x19\n\x11topicsNeedToCache\x18\x03 \x03(\t\":\n\x0eRecordDataType\x12\n\n\x02id\x18\x01 \x01(\r\x12\x0c\n\x04\x64\x65sc\x18\x02 \x01(\t\x12\x0e\n\x06topics\x18\x03 \x03(\t\"_\n\x10RecordDataConfig\x12\x38\n\x0brecordTypes\x18\x01 \x03(\x0b\x32#.mogo.telematics.pad.RecordDataType\x12\x11\n\tallTopics\x18\x02 \x03(\t\"D\n\x10SubscribeDataReq\x12\x0c\n\x04role\x18\x01 \x01(\r\x12\x0f\n\x07reqType\x18\x02 \x01(\r\x12\x11\n\tdataTypes\x18\x03 \x03(\r\"V\n\x0eOperatorCmdReq\x12\x35\n\x07\x63mdType\x18\x01 \x01(\x0e\x32$.mogo.telematics.pad.OperatorCmdType\x12\r\n\x05value\x18\x02 \x01(\x01\"\x88\x01\n\x10\x44rivingActionMsg\x12\x38\n\rdriving_state\x18\x01 \x01(\x0e\x32!.mogo.telematics.pad.DrivingState\x12:\n\x0e\x64riving_action\x18\x02 \x01(\x0e\x32\".mogo.telematics.pad.DrivingAction\"\x9d\x01\n\x19ParkScenarioDrivingAction\x12\x44\n\rdriving_state\x18\x01 \x01(\x0e\x32-.mogo.telematics.pad.ParkScenarioDrivingState\x12:\n\x0e\x64riving_action\x18\x02 \x01(\x0e\x32\".mogo.telematics.pad.DrivingAction\"y\n\x1aParkScenarioPlanningAction\x12\x42\n\naction_msg\x18\x01 \x01(\x0b\x32..mogo.telematics.pad.ParkScenarioDrivingAction\x12\x17\n\x0f\x64\x65stination_acc\x18\x02 \x01(\x01\"\xbb\x02\n\x11PlanningActionMsg\x12\x39\n\naction_msg\x18\x01 \x01(\x0b\x32%.mogo.telematics.pad.DrivingActionMsg\x12\x17\n\x0f\x64\x65stination_acc\x18\x02 \x01(\x01\x12M\n\x14park_scenario_action\x18\x03 \x01(\x0b\x32/.mogo.telematics.pad.ParkScenarioPlanningAction\x12=\n\x0ev2n_action_msg\x18\x04 \x03(\x0b\x32%.mogo.telematics.pad.DrivingActionMsg\x12\x32\n\x19\x64\x65s_lane_vehicle_postions\x18\x05 \x03(\x0b\x32\x0f.geometry.Point\x12\x10\n\x08utm_zone\x18\x06 \x01(\r\"*\n\x0bSetOneParam\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\r\n\x05value\x18\x02 \x01(\t\"=\n\x0bSetParamReq\x12.\n\x04reqs\x18\x01 \x03(\x0b\x32 .mogo.telematics.pad.SetOneParam\"w\n\rTripInfoEvent\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x10\n\x08lineName\x18\x02 \x01(\t\x12\x19\n\x11\x64\x65partureStopName\x18\x03 \x01(\t\x12\x17\n\x0f\x61rrivalStopName\x18\x04 \x01(\t\x12\x12\n\nisLastStop\x18\x05 \x01(\x08\"\x1a\n\x0bPullOverCmd\x12\x0b\n\x03\x63md\x18\x01 \x01(\r\"\x1c\n\rLaneChangeCmd\x12\x0b\n\x03\x63md\x18\x01 \x01(\r\"\x7f\n\x0bPlanningCmd\x12\x35\n\x0bpullOverCmd\x18\x01 \x01(\x0b\x32 .mogo.telematics.pad.PullOverCmd\x12\x39\n\rlaneChangeCmd\x18\x02 \x01(\x0b\x32\".mogo.telematics.pad.LaneChangeCmd\"L\n\tDebugInfo\x12\x0b\n\x03seq\x18\x01 \x01(\r\x12\x32\n\x08sessions\x18\x02 \x03(\x0b\x32 .mogo.telematics.pad.SessionInfo\"g\n\x0bSessionInfo\x12\x11\n\tsessionID\x18\x01 \x01(\r\x12\x0c\n\x04role\x18\x02 \x01(\r\x12\n\n\x02sn\x18\x03 \x01(\t\x12\x1a\n\x12\x63onnectedTimeStamp\x18\x04 \x01(\x04\x12\x0f\n\x07version\x18\x05 \x01(\t*5\n\x0fProtocolVersion\x12\x0e\n\nDefaultver\x10\x00\x12\x12\n\x0e\x43urrentVersion\x10\n*\xe9\x14\n\x0bMessageType\x12\x12\n\x0eMsgTypeDefault\x10\x00\x12\"\n\x1dMsgTypeCameraCalibCheckData30\x10\x81 \x12\"\n\x1dMsgTypeCameraCalibCheckData60\x10\x82 \x12(\n#MsgTypeCameraCalibCheckData120Front\x10\x83 \x12\'\n\"MsgTypeCameraCalibCheckData120Back\x10\x84 \x12\'\n\"MsgTypeCameraCalibCheckData120Left\x10\x85 \x12(\n#MsgTypeCameraCalibCheckData120Right\x10\x86 \x12%\n MsgTypeCaptureFrontImgOnTakeOver\x10\x87 \x12$\n\x1fMsgTypeCaptureBackImgOnTakeOver\x10\x88 \x12\x17\n\x11MsgTypeTrajectory\x10\x80\x80\x04\x12\x1b\n\x15MsgTypeTrackedObjects\x10\x81\x80\x04\x12\x15\n\x0fMsgTypeGnssInfo\x10\x82\x80\x04\x12\x19\n\x13MsgTypeVehicleState\x10\x83\x80\x04\x12\x1b\n\x15MsgTypeAutopilotState\x10\x84\x80\x04\x12\x1a\n\x14MsgTypeReportMessage\x10\x85\x80\x04\x12#\n\x1dMsgTypePerceptionTrafficLight\x10\x86\x80\x04\x12)\n#MsgTypePredictionObstacleTrajectory\x10\x87\x80\x04\x12\x17\n\x11MsgTypePointCloud\x10\x88\x80\x04\x12\x1c\n\x16MsgTypePlanningObjects\x10\x89\x80\x04\x12\x10\n\nMsgTypeOBU\x10\x8a\x80\x04\x12\x1a\n\x14MsgTypeChassisStates\x10\x8b\x80\x04\x12\x1b\n\x15MsgTypeFunctionStates\x10\x8c\x80\x04\x12\x1c\n\x16MsgTypeBackCameraVideo\x10\x8d\x80\x04\x12\x1c\n\x16MsgTypeM1StitchedVideo\x10\x8e\x80\x04\x12\x15\n\x0fMsgTypeSSMState\x10\x8f\x80\x04\x12\x14\n\x0eMsgTypeFMState\x10\x90\x80\x04\x12\x19\n\x13MsgTypeFSM2024State\x10\x91\x80\x04\x12\x15\n\x0fMsgTypeLocState\x10\x92\x80\x04\x12#\n\x1dMsgTypeCloudRegulatoryWarning\x10\x93\x80\x04\x12\x1c\n\x16MsgTypeChassis25States\x10\x94\x80\x04\x12\"\n\x1cMsgTypePredictionObjects2025\x10\x95\x80\x04\x12\x19\n\x13MsgTypeBasicInfoReq\x10\x80\x82\x04\x12\x1a\n\x14MsgTypeBasicInfoResp\x10\x81\x82\x04\x12 \n\x1aMsgTypeSetAutopilotModeReq\x10\x82\x82\x04\x12\x1b\n\x15MsgTypeSetDemoModeReq\x10\x83\x82\x04\x12\x19\n\x13MsgTypeCarConfigReq\x10\x84\x82\x04\x12\x1a\n\x14MsgTypeCarConfigResp\x10\x85\x82\x04\x12\x18\n\x12MsgTypeRecordCause\x10\x86\x82\x04\x12\x17\n\x11MsgTypeRecordData\x10\x87\x82\x04\x12\x19\n\x13MsgTypeRecordResult\x10\x88\x82\x04\x12!\n\x1bMsgTypeSetAutopilotSpeedReq\x10\x89\x82\x04\x12\x1a\n\x14MsgTypeGlobalPathReq\x10\x8a\x82\x04\x12\x1b\n\x15MsgTypeGlobalPathResp\x10\x8b\x82\x04\x12\x1d\n\x17MsgTypeTrafficLightData\x10\x8c\x82\x04\x12\x11\n\x0bMsgTypeWarn\x10\x8d\x82\x04\x12 \n\x1aMsgTypeArrivalNotification\x10\x8e\x82\x04\x12\x19\n\x13MsgTypeSystemCmdReq\x10\x8f\x82\x04\x12\"\n\x1cMsgTypeTrajectoryDownloadReq\x10\x90\x82\x04\x12\x1b\n\x15MsgTypeStatusQueryReq\x10\x91\x82\x04\x12\x1c\n\x16MsgTypeStatusQueryResp\x10\x92\x82\x04\x12\x1b\n\x15MsgTypeSetRainModeReq\x10\x93\x82\x04\x12 \n\x1aMsgTypeRecordDataConfigReq\x10\x94\x82\x04\x12!\n\x1bMsgTypeRecordDataConfigResp\x10\x95\x82\x04\x12\x1b\n\x15MsgTypeOperatorCmdReq\x10\x96\x82\x04\x12\x1d\n\x17MsgTypeSubscribeDataReq\x10\x97\x82\x04\x12\"\n\x1cMsgTypeSpecialVehicleTaskCmd\x10\x98\x82\x04\x12\x18\n\x12MsgTypeSetParamReq\x10\x99\x82\x04\x12\x1a\n\x14MsgTypeTripInfoEvent\x10\x9a\x82\x04\x12\x1a\n\x14MsgTypeBagManagerCmd\x10\x9b\x82\x04\x12\x18\n\x12MsgTypePlanningCmd\x10\x9c\x82\x04\x12\x1a\n\x14MsgTypeSetParamReqV2\x10\x9d\x82\x04\x12\x1f\n\x19MsgTypeV2nCongestionEvent\x10\x9e\x82\x04\x12 \n\x1aMsgTypeV2nGlobalPathEvents\x10\x9f\x82\x04\x12\x18\n\x12MsgTypeGetParamReq\x10\xa0\x82\x04\x12\x19\n\x13MsgTypeGetParamResp\x10\xa1\x82\x04\x12\x14\n\x0eMsgTypeTaskCmd\x10\xa2\x82\x04\x12$\n\x1eMsgTypeFSMStatusReasonQueryReq\x10\xa3\x82\x04\x12%\n\x1fMsgTypeFSMStatusReasonQueryResp\x10\xa4\x82\x04\x12\x19\n\x13MsgTypeGetDebugInfo\x10\xa5\x82\x04\x12\x1f\n\x19MsgTypeParallelDrivingCmd\x10\xa6\x82\x04\x12\x18\n\x12MsgTypeReceivedAck\x10\xa7\x82\x04\x12(\n\"MsgTypeV2nNioGreenWavePassageEvent\x10\xa8\x82\x04\x12!\n\x1bMsgTypeV2nNioCrossoverEvent\x10\xa9\x82\x04\x12\'\n!MsgTypeV2nNioOtherRetrogradeEvent\x10\xaa\x82\x04\x12\"\n\x1cMsgTypeV2nNioCongestionEvent\x10\xab\x82\x04\x12\x1a\n\x14MsgTypeLaneMarksTran\x10\xac\x82\x04\x12\x1c\n\x16MsgTypeCollisionReport\x10\xad\x82\x04\x12\x16\n\x10MsgTypePowerUnit\x10\xae\x82\x04\x12\x17\n\x11MsgTypeSSMFuncMsg\x10\xaf\x82\x04\x12\x1f\n\x19MsgTypeSSMFuncStatusQuery\x10\xb0\x82\x04\x12\x16\n\x10MsgTypeHeartbeat\x10\xb1\x82\x04\x12$\n\x1eMsgTypeCaptureImgReqOnTakeOver\x10\xb2\x82\x04\x12\x17\n\x11MsgTypeEzhouCloud\x10\xb3\x82\x04\x12\x14\n\x0eMsgTypeCopyBag\x10\xb4\x82\x04\x12\x18\n\x12MsgTypeCloudConfig\x10\xb5\x82\x04\x12!\n\x1bMsgTypeImgUploadCloudEnable\x10\xb6\x82\x04\x12&\n MsgTypeImgUploadCloudStatusQuery\x10\xb7\x82\x04*\x91\x01\n\tEventType\x12\x14\n\x10\x43ONVERSE_RUNNING\x10\x00\x12\x10\n\x0cSLOW_RUNNING\x10\x01\x12\x14\n\x10SPEEDING_RUNNING\x10\x02\x12\x15\n\x11\x45MERGENCY_BRAKING\x10\x03\x12\x14\n\x10\x41\x42NORMAL_PARKING\x10\x04\x12\x19\n\x15NON_VEHICLE_INTRUSION\x10\x05*\x92\x01\n\x13\x41\x64\x64itionalAttribute\x12\x10\n\x0c\x41TTR_UNKNOWN\x10\x00\x12\x0f\n\x0b\x41TTR_ZOMBIE\x10\x01\x12\x1a\n\x16\x41TTR_ROAD_CONSTRUCTION\x10\x02\x12\x0f\n\x0b\x41TTR_STATIC\x10\x03\x12\x11\n\rATTR_ACCIDENT\x10\x04\x12\x18\n\x14\x41TTR_ROAD_CONGESTION\x10\x05*\x85\x01\n\rSystemCmdType\x12\x12\n\x0eSYSTEMCMD_NONE\x10\x00\x12\x14\n\x10SYSTEMCMD_REBOOT\x10\x01\x12\x18\n\x14SYSTEMCMD_START_NODE\x10\x02\x12\x17\n\x13SYSTEMCMD_STOP_NODE\x10\x03\x12\x17\n\x13SYSTEMCMD_POWER_OFF\x10\x04*\xab\x01\n\x0fOperatorCmdType\x12\x15\n\x11OPERATOR_CMD_NONE\x10\x00\x12\x1c\n\x18OPERATOR_CMD_CHANGE_LANE\x10\x01\x12&\n\"OPERATOR_CMD_SET_ACCELERATED_SPEED\x10\x02\x12\x19\n\x15OPERATOR_CMD_SET_HORN\x10\x03\x12 \n\x1cOPERATOR_CMD_SEND_LANE_MARKS\x10\x04*\x90\x07\n\x0c\x44rivingState\x12\x12\n\x0eNO_AUTODRIVING\x10\x00\x12\x0e\n\nLANKE_KEEP\x10\x01\x12\x11\n\rTRAFFIC_LIGHT\x10\x02\x12\x1b\n\x17\x46OLLOW_LANE_CHANGE_LEFT\x10\x03\x12\x1c\n\x18\x46OLLOW_LANE_CHANGE_RIGHT\x10\x04\x12\x19\n\x15\x41UTO_LANE_CHANGE_LEFT\x10\x05\x12\x1a\n\x16\x41UTO_LANE_CHANGE_RIGHT\x10\x06\x12\x13\n\x0fLANE_AVOID_LEFT\x10\x07\x12\x14\n\x10LANE_AVOID_RIGHT\x10\x08\x12\x0c\n\x08START_UP\x10\t\x12\r\n\tPULL_OVER\x10\n\x12\x1d\n\x19UN_PROTECTED_INTERSECTION\x10\x0b\x12\x1d\n\x19\x41UTO_LANE_CHANGE_LEFT_V2N\x10\x0c\x12\x1e\n\x1a\x41UTO_LANE_CHANGE_RIGHT_V2N\x10\r\x12\x17\n\x13LANE_AVOID_LEFT_V2N\x10\x0e\x12\x18\n\x14LANE_AVOID_RIGHT_V2N\x10\x0f\x12\x0f\n\x0bWAITING_V2N\x10\x10\x12\x1d\n\x19\x41UTO_LANE_CHANGE_LEFT_RSI\x10\x11\x12\x1e\n\x1a\x41UTO_LANE_CHANGE_RIGHT_RSI\x10\x12\x12\x17\n\x13LANE_AVOID_LEFT_RSI\x10\x13\x12\x18\n\x14LANE_AVOID_RIGHT_RSI\x10\x14\x12\x0f\n\x0bWAITING_RSI\x10\x15\x12\x1d\n\x19\x41UTO_LANE_CHANGE_LEFT_RSM\x10\x16\x12\x1e\n\x1a\x41UTO_LANE_CHANGE_RIGHT_RSM\x10\x17\x12\x17\n\x13LANE_AVOID_LEFT_RSM\x10\x18\x12\x18\n\x14LANE_AVOID_RIGHT_RSM\x10\x19\x12\x0f\n\x0bWAITING_RSM\x10\x1a\x12&\n\"AUTO_LANE_CHANGE_LEFT_RSI_TRIANGLE\x10\x1b\x12\'\n#AUTO_LANE_CHANGE_RIGHT_RSI_TRIANGLE\x10\x1c\x12 \n\x1cLANE_AVOID_LEFT_RSI_TRIANGLE\x10\x1d\x12!\n\x1dLANE_AVOID_RIGHT_RSI_TRIANGLE\x10\x1e\x12\x18\n\x14WAITING_RSI_TRIANGLE\x10\x1f\x12\x0e\n\nOUT_OF_ODD\x10 \x12\'\n#YIELD_TO_VEHICLE_COMING_FROM_BEHIND\x10!*\xc5\x02\n\rDrivingAction\x12\x1d\n\x19\x44RIVING_Action_STATE_NONE\x10\x00\x12\x1c\n\x18\x44RIVING_ACTION_STATE_ONE\x10\x01\x12\x1c\n\x18\x44RIVING_ACTION_STATE_TWO\x10\x02\x12\x1e\n\x1a\x44RIVING_ACTION_STATE_THREE\x10\x03\x12\x1d\n\x19\x44RIVING_ACTION_STATE_FOUR\x10\x04\x12\x1d\n\x19\x44RIVING_ACTION_STATE_FIVE\x10\x05\x12\x1c\n\x18\x44RIVING_ACTION_STATE_SIX\x10\x06\x12\x1e\n\x1a\x44RIVING_ACTION_STATE_SEVEN\x10\x07\x12\x1e\n\x1a\x44RIVING_ACTION_STATE_EIGHT\x10\x08\x12\x1d\n\x19\x44RIVING_ACTION_STATE_NINE\x10\t*\x9f\x02\n\x18ParkScenarioDrivingState\x12\x1f\n\x1bPARK_SENARIO_NO_AUTODRIVING\x10\x00\x12\x1b\n\x17PARK_SENARIO_LANKE_KEEP\x10\x01\x12 \n\x1cPARK_SENARIO_LANE_AVOID_LEFT\x10\x02\x12!\n\x1dPARK_SENARIO_LANE_AVOID_RIGHT\x10\x03\x12\x19\n\x15PARK_SENARIO_START_UP\x10\x04\x12\x1a\n\x16PARK_SENARIO_PULL_OVER\x10\x05\x12#\n\x1fPARK_SENARIO_FORCE_PULL_OVER_ON\x10\x06\x12$\n PARK_SENARIO_FORCE_PULL_OVER_OFF\x10\x07\x62\x06proto3')
+  serialized_pb=_b('\n\x11message_pad.proto\x12\x13mogo.telematics.pad\x1a\x0egeometry.proto\"\x1c\n\x0c\x42yteArrayMsg\x12\x0c\n\x04\x64\x61ta\x18\x01 \x01(\x0c\"9\n\x1b\x43loudRegulatoryWarningInner\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x0c\n\x04\x64\x65sc\x18\x02 \x01(\t\"k\n\x16\x43loudRegulatoryWarning\x12Q\n\x17\x63loudRegulatoryWarnings\x18\x01 \x03(\x0b\x32\x30.mogo.telematics.pad.CloudRegulatoryWarningInner\"I\n\x0f\x43ollisionReport\x12\x11\n\tlongitude\x18\x01 \x01(\x01\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x11\n\ttimestamp\x18\x03 \x01(\x01\"2\n\x14\x43\x61ptureImgOnTakeOver\x12\x0c\n\x04uuid\x18\x01 \x01(\r\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\"\x87\x01\n\x06Header\x12\r\n\x05msgID\x18\x01 \x01(\x04\x12\x31\n\x07msgType\x18\x02 \x01(\x0e\x32 .mogo.telematics.pad.MessageType\x12\x11\n\ttimestamp\x18\x03 \x01(\x01\x12\x17\n\x0fsourceTimestamp\x18\x04 \x01(\x01\x12\x0f\n\x07needAck\x18\x05 \x01(\r\"#\n\x11ImgUploadCloudCmd\x12\x0e\n\x06\x65nable\x18\x01 \x01(\x08\"*\n\x18ImgUploadCloudStatusResp\x12\x0e\n\x06\x65nable\x18\x01 \x01(\x08\"\x1d\n\x0bReceivedAck\x12\x0e\n\x06msgids\x18\x01 \x03(\x04\"\xea\x01\n\rV2nCrossSpeed\x12\x1a\n\x12speed_straight_min\x18\x01 \x01(\r\x12\x1a\n\x12speed_straight_max\x18\x02 \x01(\r\x12\x16\n\x0espeed_left_min\x18\x03 \x01(\r\x12\x16\n\x0espeed_left_max\x18\x04 \x01(\r\x12\x17\n\x0fspeed_right_min\x18\x05 \x01(\r\x12\x17\n\x0fspeed_right_max\x18\x06 \x01(\r\x12\x11\n\tmax_speed\x18\x07 \x01(\r\x12\x12\n\nmax_status\x18\x08 \x01(\r\x12\x0b\n\x03lng\x18\t \x01(\x01\x12\x0b\n\x03lat\x18\n \x01(\x01\"^\n\rCloudLinkAddr\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x11\n\tdirection\x18\x02 \x01(\r\x12\x0e\n\x06\x64omain\x18\x03 \x01(\t\x12\x0c\n\x04port\x18\x04 \x01(\r\x12\x0e\n\x06\x65nable\x18\x05 \x01(\x08\"@\n\x0b\x43loudConfig\x12\x31\n\x05\x61\x64\x64rs\x18\x01 \x03(\x0b\x32\".mogo.telematics.pad.CloudLinkAddr\"|\n\rV2nCongestion\x12\x10\n\x08msg_time\x18\x01 \x01(\x04\x12\x10\n\x08msg_name\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x61ta_source\x18\x03 \x01(\r\x12\x32\n\x05infos\x18\x04 \x03(\x0b\x32#.mogo.telematics.pad.CongestionInfo\"\x1f\n\x03Geo\x12\x0b\n\x03lon\x18\x01 \x01(\x01\x12\x0b\n\x03lat\x18\x02 \x01(\x01\"\x81\x01\n\x10\x45ventLocationGeo\x12\x10\n\x08startLng\x18\x01 \x01(\x01\x12\x10\n\x08startLat\x18\x02 \x01(\x01\x12\x0e\n\x06\x65ndLng\x18\x03 \x01(\x01\x12\x0e\n\x06\x65ndLat\x18\x04 \x01(\x01\x12)\n\x07regions\x18\x05 \x03(\x0b\x32\x18.mogo.telematics.pad.Geo\"]\n\nTimePeriod\x12\x12\n\nstart_time\x18\x01 \x01(\x04\x12\x10\n\x08\x65nd_time\x18\x02 \x01(\x04\x12\x13\n\x0bupdate_time\x18\x03 \x01(\x04\x12\x14\n\x0c\x63onfirm_time\x18\x04 \x01(\x04\"\xef\x02\n\x0e\x43ongestionInfo\x12\x13\n\x0b\x64\x61ta_status\x18\x01 \x01(\r\x12\x34\n\x0btime_period\x18\x02 \x01(\x0b\x32\x1f.mogo.telematics.pad.TimePeriod\x12\x41\n\x12\x65vent_location_geo\x18\x03 \x01(\x0b\x32%.mogo.telematics.pad.EventLocationGeo\x12\x14\n\x0cimg_file_key\x18\x04 \x03(\t\x12\x12\n\nevent_type\x18\x05 \x01(\r\x12\x10\n\x08msg_uuid\x18\x06 \x01(\t\x12\x18\n\x10\x63ongestion_level\x18\x07 \x01(\r\x12\x0f\n\x07lane_no\x18\x08 \x01(\r\x12\x17\n\x0f\x63ongestion_type\x18\t \x01(\r\x12\x0f\n\x07\x62\x65\x61ring\x18\n \x01(\x01\x12\x0b\n\x03lon\x18\x0b \x01(\x01\x12\x0b\n\x03lat\x18\x0c \x01(\x01\x12\x11\n\tvideo_url\x18\r \x01(\t\x12\x11\n\tcamera_ip\x18\x0e \x01(\t\"\x82\x02\n\x05\x45vent\x12\x11\n\tchannelId\x18\x01 \x01(\r\x12\r\n\x05rcuId\x18\x02 \x01(\x04\x12\x31\n\teventType\x18\x03 \x01(\x0e\x32\x1e.mogo.telematics.pad.EventType\x12\x12\n\nconfidence\x18\x04 \x01(\r\x12\x10\n\x08gnssType\x18\x05 \x01(\r\x12\x11\n\tlongitude\x18\x06 \x01(\x01\x12\x10\n\x08latitude\x18\x07 \x01(\x01\x12\x11\n\ttimestamp\x18\x08 \x01(\x04\x12\x0f\n\x07\x65ventId\x18\t \x01(\t\x12\x0c\n\x04\x65xts\x18\n \x01(\t\x12\x14\n\x0ctargetIdsLen\x18\x0b \x01(\r\x12\x11\n\ttargetIds\x18\x0c \x03(\t\"\xd4\x01\n\x0fTrajectoryPoint\x12\x11\n\tlongitude\x18\x01 \x01(\x01\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x10\n\x08\x61ltitude\x18\x03 \x01(\x01\x12\x0c\n\x04time\x18\x04 \x01(\x01\x12\x10\n\x08velocity\x18\x05 \x01(\x01\x12\x14\n\x0c\x61\x63\x63\x65leration\x18\x06 \x01(\x01\x12\r\n\x05theta\x18\x07 \x01(\x01\x12\r\n\x05kappa\x18\x08 \x01(\x01\x12\x16\n\x0e\x61\x63\x63umulatedDis\x18\t \x01(\x01\x12\x1e\n\x16reversedAccumulatedDis\x18\n \x01(\x01\"]\n\nTrajectory\x12\x34\n\x06points\x18\x01 \x03(\x0b\x32$.mogo.telematics.pad.TrajectoryPoint\x12\x19\n\x11is_AIP_trajectory\x18\x02 \x01(\x08\"\'\n\tSubSource\x12\x0e\n\x06source\x18\x01 \x01(\r\x12\n\n\x02id\x18\x02 \x01(\t\"S\n\rTrackedSource\x12\x0e\n\x06source\x18\x01 \x01(\r\x12\x32\n\nsub_source\x18\x02 \x03(\x0b\x32\x1e.mogo.telematics.pad.SubSource\"\x81\x05\n\rTrackedObject\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x11\n\tlongitude\x18\x02 \x01(\x01\x12\x10\n\x08latitude\x18\x03 \x01(\x01\x12\x10\n\x08\x61ltitude\x18\x04 \x01(\x01\x12\x12\n\nsystemTime\x18\x05 \x01(\x01\x12\x15\n\rsatelliteTime\x18\x06 \x01(\x01\x12\x0c\n\x04uuid\x18\x07 \x01(\r\x12\r\n\x05\x63\x61rID\x18\x08 \x01(\t\x12\r\n\x05\x63olor\x18\t \x01(\t\x12\x0f\n\x07heading\x18\n \x01(\x01\x12\r\n\x05speed\x18\x0b \x01(\x01\x12\x11\n\tdrawLevel\x18\x0c \x01(\r\x12\x12\n\ndriverTime\x18\r \x01(\x01\x12:\n\x0etracked_source\x18\x0e \x03(\x0b\x32\".mogo.telematics.pad.TrackedSource\x12.\n\x07polygon\x18\x0f \x03(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x1f\n\x06\x63\x65nter\x18\x10 \x01(\x0b\x32\x0f.geometry.Point\x12?\n\radd_attribute\x18\x11 \x01(\x0e\x32(.mogo.telematics.pad.AdditionalAttribute\x12\r\n\x05\x61ngle\x18\x12 \x01(\x01\x12\x11\n\timage_url\x18\x13 \x03(\t\x12\x11\n\tvideo_url\x18\x14 \x01(\t\x12\x11\n\tcamera_ip\x18\x15 \x01(\t\x12\x19\n\x11\x64\x65tect_start_time\x18\x16 \x01(\x04\x12\x10\n\x08v2x_uuid\x18\x17 \x01(\t\x12\x0e\n\x06roadId\x18\x18 \x01(\t\x12\x0f\n\x07laneNum\x18\x19 \x01(\x05\x12\x16\n\x0esuggestedLanes\x18\x1a \x01(\x08\x12\x11\n\tarrowType\x18\x1b \x01(\x05\"d\n\x10LocalizationInfo\x12\r\n\x05stamp\x18\x01 \x01(\x01\x12\x11\n\tlongitude\x18\x02 \x01(\x02\x12\x10\n\x08latitude\x18\x03 \x01(\x02\x12\x0b\n\x03\x61lt\x18\x04 \x01(\x02\x12\x0f\n\x07heading\x18\x05 \x01(\x02\"\x8e\x01\n\rBlindAreaData\x12\x17\n\x0f\x61ngleResolution\x18\x01 \x01(\x02\x12\x11\n\tdistances\x18\x02 \x03(\x05\x12?\n\x10localizationInfo\x18\x03 \x01(\x0b\x32%.mogo.telematics.pad.LocalizationInfo\x12\x10\n\x08maxRange\x18\x04 \x01(\x02\"\x95\x01\n\x0eTrackedObjects\x12\x30\n\x04objs\x18\x01 \x03(\x0b\x32\".mogo.telematics.pad.TrackedObject\x12\x39\n\rblindAreaData\x18\x02 \x01(\x0b\x32\".mogo.telematics.pad.BlindAreaData\x12\x16\n\x0e\x63ollision_risk\x18\x03 \x01(\r\"\xcd\x01\n\x08GnssInfo\x12\x11\n\tlongitude\x18\x01 \x01(\x01\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x10\n\x08\x61ltitude\x18\x03 \x01(\x01\x12\x0f\n\x07heading\x18\x04 \x01(\x01\x12\x14\n\x0c\x61\x63\x63\x65leration\x18\x05 \x01(\x01\x12\x0f\n\x07yawRate\x18\x06 \x01(\x01\x12\x11\n\tgnssSpeed\x18\x07 \x01(\x01\x12\x14\n\x0cvehicleSpeed\x18\x08 \x01(\x01\x12\x15\n\rsatelliteTime\x18\t \x01(\x01\x12\x12\n\nsystemTime\x18\n \x01(\x01\"\x81\x01\n\x0e\x41utopilotState\x12\r\n\x05state\x18\x01 \x01(\r\x12\x0e\n\x06\x63\x61mera\x18\x02 \x01(\r\x12\r\n\x05radar\x18\x03 \x01(\r\x12\x0b\n\x03rtk\x18\x04 \x01(\r\x12\x15\n\rautopilotMode\x18\x05 \x01(\r\x12\r\n\x05speed\x18\x06 \x01(\x01\x12\x0e\n\x06reason\x18\x07 \x01(\t\",\n\x0ePlanningObject\x12\x0c\n\x04uuid\x18\x01 \x01(\r\x12\x0c\n\x04type\x18\x02 \x01(\r\"D\n\x0fPlanningObjects\x12\x31\n\x04objs\x18\x01 \x03(\x0b\x32#.mogo.telematics.pad.PlanningObject\"\x85\x02\n\x04Line\x12\x0e\n\x06lineId\x18\x01 \x01(\x04\x12\x0f\n\x07trajUrl\x18\x02 \x01(\t\x12\x0f\n\x07trajMd5\x18\x03 \x01(\t\x12\x0f\n\x07stopUrl\x18\x04 \x01(\t\x12\x0f\n\x07stopMd5\x18\x05 \x01(\t\x12\x11\n\ttimestamp\x18\x06 \x01(\x04\x12\x14\n\x0cvehicleModel\x18\x07 \x01(\t\x12\x14\n\x0ctrajUrl_dpqp\x18\x08 \x01(\t\x12\x14\n\x0ctrajMd5_dpqp\x18\t \x01(\t\x12\x14\n\x0cstopUrl_dpqp\x18\n \x01(\t\x12\x14\n\x0cstopMd5_dpqp\x18\x0b \x01(\t\x12\x16\n\x0etimestamp_dpqp\x18\x0c \x01(\x04\x12\x10\n\x08lineName\x18\r \x01(\t\"\xc9\x01\n\x15TrajectoryDownloadReq\x12\'\n\x04line\x18\x01 \x01(\x0b\x32\x19.mogo.telematics.pad.Line\x12\x0e\n\x06source\x18\x02 \x01(\r\x12\x14\n\x0c\x64ownloadType\x18\x03 \x01(\r\x12\x31\n\trouteInfo\x18\x04 \x01(\x0b\x32\x1e.mogo.telematics.pad.RouteInfo\x12.\n\x08\x63md_info\x18\x05 \x01(\x0b\x32\x1c.mogo.telematics.pad.CmdInfo\"%\n\x0c\x42\x61sicInfoReq\x12\x15\n\rcertification\x18\x01 \x01(\x0c\"f\n\rBasicInfoResp\x12\n\n\x02sn\x18\x01 \x01(\t\x12\x13\n\x0b\x65nvironment\x18\x02 \x01(\r\x12\x0c\n\x04role\x18\x03 \x01(\r\x12\x0f\n\x07version\x18\x04 \x01(\t\x12\x15\n\rcertification\x18\x05 \x01(\x0c\"c\n\x08Location\x12\x11\n\tlongitude\x18\x01 \x01(\x01\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x10\n\x08\x61ltitude\x18\x03 \x01(\x01\x12\x0f\n\x07heading\x18\x04 \x01(\x01\x12\x0f\n\x07station\x18\x05 \x01(\x08\"\x9e\x03\n\tRouteInfo\x12\x34\n\rstartLocation\x18\x01 \x01(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x11\n\tstartName\x18\x02 \x01(\t\x12\x32\n\x0b\x65ndLocation\x18\x03 \x01(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x0f\n\x07\x65ndName\x18\x04 \x01(\t\x12\x30\n\twayPoints\x18\x05 \x03(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x12\n\nspeedLimit\x18\x06 \x01(\x01\x12\x13\n\x0bvehicleType\x18\x07 \x01(\r\x12\x14\n\x0cisSpeakVoice\x18\x08 \x01(\x08\x12\x0f\n\x07routeID\x18\t \x01(\r\x12\x11\n\trouteName\x18\n \x01(\t\x12\'\n\x04line\x18\x0b \x01(\x0b\x32\x19.mogo.telematics.pad.Line\x12\x32\n\x0b\x62lackPoints\x18\x0c \x03(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x11\n\tisStation\x18\r \x01(\x08\"9\n\x07\x43mdInfo\x12\x1c\n\x14\x66irst_autopilot_flag\x18\x01 \x01(\x08\x12\x10\n\x08order_id\x18\x02 \x01(\t\"\xe4\x01\n\x13SetAutopilotModeReq\x12\x0c\n\x04mode\x18\x01 \x01(\r\x12\x0e\n\x06source\x18\x02 \x01(\r\x12\x31\n\trouteInfo\x18\x03 \x01(\x0b\x32\x1e.mogo.telematics.pad.RouteInfo\x12\x11\n\tsessionId\x18\x04 \x01(\x04\x12.\n\x08\x63md_info\x18\x05 \x01(\x0b\x32\x1c.mogo.telematics.pad.CmdInfo\x12\x39\n\x0estart_pos_type\x18\x06 \x01(\x0e\x32!.mogo.telematics.pad.StartPosType\" \n\x0eSetDemoModeReq\x12\x0e\n\x06\x65nable\x18\x01 \x01(\r\"\x0e\n\x0c\x43\x61rConfigReq\"\x9f\x02\n\rCarConfigResp\x12\x13\n\x0b\x64ockVersion\x18\x01 \x01(\t\x12\x13\n\x0bplateNumber\x18\x02 \x01(\t\x12\x12\n\nmacAddress\x18\x03 \x01(\t\x12=\n\x0fprotocolVersion\x18\x04 \x01(\x0e\x32$.mogo.telematics.pad.ProtocolVersion\x12\x12\n\nspeedLimit\x18\x05 \x01(\x01\x12\x15\n\rmaxSpeedLimit\x18\x06 \x01(\x01\x12\x17\n\x0fminAcceleration\x18\x07 \x01(\x01\x12\x17\n\x0fmaxAcceleration\x18\x08 \x01(\x01\x12\x0f\n\x07\x63\x61rType\x18\t \x01(\t\x12\x12\n\nsubCarType\x18\n \x01(\t\x12\x0f\n\x07vinCode\x18\x0b \x01(\t\"N\n\x0bRecordCause\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\x10\n\x08\x66ilename\x18\x02 \x01(\t\x12\x0e\n\x06reason\x18\x03 \x01(\t\x12\x10\n\x08reasonID\x18\x04 \x01(\t\"~\n\nRecordData\x12\n\n\x02id\x18\x01 \x01(\r\x12\x10\n\x08\x64uration\x18\x02 \x01(\r\x12\x0c\n\x04type\x18\x03 \x01(\r\x12\x10\n\x08isRecord\x18\x04 \x01(\x08\x12\x0f\n\x07sustain\x18\x05 \x01(\x08\x12\x11\n\tbduration\x18\x06 \x01(\r\x12\x0e\n\x06topics\x18\x07 \x03(\t\"*\n\x14SetAutopilotSpeedReq\x12\x12\n\nspeedLimit\x18\x01 \x01(\x01\"\x0f\n\rGlobalPathReq\"R\n\x0eGlobalPathResp\x12\x30\n\twayPoints\x18\x01 \x03(\x0b\x32\x1d.mogo.telematics.pad.Location\x12\x0e\n\x06lineId\x18\x02 \x01(\x04\"D\n\x12TrafficLightStatus\x12\x0f\n\x07phaseNo\x18\x01 \x01(\t\x12\r\n\x05\x63olor\x18\x02 \x01(\t\x12\x0e\n\x06remain\x18\x03 \x01(\x05\"\xb9\x01\n\x12TrafficLightDetail\x12\x35\n\x04left\x18\x01 \x01(\x0b\x32\'.mogo.telematics.pad.TrafficLightStatus\x12\x34\n\x03mid\x18\x02 \x01(\x0b\x32\'.mogo.telematics.pad.TrafficLightStatus\x12\x36\n\x05right\x18\x03 \x01(\x0b\x32\'.mogo.telematics.pad.TrafficLightStatus\"\x83\x02\n\x10TrafficLightData\x12\x0f\n\x07\x63rossID\x18\x01 \x01(\t\x12\x10\n\x08latitude\x18\x02 \x01(\x01\x12\x11\n\tlongitude\x18\x03 \x01(\x01\x12\x0f\n\x07heading\x18\x04 \x01(\t\x12\x11\n\tdirection\x18\x05 \x01(\t\x12\x0f\n\x07lightId\x18\x06 \x01(\x05\x12\x0e\n\x06laneNo\x18\x07 \x01(\x05\x12\x0f\n\x07\x61rrowNo\x18\x08 \x01(\x05\x12\x13\n\x0b\x66lashYellow\x18\t \x01(\x05\x12;\n\nlaneDetail\x18\n \x01(\x0b\x32\'.mogo.telematics.pad.TrafficLightDetail\x12\x11\n\ttimestamp\x18\x0b \x01(\x04\"C\n\x04Warn\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x0f\n\x07\x63ontent\x18\x02 \x01(\t\x12\r\n\x05level\x18\x03 \x01(\r\x12\r\n\x05value\x18\x04 \x01(\t\"Z\n\x13\x41rrivalNotification\x12\x0f\n\x07\x63\x61rType\x18\x01 \x01(\r\x12\x32\n\x0b\x65ndLocation\x18\x02 \x01(\x0b\x32\x1d.mogo.telematics.pad.Location\"Q\n\x0cSystemCmdReq\x12\x33\n\x07\x63mdType\x18\x01 \x01(\x0e\x32\".mogo.telematics.pad.SystemCmdType\x12\x0c\n\x04node\x18\x02 \x01(\r\"\x10\n\x0eStatusQueryReq\" \n\x0eSetRainModeReq\x12\x0e\n\x06\x65nable\x18\x01 \x01(\r\"U\n\x13RecordDataConfigReq\x12\x0f\n\x07reqType\x18\x01 \x01(\r\x12\x12\n\nrecordType\x18\x02 \x01(\r\x12\x19\n\x11topicsNeedToCache\x18\x03 \x03(\t\":\n\x0eRecordDataType\x12\n\n\x02id\x18\x01 \x01(\r\x12\x0c\n\x04\x64\x65sc\x18\x02 \x01(\t\x12\x0e\n\x06topics\x18\x03 \x03(\t\"_\n\x10RecordDataConfig\x12\x38\n\x0brecordTypes\x18\x01 \x03(\x0b\x32#.mogo.telematics.pad.RecordDataType\x12\x11\n\tallTopics\x18\x02 \x03(\t\"D\n\x10SubscribeDataReq\x12\x0c\n\x04role\x18\x01 \x01(\r\x12\x0f\n\x07reqType\x18\x02 \x01(\r\x12\x11\n\tdataTypes\x18\x03 \x03(\r\"V\n\x0eOperatorCmdReq\x12\x35\n\x07\x63mdType\x18\x01 \x01(\x0e\x32$.mogo.telematics.pad.OperatorCmdType\x12\r\n\x05value\x18\x02 \x01(\x01\"\x88\x01\n\x10\x44rivingActionMsg\x12\x38\n\rdriving_state\x18\x01 \x01(\x0e\x32!.mogo.telematics.pad.DrivingState\x12:\n\x0e\x64riving_action\x18\x02 \x01(\x0e\x32\".mogo.telematics.pad.DrivingAction\"\x9d\x01\n\x19ParkScenarioDrivingAction\x12\x44\n\rdriving_state\x18\x01 \x01(\x0e\x32-.mogo.telematics.pad.ParkScenarioDrivingState\x12:\n\x0e\x64riving_action\x18\x02 \x01(\x0e\x32\".mogo.telematics.pad.DrivingAction\"y\n\x1aParkScenarioPlanningAction\x12\x42\n\naction_msg\x18\x01 \x01(\x0b\x32..mogo.telematics.pad.ParkScenarioDrivingAction\x12\x17\n\x0f\x64\x65stination_acc\x18\x02 \x01(\x01\"\xbb\x02\n\x11PlanningActionMsg\x12\x39\n\naction_msg\x18\x01 \x01(\x0b\x32%.mogo.telematics.pad.DrivingActionMsg\x12\x17\n\x0f\x64\x65stination_acc\x18\x02 \x01(\x01\x12M\n\x14park_scenario_action\x18\x03 \x01(\x0b\x32/.mogo.telematics.pad.ParkScenarioPlanningAction\x12=\n\x0ev2n_action_msg\x18\x04 \x03(\x0b\x32%.mogo.telematics.pad.DrivingActionMsg\x12\x32\n\x19\x64\x65s_lane_vehicle_postions\x18\x05 \x03(\x0b\x32\x0f.geometry.Point\x12\x10\n\x08utm_zone\x18\x06 \x01(\r\"*\n\x0bSetOneParam\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\r\n\x05value\x18\x02 \x01(\t\"=\n\x0bSetParamReq\x12.\n\x04reqs\x18\x01 \x03(\x0b\x32 .mogo.telematics.pad.SetOneParam\"w\n\rTripInfoEvent\x12\x0c\n\x04type\x18\x01 \x01(\r\x12\x10\n\x08lineName\x18\x02 \x01(\t\x12\x19\n\x11\x64\x65partureStopName\x18\x03 \x01(\t\x12\x17\n\x0f\x61rrivalStopName\x18\x04 \x01(\t\x12\x12\n\nisLastStop\x18\x05 \x01(\x08\"\x1a\n\x0bPullOverCmd\x12\x0b\n\x03\x63md\x18\x01 \x01(\r\"\x1c\n\rLaneChangeCmd\x12\x0b\n\x03\x63md\x18\x01 \x01(\r\"\x7f\n\x0bPlanningCmd\x12\x35\n\x0bpullOverCmd\x18\x01 \x01(\x0b\x32 .mogo.telematics.pad.PullOverCmd\x12\x39\n\rlaneChangeCmd\x18\x02 \x01(\x0b\x32\".mogo.telematics.pad.LaneChangeCmd\"L\n\tDebugInfo\x12\x0b\n\x03seq\x18\x01 \x01(\r\x12\x32\n\x08sessions\x18\x02 \x03(\x0b\x32 .mogo.telematics.pad.SessionInfo\"g\n\x0bSessionInfo\x12\x11\n\tsessionID\x18\x01 \x01(\r\x12\x0c\n\x04role\x18\x02 \x01(\r\x12\n\n\x02sn\x18\x03 \x01(\t\x12\x1a\n\x12\x63onnectedTimeStamp\x18\x04 \x01(\x04\x12\x0f\n\x07version\x18\x05 \x01(\t*5\n\x0fProtocolVersion\x12\x0e\n\nDefaultver\x10\x00\x12\x12\n\x0e\x43urrentVersion\x10\n*\xe9\x14\n\x0bMessageType\x12\x12\n\x0eMsgTypeDefault\x10\x00\x12\"\n\x1dMsgTypeCameraCalibCheckData30\x10\x81 \x12\"\n\x1dMsgTypeCameraCalibCheckData60\x10\x82 \x12(\n#MsgTypeCameraCalibCheckData120Front\x10\x83 \x12\'\n\"MsgTypeCameraCalibCheckData120Back\x10\x84 \x12\'\n\"MsgTypeCameraCalibCheckData120Left\x10\x85 \x12(\n#MsgTypeCameraCalibCheckData120Right\x10\x86 \x12%\n MsgTypeCaptureFrontImgOnTakeOver\x10\x87 \x12$\n\x1fMsgTypeCaptureBackImgOnTakeOver\x10\x88 \x12\x17\n\x11MsgTypeTrajectory\x10\x80\x80\x04\x12\x1b\n\x15MsgTypeTrackedObjects\x10\x81\x80\x04\x12\x15\n\x0fMsgTypeGnssInfo\x10\x82\x80\x04\x12\x19\n\x13MsgTypeVehicleState\x10\x83\x80\x04\x12\x1b\n\x15MsgTypeAutopilotState\x10\x84\x80\x04\x12\x1a\n\x14MsgTypeReportMessage\x10\x85\x80\x04\x12#\n\x1dMsgTypePerceptionTrafficLight\x10\x86\x80\x04\x12)\n#MsgTypePredictionObstacleTrajectory\x10\x87\x80\x04\x12\x17\n\x11MsgTypePointCloud\x10\x88\x80\x04\x12\x1c\n\x16MsgTypePlanningObjects\x10\x89\x80\x04\x12\x10\n\nMsgTypeOBU\x10\x8a\x80\x04\x12\x1a\n\x14MsgTypeChassisStates\x10\x8b\x80\x04\x12\x1b\n\x15MsgTypeFunctionStates\x10\x8c\x80\x04\x12\x1c\n\x16MsgTypeBackCameraVideo\x10\x8d\x80\x04\x12\x1c\n\x16MsgTypeM1StitchedVideo\x10\x8e\x80\x04\x12\x15\n\x0fMsgTypeSSMState\x10\x8f\x80\x04\x12\x14\n\x0eMsgTypeFMState\x10\x90\x80\x04\x12\x19\n\x13MsgTypeFSM2024State\x10\x91\x80\x04\x12\x15\n\x0fMsgTypeLocState\x10\x92\x80\x04\x12#\n\x1dMsgTypeCloudRegulatoryWarning\x10\x93\x80\x04\x12\x1c\n\x16MsgTypeChassis25States\x10\x94\x80\x04\x12\"\n\x1cMsgTypePredictionObjects2025\x10\x95\x80\x04\x12\x19\n\x13MsgTypeBasicInfoReq\x10\x80\x82\x04\x12\x1a\n\x14MsgTypeBasicInfoResp\x10\x81\x82\x04\x12 \n\x1aMsgTypeSetAutopilotModeReq\x10\x82\x82\x04\x12\x1b\n\x15MsgTypeSetDemoModeReq\x10\x83\x82\x04\x12\x19\n\x13MsgTypeCarConfigReq\x10\x84\x82\x04\x12\x1a\n\x14MsgTypeCarConfigResp\x10\x85\x82\x04\x12\x18\n\x12MsgTypeRecordCause\x10\x86\x82\x04\x12\x17\n\x11MsgTypeRecordData\x10\x87\x82\x04\x12\x19\n\x13MsgTypeRecordResult\x10\x88\x82\x04\x12!\n\x1bMsgTypeSetAutopilotSpeedReq\x10\x89\x82\x04\x12\x1a\n\x14MsgTypeGlobalPathReq\x10\x8a\x82\x04\x12\x1b\n\x15MsgTypeGlobalPathResp\x10\x8b\x82\x04\x12\x1d\n\x17MsgTypeTrafficLightData\x10\x8c\x82\x04\x12\x11\n\x0bMsgTypeWarn\x10\x8d\x82\x04\x12 \n\x1aMsgTypeArrivalNotification\x10\x8e\x82\x04\x12\x19\n\x13MsgTypeSystemCmdReq\x10\x8f\x82\x04\x12\"\n\x1cMsgTypeTrajectoryDownloadReq\x10\x90\x82\x04\x12\x1b\n\x15MsgTypeStatusQueryReq\x10\x91\x82\x04\x12\x1c\n\x16MsgTypeStatusQueryResp\x10\x92\x82\x04\x12\x1b\n\x15MsgTypeSetRainModeReq\x10\x93\x82\x04\x12 \n\x1aMsgTypeRecordDataConfigReq\x10\x94\x82\x04\x12!\n\x1bMsgTypeRecordDataConfigResp\x10\x95\x82\x04\x12\x1b\n\x15MsgTypeOperatorCmdReq\x10\x96\x82\x04\x12\x1d\n\x17MsgTypeSubscribeDataReq\x10\x97\x82\x04\x12\"\n\x1cMsgTypeSpecialVehicleTaskCmd\x10\x98\x82\x04\x12\x18\n\x12MsgTypeSetParamReq\x10\x99\x82\x04\x12\x1a\n\x14MsgTypeTripInfoEvent\x10\x9a\x82\x04\x12\x1a\n\x14MsgTypeBagManagerCmd\x10\x9b\x82\x04\x12\x18\n\x12MsgTypePlanningCmd\x10\x9c\x82\x04\x12\x1a\n\x14MsgTypeSetParamReqV2\x10\x9d\x82\x04\x12\x1f\n\x19MsgTypeV2nCongestionEvent\x10\x9e\x82\x04\x12 \n\x1aMsgTypeV2nGlobalPathEvents\x10\x9f\x82\x04\x12\x18\n\x12MsgTypeGetParamReq\x10\xa0\x82\x04\x12\x19\n\x13MsgTypeGetParamResp\x10\xa1\x82\x04\x12\x14\n\x0eMsgTypeTaskCmd\x10\xa2\x82\x04\x12$\n\x1eMsgTypeFSMStatusReasonQueryReq\x10\xa3\x82\x04\x12%\n\x1fMsgTypeFSMStatusReasonQueryResp\x10\xa4\x82\x04\x12\x19\n\x13MsgTypeGetDebugInfo\x10\xa5\x82\x04\x12\x1f\n\x19MsgTypeParallelDrivingCmd\x10\xa6\x82\x04\x12\x18\n\x12MsgTypeReceivedAck\x10\xa7\x82\x04\x12(\n\"MsgTypeV2nNioGreenWavePassageEvent\x10\xa8\x82\x04\x12!\n\x1bMsgTypeV2nNioCrossoverEvent\x10\xa9\x82\x04\x12\'\n!MsgTypeV2nNioOtherRetrogradeEvent\x10\xaa\x82\x04\x12\"\n\x1cMsgTypeV2nNioCongestionEvent\x10\xab\x82\x04\x12\x1a\n\x14MsgTypeLaneMarksTran\x10\xac\x82\x04\x12\x1c\n\x16MsgTypeCollisionReport\x10\xad\x82\x04\x12\x16\n\x10MsgTypePowerUnit\x10\xae\x82\x04\x12\x17\n\x11MsgTypeSSMFuncMsg\x10\xaf\x82\x04\x12\x1f\n\x19MsgTypeSSMFuncStatusQuery\x10\xb0\x82\x04\x12\x16\n\x10MsgTypeHeartbeat\x10\xb1\x82\x04\x12$\n\x1eMsgTypeCaptureImgReqOnTakeOver\x10\xb2\x82\x04\x12\x17\n\x11MsgTypeEzhouCloud\x10\xb3\x82\x04\x12\x14\n\x0eMsgTypeCopyBag\x10\xb4\x82\x04\x12\x18\n\x12MsgTypeCloudConfig\x10\xb5\x82\x04\x12!\n\x1bMsgTypeImgUploadCloudEnable\x10\xb6\x82\x04\x12&\n MsgTypeImgUploadCloudStatusQuery\x10\xb7\x82\x04*\x91\x01\n\tEventType\x12\x14\n\x10\x43ONVERSE_RUNNING\x10\x00\x12\x10\n\x0cSLOW_RUNNING\x10\x01\x12\x14\n\x10SPEEDING_RUNNING\x10\x02\x12\x15\n\x11\x45MERGENCY_BRAKING\x10\x03\x12\x14\n\x10\x41\x42NORMAL_PARKING\x10\x04\x12\x19\n\x15NON_VEHICLE_INTRUSION\x10\x05*\x92\x01\n\x13\x41\x64\x64itionalAttribute\x12\x10\n\x0c\x41TTR_UNKNOWN\x10\x00\x12\x0f\n\x0b\x41TTR_ZOMBIE\x10\x01\x12\x1a\n\x16\x41TTR_ROAD_CONSTRUCTION\x10\x02\x12\x0f\n\x0b\x41TTR_STATIC\x10\x03\x12\x11\n\rATTR_ACCIDENT\x10\x04\x12\x18\n\x14\x41TTR_ROAD_CONGESTION\x10\x05*8\n\x0cStartPosType\x12\x11\n\rFIRST_STATION\x10\x00\x12\n\n\x06MIDDLE\x10\x01\x12\t\n\x05OTHER\x10\x02*\x85\x01\n\rSystemCmdType\x12\x12\n\x0eSYSTEMCMD_NONE\x10\x00\x12\x14\n\x10SYSTEMCMD_REBOOT\x10\x01\x12\x18\n\x14SYSTEMCMD_START_NODE\x10\x02\x12\x17\n\x13SYSTEMCMD_STOP_NODE\x10\x03\x12\x17\n\x13SYSTEMCMD_POWER_OFF\x10\x04*\xab\x01\n\x0fOperatorCmdType\x12\x15\n\x11OPERATOR_CMD_NONE\x10\x00\x12\x1c\n\x18OPERATOR_CMD_CHANGE_LANE\x10\x01\x12&\n\"OPERATOR_CMD_SET_ACCELERATED_SPEED\x10\x02\x12\x19\n\x15OPERATOR_CMD_SET_HORN\x10\x03\x12 \n\x1cOPERATOR_CMD_SEND_LANE_MARKS\x10\x04*\x90\x07\n\x0c\x44rivingState\x12\x12\n\x0eNO_AUTODRIVING\x10\x00\x12\x0e\n\nLANKE_KEEP\x10\x01\x12\x11\n\rTRAFFIC_LIGHT\x10\x02\x12\x1b\n\x17\x46OLLOW_LANE_CHANGE_LEFT\x10\x03\x12\x1c\n\x18\x46OLLOW_LANE_CHANGE_RIGHT\x10\x04\x12\x19\n\x15\x41UTO_LANE_CHANGE_LEFT\x10\x05\x12\x1a\n\x16\x41UTO_LANE_CHANGE_RIGHT\x10\x06\x12\x13\n\x0fLANE_AVOID_LEFT\x10\x07\x12\x14\n\x10LANE_AVOID_RIGHT\x10\x08\x12\x0c\n\x08START_UP\x10\t\x12\r\n\tPULL_OVER\x10\n\x12\x1d\n\x19UN_PROTECTED_INTERSECTION\x10\x0b\x12\x1d\n\x19\x41UTO_LANE_CHANGE_LEFT_V2N\x10\x0c\x12\x1e\n\x1a\x41UTO_LANE_CHANGE_RIGHT_V2N\x10\r\x12\x17\n\x13LANE_AVOID_LEFT_V2N\x10\x0e\x12\x18\n\x14LANE_AVOID_RIGHT_V2N\x10\x0f\x12\x0f\n\x0bWAITING_V2N\x10\x10\x12\x1d\n\x19\x41UTO_LANE_CHANGE_LEFT_RSI\x10\x11\x12\x1e\n\x1a\x41UTO_LANE_CHANGE_RIGHT_RSI\x10\x12\x12\x17\n\x13LANE_AVOID_LEFT_RSI\x10\x13\x12\x18\n\x14LANE_AVOID_RIGHT_RSI\x10\x14\x12\x0f\n\x0bWAITING_RSI\x10\x15\x12\x1d\n\x19\x41UTO_LANE_CHANGE_LEFT_RSM\x10\x16\x12\x1e\n\x1a\x41UTO_LANE_CHANGE_RIGHT_RSM\x10\x17\x12\x17\n\x13LANE_AVOID_LEFT_RSM\x10\x18\x12\x18\n\x14LANE_AVOID_RIGHT_RSM\x10\x19\x12\x0f\n\x0bWAITING_RSM\x10\x1a\x12&\n\"AUTO_LANE_CHANGE_LEFT_RSI_TRIANGLE\x10\x1b\x12\'\n#AUTO_LANE_CHANGE_RIGHT_RSI_TRIANGLE\x10\x1c\x12 \n\x1cLANE_AVOID_LEFT_RSI_TRIANGLE\x10\x1d\x12!\n\x1dLANE_AVOID_RIGHT_RSI_TRIANGLE\x10\x1e\x12\x18\n\x14WAITING_RSI_TRIANGLE\x10\x1f\x12\x0e\n\nOUT_OF_ODD\x10 \x12\'\n#YIELD_TO_VEHICLE_COMING_FROM_BEHIND\x10!*\xc5\x02\n\rDrivingAction\x12\x1d\n\x19\x44RIVING_Action_STATE_NONE\x10\x00\x12\x1c\n\x18\x44RIVING_ACTION_STATE_ONE\x10\x01\x12\x1c\n\x18\x44RIVING_ACTION_STATE_TWO\x10\x02\x12\x1e\n\x1a\x44RIVING_ACTION_STATE_THREE\x10\x03\x12\x1d\n\x19\x44RIVING_ACTION_STATE_FOUR\x10\x04\x12\x1d\n\x19\x44RIVING_ACTION_STATE_FIVE\x10\x05\x12\x1c\n\x18\x44RIVING_ACTION_STATE_SIX\x10\x06\x12\x1e\n\x1a\x44RIVING_ACTION_STATE_SEVEN\x10\x07\x12\x1e\n\x1a\x44RIVING_ACTION_STATE_EIGHT\x10\x08\x12\x1d\n\x19\x44RIVING_ACTION_STATE_NINE\x10\t*\x9f\x02\n\x18ParkScenarioDrivingState\x12\x1f\n\x1bPARK_SENARIO_NO_AUTODRIVING\x10\x00\x12\x1b\n\x17PARK_SENARIO_LANKE_KEEP\x10\x01\x12 \n\x1cPARK_SENARIO_LANE_AVOID_LEFT\x10\x02\x12!\n\x1dPARK_SENARIO_LANE_AVOID_RIGHT\x10\x03\x12\x19\n\x15PARK_SENARIO_START_UP\x10\x04\x12\x1a\n\x16PARK_SENARIO_PULL_OVER\x10\x05\x12#\n\x1fPARK_SENARIO_FORCE_PULL_OVER_ON\x10\x06\x12$\n PARK_SENARIO_FORCE_PULL_OVER_OFF\x10\x07\x62\x06proto3')
   ,
   dependencies=[geometry__pb2.DESCRIPTOR,])
 
@@ -42,8 +42,8 @@ _PROTOCOLVERSION = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=8518,
-  serialized_end=8571,
+  serialized_start=8652,
+  serialized_end=8705,
 )
 _sym_db.RegisterEnumDescriptor(_PROTOCOLVERSION)
 
@@ -405,8 +405,8 @@ _MESSAGETYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=8574,
-  serialized_end=11239,
+  serialized_start=8708,
+  serialized_end=11373,
 )
 _sym_db.RegisterEnumDescriptor(_MESSAGETYPE)
 
@@ -444,8 +444,8 @@ _EVENTTYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=11242,
-  serialized_end=11387,
+  serialized_start=11376,
+  serialized_end=11521,
 )
 _sym_db.RegisterEnumDescriptor(_EVENTTYPE)
 
@@ -483,12 +483,39 @@ _ADDITIONALATTRIBUTE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=11390,
-  serialized_end=11536,
+  serialized_start=11524,
+  serialized_end=11670,
 )
 _sym_db.RegisterEnumDescriptor(_ADDITIONALATTRIBUTE)
 
 AdditionalAttribute = enum_type_wrapper.EnumTypeWrapper(_ADDITIONALATTRIBUTE)
+_STARTPOSTYPE = _descriptor.EnumDescriptor(
+  name='StartPosType',
+  full_name='mogo.telematics.pad.StartPosType',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='FIRST_STATION', index=0, number=0,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='MIDDLE', index=1, number=1,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='OTHER', index=2, number=2,
+      serialized_options=None,
+      type=None),
+  ],
+  containing_type=None,
+  serialized_options=None,
+  serialized_start=11672,
+  serialized_end=11728,
+)
+_sym_db.RegisterEnumDescriptor(_STARTPOSTYPE)
+
+StartPosType = enum_type_wrapper.EnumTypeWrapper(_STARTPOSTYPE)
 _SYSTEMCMDTYPE = _descriptor.EnumDescriptor(
   name='SystemCmdType',
   full_name='mogo.telematics.pad.SystemCmdType',
@@ -518,8 +545,8 @@ _SYSTEMCMDTYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=11539,
-  serialized_end=11672,
+  serialized_start=11731,
+  serialized_end=11864,
 )
 _sym_db.RegisterEnumDescriptor(_SYSTEMCMDTYPE)
 
@@ -553,8 +580,8 @@ _OPERATORCMDTYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=11675,
-  serialized_end=11846,
+  serialized_start=11867,
+  serialized_end=12038,
 )
 _sym_db.RegisterEnumDescriptor(_OPERATORCMDTYPE)
 
@@ -704,8 +731,8 @@ _DRIVINGSTATE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=11849,
-  serialized_end=12761,
+  serialized_start=12041,
+  serialized_end=12953,
 )
 _sym_db.RegisterEnumDescriptor(_DRIVINGSTATE)
 
@@ -759,8 +786,8 @@ _DRIVINGACTION = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=12764,
-  serialized_end=13089,
+  serialized_start=12956,
+  serialized_end=13281,
 )
 _sym_db.RegisterEnumDescriptor(_DRIVINGACTION)
 
@@ -806,8 +833,8 @@ _PARKSCENARIODRIVINGSTATE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=13092,
-  serialized_end=13379,
+  serialized_start=13284,
+  serialized_end=13571,
 )
 _sym_db.RegisterEnumDescriptor(_PARKSCENARIODRIVINGSTATE)
 
@@ -913,6 +940,9 @@ ATTR_ROAD_CONSTRUCTION = 2
 ATTR_STATIC = 3
 ATTR_ACCIDENT = 4
 ATTR_ROAD_CONGESTION = 5
+FIRST_STATION = 0
+MIDDLE = 1
+OTHER = 2
 SYSTEMCMD_NONE = 0
 SYSTEMCMD_REBOOT = 1
 SYSTEMCMD_START_NODE = 2
@@ -2036,6 +2066,13 @@ _TRAJECTORY = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='is_AIP_trajectory', full_name='mogo.telematics.pad.Trajectory.is_AIP_trajectory', index=1,
+      number=2, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -2049,7 +2086,7 @@ _TRAJECTORY = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=2264,
-  serialized_end=2330,
+  serialized_end=2357,
 )
 
 
@@ -2086,8 +2123,8 @@ _SUBSOURCE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2332,
-  serialized_end=2371,
+  serialized_start=2359,
+  serialized_end=2398,
 )
 
 
@@ -2124,8 +2161,8 @@ _TRACKEDSOURCE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2373,
-  serialized_end=2456,
+  serialized_start=2400,
+  serialized_end=2483,
 )
 
 
@@ -2337,8 +2374,8 @@ _TRACKEDOBJECT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2459,
-  serialized_end=3100,
+  serialized_start=2486,
+  serialized_end=3127,
 )
 
 
@@ -2396,8 +2433,8 @@ _LOCALIZATIONINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3102,
-  serialized_end=3202,
+  serialized_start=3129,
+  serialized_end=3229,
 )
 
 
@@ -2448,8 +2485,8 @@ _BLINDAREADATA = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3205,
-  serialized_end=3347,
+  serialized_start=3232,
+  serialized_end=3374,
 )
 
 
@@ -2493,8 +2530,8 @@ _TRACKEDOBJECTS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3350,
-  serialized_end=3499,
+  serialized_start=3377,
+  serialized_end=3526,
 )
 
 
@@ -2587,8 +2624,8 @@ _GNSSINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3502,
-  serialized_end=3707,
+  serialized_start=3529,
+  serialized_end=3734,
 )
 
 
@@ -2660,8 +2697,8 @@ _AUTOPILOTSTATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3710,
-  serialized_end=3839,
+  serialized_start=3737,
+  serialized_end=3866,
 )
 
 
@@ -2698,8 +2735,8 @@ _PLANNINGOBJECT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3841,
-  serialized_end=3885,
+  serialized_start=3868,
+  serialized_end=3912,
 )
 
 
@@ -2729,8 +2766,8 @@ _PLANNINGOBJECTS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3887,
-  serialized_end=3955,
+  serialized_start=3914,
+  serialized_end=3982,
 )
 
 
@@ -2844,8 +2881,8 @@ _LINE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3958,
-  serialized_end=4219,
+  serialized_start=3985,
+  serialized_end=4246,
 )
 
 
@@ -2884,6 +2921,13 @@ _TRAJECTORYDOWNLOADREQ = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='cmd_info', full_name='mogo.telematics.pad.TrajectoryDownloadReq.cmd_info', index=4,
+      number=5, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -2896,8 +2940,8 @@ _TRAJECTORYDOWNLOADREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4222,
-  serialized_end=4375,
+  serialized_start=4249,
+  serialized_end=4450,
 )
 
 
@@ -2927,8 +2971,8 @@ _BASICINFOREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4377,
-  serialized_end=4414,
+  serialized_start=4452,
+  serialized_end=4489,
 )
 
 
@@ -2986,8 +3030,8 @@ _BASICINFORESP = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4416,
-  serialized_end=4518,
+  serialized_start=4491,
+  serialized_end=4593,
 )
 
 
@@ -3045,8 +3089,8 @@ _LOCATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4520,
-  serialized_end=4619,
+  serialized_start=4595,
+  serialized_end=4694,
 )
 
 
@@ -3160,8 +3204,8 @@ _ROUTEINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4622,
-  serialized_end=5036,
+  serialized_start=4697,
+  serialized_end=5111,
 )
 
 
@@ -3198,8 +3242,8 @@ _CMDINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5038,
-  serialized_end=5095,
+  serialized_start=5113,
+  serialized_end=5170,
 )
 
 
@@ -3245,6 +3289,13 @@ _SETAUTOPILOTMODEREQ = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='start_pos_type', full_name='mogo.telematics.pad.SetAutopilotModeReq.start_pos_type', index=5,
+      number=6, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -3257,8 +3308,8 @@ _SETAUTOPILOTMODEREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5098,
-  serialized_end=5267,
+  serialized_start=5173,
+  serialized_end=5401,
 )
 
 
@@ -3288,8 +3339,8 @@ _SETDEMOMODEREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5269,
-  serialized_end=5301,
+  serialized_start=5403,
+  serialized_end=5435,
 )
 
 
@@ -3312,8 +3363,8 @@ _CARCONFIGREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5303,
-  serialized_end=5317,
+  serialized_start=5437,
+  serialized_end=5451,
 )
 
 
@@ -3413,8 +3464,8 @@ _CARCONFIGRESP = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5320,
-  serialized_end=5607,
+  serialized_start=5454,
+  serialized_end=5741,
 )
 
 
@@ -3465,8 +3516,8 @@ _RECORDCAUSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5609,
-  serialized_end=5687,
+  serialized_start=5743,
+  serialized_end=5821,
 )
 
 
@@ -3538,8 +3589,8 @@ _RECORDDATA = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5689,
-  serialized_end=5815,
+  serialized_start=5823,
+  serialized_end=5949,
 )
 
 
@@ -3569,8 +3620,8 @@ _SETAUTOPILOTSPEEDREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5817,
-  serialized_end=5859,
+  serialized_start=5951,
+  serialized_end=5993,
 )
 
 
@@ -3593,8 +3644,8 @@ _GLOBALPATHREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5861,
-  serialized_end=5876,
+  serialized_start=5995,
+  serialized_end=6010,
 )
 
 
@@ -3631,8 +3682,8 @@ _GLOBALPATHRESP = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5878,
-  serialized_end=5960,
+  serialized_start=6012,
+  serialized_end=6094,
 )
 
 
@@ -3676,8 +3727,8 @@ _TRAFFICLIGHTSTATUS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=5962,
-  serialized_end=6030,
+  serialized_start=6096,
+  serialized_end=6164,
 )
 
 
@@ -3721,8 +3772,8 @@ _TRAFFICLIGHTDETAIL = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6033,
-  serialized_end=6218,
+  serialized_start=6167,
+  serialized_end=6352,
 )
 
 
@@ -3822,8 +3873,8 @@ _TRAFFICLIGHTDATA = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6221,
-  serialized_end=6480,
+  serialized_start=6355,
+  serialized_end=6614,
 )
 
 
@@ -3874,8 +3925,8 @@ _WARN = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6482,
-  serialized_end=6549,
+  serialized_start=6616,
+  serialized_end=6683,
 )
 
 
@@ -3912,8 +3963,8 @@ _ARRIVALNOTIFICATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6551,
-  serialized_end=6641,
+  serialized_start=6685,
+  serialized_end=6775,
 )
 
 
@@ -3950,8 +4001,8 @@ _SYSTEMCMDREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6643,
-  serialized_end=6724,
+  serialized_start=6777,
+  serialized_end=6858,
 )
 
 
@@ -3974,8 +4025,8 @@ _STATUSQUERYREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6726,
-  serialized_end=6742,
+  serialized_start=6860,
+  serialized_end=6876,
 )
 
 
@@ -4005,8 +4056,8 @@ _SETRAINMODEREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6744,
-  serialized_end=6776,
+  serialized_start=6878,
+  serialized_end=6910,
 )
 
 
@@ -4050,8 +4101,8 @@ _RECORDDATACONFIGREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6778,
-  serialized_end=6863,
+  serialized_start=6912,
+  serialized_end=6997,
 )
 
 
@@ -4095,8 +4146,8 @@ _RECORDDATATYPE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6865,
-  serialized_end=6923,
+  serialized_start=6999,
+  serialized_end=7057,
 )
 
 
@@ -4133,8 +4184,8 @@ _RECORDDATACONFIG = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=6925,
-  serialized_end=7020,
+  serialized_start=7059,
+  serialized_end=7154,
 )
 
 
@@ -4178,8 +4229,8 @@ _SUBSCRIBEDATAREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=7022,
-  serialized_end=7090,
+  serialized_start=7156,
+  serialized_end=7224,
 )
 
 
@@ -4216,8 +4267,8 @@ _OPERATORCMDREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=7092,
-  serialized_end=7178,
+  serialized_start=7226,
+  serialized_end=7312,
 )
 
 
@@ -4254,8 +4305,8 @@ _DRIVINGACTIONMSG = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=7181,
-  serialized_end=7317,
+  serialized_start=7315,
+  serialized_end=7451,
 )
 
 
@@ -4292,8 +4343,8 @@ _PARKSCENARIODRIVINGACTION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=7320,
-  serialized_end=7477,
+  serialized_start=7454,
+  serialized_end=7611,
 )
 
 
@@ -4330,8 +4381,8 @@ _PARKSCENARIOPLANNINGACTION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=7479,
-  serialized_end=7600,
+  serialized_start=7613,
+  serialized_end=7734,
 )
 
 
@@ -4396,8 +4447,8 @@ _PLANNINGACTIONMSG = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=7603,
-  serialized_end=7918,
+  serialized_start=7737,
+  serialized_end=8052,
 )
 
 
@@ -4434,8 +4485,8 @@ _SETONEPARAM = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=7920,
-  serialized_end=7962,
+  serialized_start=8054,
+  serialized_end=8096,
 )
 
 
@@ -4465,8 +4516,8 @@ _SETPARAMREQ = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=7964,
-  serialized_end=8025,
+  serialized_start=8098,
+  serialized_end=8159,
 )
 
 
@@ -4524,8 +4575,8 @@ _TRIPINFOEVENT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=8027,
-  serialized_end=8146,
+  serialized_start=8161,
+  serialized_end=8280,
 )
 
 
@@ -4555,8 +4606,8 @@ _PULLOVERCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=8148,
-  serialized_end=8174,
+  serialized_start=8282,
+  serialized_end=8308,
 )
 
 
@@ -4586,8 +4637,8 @@ _LANECHANGECMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=8176,
-  serialized_end=8204,
+  serialized_start=8310,
+  serialized_end=8338,
 )
 
 
@@ -4624,8 +4675,8 @@ _PLANNINGCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=8206,
-  serialized_end=8333,
+  serialized_start=8340,
+  serialized_end=8467,
 )
 
 
@@ -4662,8 +4713,8 @@ _DEBUGINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=8335,
-  serialized_end=8411,
+  serialized_start=8469,
+  serialized_end=8545,
 )
 
 
@@ -4721,8 +4772,8 @@ _SESSIONINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=8413,
-  serialized_end=8516,
+  serialized_start=8547,
+  serialized_end=8650,
 )
 
 _CLOUDREGULATORYWARNING.fields_by_name['cloudRegulatoryWarnings'].message_type = _CLOUDREGULATORYWARNINGINNER
@@ -4745,6 +4796,7 @@ _TRACKEDOBJECTS.fields_by_name['blindAreaData'].message_type = _BLINDAREADATA
 _PLANNINGOBJECTS.fields_by_name['objs'].message_type = _PLANNINGOBJECT
 _TRAJECTORYDOWNLOADREQ.fields_by_name['line'].message_type = _LINE
 _TRAJECTORYDOWNLOADREQ.fields_by_name['routeInfo'].message_type = _ROUTEINFO
+_TRAJECTORYDOWNLOADREQ.fields_by_name['cmd_info'].message_type = _CMDINFO
 _ROUTEINFO.fields_by_name['startLocation'].message_type = _LOCATION
 _ROUTEINFO.fields_by_name['endLocation'].message_type = _LOCATION
 _ROUTEINFO.fields_by_name['wayPoints'].message_type = _LOCATION
@@ -4752,6 +4804,7 @@ _ROUTEINFO.fields_by_name['line'].message_type = _LINE
 _ROUTEINFO.fields_by_name['blackPoints'].message_type = _LOCATION
 _SETAUTOPILOTMODEREQ.fields_by_name['routeInfo'].message_type = _ROUTEINFO
 _SETAUTOPILOTMODEREQ.fields_by_name['cmd_info'].message_type = _CMDINFO
+_SETAUTOPILOTMODEREQ.fields_by_name['start_pos_type'].enum_type = _STARTPOSTYPE
 _CARCONFIGRESP.fields_by_name['protocolVersion'].enum_type = _PROTOCOLVERSION
 _GLOBALPATHRESP.fields_by_name['wayPoints'].message_type = _LOCATION
 _TRAFFICLIGHTDETAIL.fields_by_name['left'].message_type = _TRAFFICLIGHTSTATUS
@@ -4850,6 +4903,7 @@ DESCRIPTOR.enum_types_by_name['ProtocolVersion'] = _PROTOCOLVERSION
 DESCRIPTOR.enum_types_by_name['MessageType'] = _MESSAGETYPE
 DESCRIPTOR.enum_types_by_name['EventType'] = _EVENTTYPE
 DESCRIPTOR.enum_types_by_name['AdditionalAttribute'] = _ADDITIONALATTRIBUTE
+DESCRIPTOR.enum_types_by_name['StartPosType'] = _STARTPOSTYPE
 DESCRIPTOR.enum_types_by_name['SystemCmdType'] = _SYSTEMCMDTYPE
 DESCRIPTOR.enum_types_by_name['OperatorCmdType'] = _OPERATORCMDTYPE
 DESCRIPTOR.enum_types_by_name['DrivingState'] = _DRIVINGSTATE

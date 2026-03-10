@@ -14,6 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 import geometry_pb2 as geometry__pb2
+import header_pb2 as header__pb2
 
 
 DESCRIPTOR = _descriptor.FileDescriptor(
@@ -21,9 +22,9 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='taskmgr',
   syntax='proto2',
   serialized_options=None,
-  serialized_pb=_b('\n\rtm_info.proto\x12\x07taskmgr\x1a\x0egeometry.proto\"2\n\x10TaskQueryRequest\x12\x0e\n\x06taskId\x18\x01 \x02(\r\x12\x0e\n\x06lineId\x18\x02 \x02(\r\"\x92\x01\n\x08Location\x12\x19\n\x0e\x63oordinateType\x18\x01 \x01(\r:\x01\x30\x12\x1e\n\x05point\x18\x02 \x01(\x0b\x32\x0f.geometry.Point\x12\x0f\n\x07station\x18\x03 \x01(\r\x12\x11\n\tstationId\x18\x04 \x01(\x04\x12\x13\n\x0bstationName\x18\x05 \x01(\t\x12\x12\n\nstationSeq\x18\x06 \x01(\x04\"\xf0\x01\n\x11TaskQueryResponse\x12&\n\x0b\x63urLocation\x18\x01 \x02(\x0b\x32\x11.taskmgr.Location\x12\x1d\n\x15\x61\x63\x63umulatedStationDis\x18\x04 \x02(\x01\x12%\n\x1dreversedAccumulatedStationDis\x18\x05 \x02(\x01\x12\x17\n\x0fstationTimeLeft\x18\x06 \x02(\x01\x12\x1a\n\x12\x61\x63\x63umulatedTaskDis\x18\x0b \x01(\x01\x12\"\n\x1areversedAccumulatedTaskDis\x18\x0c \x01(\x01\x12\x14\n\x0ctaskTimeLeft\x18\r \x01(\x01\"\xf6\x01\n\x08TaskInfo\x12\x0e\n\x06taskId\x18\x01 \x02(\x04\x12&\n\ntask_state\x18\x02 \x02(\x0e\x32\x12.taskmgr.TaskState\x12\x0e\n\x06lineId\x18\x03 \x02(\x04\x12&\n\x0b\x63urLocation\x18\x04 \x02(\x0b\x32\x11.taskmgr.Location\x12%\n\npreStation\x18\x05 \x02(\x0b\x32\x11.taskmgr.Location\x12&\n\x0bnextStation\x18\x06 \x02(\x0b\x32\x11.taskmgr.Location\x12\x15\n\rtaskStartTime\x18\x07 \x01(\x04\x12\x14\n\x0ctaskTimeLeft\x18\x08 \x01(\x01\"1\n\rTaskEndNotify\x12\x0e\n\x06normal\x18\x01 \x02(\x08\x12\x10\n\x08order_id\x18\x02 \x01(\t*R\n\tTaskState\x12\x08\n\x04NONE\x10\x00\x12\x0b\n\x07WAITING\x10\n\x12\x0b\n\x07RUNNING\x10\x14\x12\n\n\x06STOPED\x10\x1e\x12\n\n\x06\x46INISH\x10(\x12\t\n\x05\x41\x42ORT\x10\x32')
+  serialized_pb=_b('\n\rtm_info.proto\x12\x07taskmgr\x1a\x0egeometry.proto\x1a\x0cheader.proto\"2\n\x10TaskQueryRequest\x12\x0e\n\x06taskId\x18\x01 \x02(\r\x12\x0e\n\x06lineId\x18\x02 \x02(\r\"\x92\x01\n\x08Location\x12\x19\n\x0e\x63oordinateType\x18\x01 \x01(\r:\x01\x30\x12\x1e\n\x05point\x18\x02 \x01(\x0b\x32\x0f.geometry.Point\x12\x0f\n\x07station\x18\x03 \x01(\r\x12\x11\n\tstationId\x18\x04 \x01(\x04\x12\x13\n\x0bstationName\x18\x05 \x01(\t\x12\x12\n\nstationSeq\x18\x06 \x01(\x04\"\xf0\x01\n\x11TaskQueryResponse\x12&\n\x0b\x63urLocation\x18\x01 \x02(\x0b\x32\x11.taskmgr.Location\x12\x1d\n\x15\x61\x63\x63umulatedStationDis\x18\x04 \x02(\x01\x12%\n\x1dreversedAccumulatedStationDis\x18\x05 \x02(\x01\x12\x17\n\x0fstationTimeLeft\x18\x06 \x02(\x01\x12\x1a\n\x12\x61\x63\x63umulatedTaskDis\x18\x0b \x01(\x01\x12\"\n\x1areversedAccumulatedTaskDis\x18\x0c \x01(\x01\x12\x14\n\x0ctaskTimeLeft\x18\r \x01(\x01\"\xf6\x01\n\x08TaskInfo\x12\x0e\n\x06taskId\x18\x01 \x02(\x04\x12&\n\ntask_state\x18\x02 \x02(\x0e\x32\x12.taskmgr.TaskState\x12\x0e\n\x06lineId\x18\x03 \x02(\x04\x12&\n\x0b\x63urLocation\x18\x04 \x02(\x0b\x32\x11.taskmgr.Location\x12%\n\npreStation\x18\x05 \x02(\x0b\x32\x11.taskmgr.Location\x12&\n\x0bnextStation\x18\x06 \x02(\x0b\x32\x11.taskmgr.Location\x12\x15\n\rtaskStartTime\x18\x07 \x01(\x04\x12\x14\n\x0ctaskTimeLeft\x18\x08 \x01(\x01\"1\n\rTaskEndNotify\x12\x0e\n\x06normal\x18\x01 \x02(\x08\x12\x10\n\x08order_id\x18\x02 \x01(\t\"\xbd\x01\n\x19TaskStartOrContinueNotify\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x10\n\x08order_id\x18\x02 \x01(\t\x12\"\n\tstart_pos\x18\x03 \x01(\x0b\x32\x0f.geometry.Point\x12 \n\x07\x65nd_pos\x18\x04 \x02(\x0b\x32\x0f.geometry.Point\x12(\n\x0f\x65nd_pos_lon_lat\x18\x05 \x01(\x0b\x32\x0f.geometry.Point\"?\n\x0fVoiceEventItems\x12\r\n\x05\x65vent\x18\x01 \x02(\r\x12\x0e\n\x06\x61\x63tion\x18\x02 \x01(\t\x12\r\n\x05\x65xtra\x18\x03 \x01(\t\"\x85\x01\n\x10VoiceEventReport\x12\x0b\n\x03src\x18\x01 \x02(\t\x12\'\n\x05items\x18\x02 \x03(\x0b\x32\x18.taskmgr.VoiceEventItems\x12&\n\x0b\x63urLocation\x18\x03 \x01(\x0b\x32\x11.taskmgr.Location\x12\x13\n\x0bmillisecond\x18\x04 \x01(\x04*^\n\tTaskState\x12\x08\n\x04NONE\x10\x00\x12\x0b\n\x07WAITING\x10\n\x12\x0b\n\x07RUNNING\x10\x14\x12\n\n\x06STOPED\x10\x1e\x12\n\n\x06\x46INISH\x10(\x12\t\n\x05\x41\x42ORT\x10\x32\x12\n\n\x06\x43\x41NCEL\x10<*\xd3\x01\n\nVoiceEvent\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x12\n\rENTER_STATION\x10\xb9\x17\x12\x12\n\rLEAVE_STATION\x10\xba\x17\x12\x0e\n\tAVOIDANCE\x10\x9f\x18\x12\x0e\n\tTURN_LEFT\x10\x84\x19\x12\x0f\n\nTURN_RIGHT\x10\x85\x19\x12\x19\n\x14PEDESTRIAN_AVOIDANCE\x10\xd1\x0f\x12\x18\n\x13\x43ROSSWALK_AVOIDANCE\x10\xd2\x0f\x12\n\n\x05STUCK\x10\xb5\x10\x12\x0e\n\tCROSSROAD\x10\xb6\x10\x12\x0e\n\tCOLLISION\x10\xe9\x07')
   ,
-  dependencies=[geometry__pb2.DESCRIPTOR,])
+  dependencies=[geometry__pb2.DESCRIPTOR,header__pb2.DESCRIPTOR,])
 
 _TASKSTATE = _descriptor.EnumDescriptor(
   name='TaskState',
@@ -55,21 +56,96 @@ _TASKSTATE = _descriptor.EnumDescriptor(
       name='ABORT', index=5, number=50,
       serialized_options=None,
       type=None),
+    _descriptor.EnumValueDescriptor(
+      name='CANCEL', index=6, number=60,
+      serialized_options=None,
+      type=None),
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=786,
-  serialized_end=868,
+  serialized_start=1193,
+  serialized_end=1287,
 )
 _sym_db.RegisterEnumDescriptor(_TASKSTATE)
 
 TaskState = enum_type_wrapper.EnumTypeWrapper(_TASKSTATE)
+_VOICEEVENT = _descriptor.EnumDescriptor(
+  name='VoiceEvent',
+  full_name='taskmgr.VoiceEvent',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='UNKNOWN', index=0, number=0,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='ENTER_STATION', index=1, number=3001,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='LEAVE_STATION', index=2, number=3002,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='AVOIDANCE', index=3, number=3103,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='TURN_LEFT', index=4, number=3204,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='TURN_RIGHT', index=5, number=3205,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='PEDESTRIAN_AVOIDANCE', index=6, number=2001,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='CROSSWALK_AVOIDANCE', index=7, number=2002,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='STUCK', index=8, number=2101,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='CROSSROAD', index=9, number=2102,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='COLLISION', index=10, number=1001,
+      serialized_options=None,
+      type=None),
+  ],
+  containing_type=None,
+  serialized_options=None,
+  serialized_start=1290,
+  serialized_end=1501,
+)
+_sym_db.RegisterEnumDescriptor(_VOICEEVENT)
+
+VoiceEvent = enum_type_wrapper.EnumTypeWrapper(_VOICEEVENT)
 NONE = 0
 WAITING = 10
 RUNNING = 20
 STOPED = 30
 FINISH = 40
 ABORT = 50
+CANCEL = 60
+UNKNOWN = 0
+ENTER_STATION = 3001
+LEAVE_STATION = 3002
+AVOIDANCE = 3103
+TURN_LEFT = 3204
+TURN_RIGHT = 3205
+PEDESTRIAN_AVOIDANCE = 2001
+CROSSWALK_AVOIDANCE = 2002
+STUCK = 2101
+CROSSROAD = 2102
+COLLISION = 1001
 
 
 
@@ -106,8 +182,8 @@ _TASKQUERYREQUEST = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=42,
-  serialized_end=92,
+  serialized_start=56,
+  serialized_end=106,
 )
 
 
@@ -172,8 +248,8 @@ _LOCATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=95,
-  serialized_end=241,
+  serialized_start=109,
+  serialized_end=255,
 )
 
 
@@ -245,8 +321,8 @@ _TASKQUERYRESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=244,
-  serialized_end=484,
+  serialized_start=258,
+  serialized_end=498,
 )
 
 
@@ -325,8 +401,8 @@ _TASKINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=487,
-  serialized_end=733,
+  serialized_start=501,
+  serialized_end=747,
 )
 
 
@@ -363,8 +439,164 @@ _TASKENDNOTIFY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=735,
-  serialized_end=784,
+  serialized_start=749,
+  serialized_end=798,
+)
+
+
+_TASKSTARTORCONTINUENOTIFY = _descriptor.Descriptor(
+  name='TaskStartOrContinueNotify',
+  full_name='taskmgr.TaskStartOrContinueNotify',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='header', full_name='taskmgr.TaskStartOrContinueNotify.header', index=0,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='order_id', full_name='taskmgr.TaskStartOrContinueNotify.order_id', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='start_pos', full_name='taskmgr.TaskStartOrContinueNotify.start_pos', index=2,
+      number=3, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='end_pos', full_name='taskmgr.TaskStartOrContinueNotify.end_pos', index=3,
+      number=4, type=11, cpp_type=10, label=2,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='end_pos_lon_lat', full_name='taskmgr.TaskStartOrContinueNotify.end_pos_lon_lat', index=4,
+      number=5, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=801,
+  serialized_end=990,
+)
+
+
+_VOICEEVENTITEMS = _descriptor.Descriptor(
+  name='VoiceEventItems',
+  full_name='taskmgr.VoiceEventItems',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='event', full_name='taskmgr.VoiceEventItems.event', index=0,
+      number=1, type=13, cpp_type=3, label=2,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='action', full_name='taskmgr.VoiceEventItems.action', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='extra', full_name='taskmgr.VoiceEventItems.extra', index=2,
+      number=3, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=992,
+  serialized_end=1055,
+)
+
+
+_VOICEEVENTREPORT = _descriptor.Descriptor(
+  name='VoiceEventReport',
+  full_name='taskmgr.VoiceEventReport',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='src', full_name='taskmgr.VoiceEventReport.src', index=0,
+      number=1, type=9, cpp_type=9, label=2,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='items', full_name='taskmgr.VoiceEventReport.items', index=1,
+      number=2, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='curLocation', full_name='taskmgr.VoiceEventReport.curLocation', index=2,
+      number=3, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='millisecond', full_name='taskmgr.VoiceEventReport.millisecond', index=3,
+      number=4, type=4, cpp_type=4, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1058,
+  serialized_end=1191,
 )
 
 _LOCATION.fields_by_name['point'].message_type = geometry__pb2._POINT
@@ -373,12 +605,22 @@ _TASKINFO.fields_by_name['task_state'].enum_type = _TASKSTATE
 _TASKINFO.fields_by_name['curLocation'].message_type = _LOCATION
 _TASKINFO.fields_by_name['preStation'].message_type = _LOCATION
 _TASKINFO.fields_by_name['nextStation'].message_type = _LOCATION
+_TASKSTARTORCONTINUENOTIFY.fields_by_name['header'].message_type = header__pb2._HEADER
+_TASKSTARTORCONTINUENOTIFY.fields_by_name['start_pos'].message_type = geometry__pb2._POINT
+_TASKSTARTORCONTINUENOTIFY.fields_by_name['end_pos'].message_type = geometry__pb2._POINT
+_TASKSTARTORCONTINUENOTIFY.fields_by_name['end_pos_lon_lat'].message_type = geometry__pb2._POINT
+_VOICEEVENTREPORT.fields_by_name['items'].message_type = _VOICEEVENTITEMS
+_VOICEEVENTREPORT.fields_by_name['curLocation'].message_type = _LOCATION
 DESCRIPTOR.message_types_by_name['TaskQueryRequest'] = _TASKQUERYREQUEST
 DESCRIPTOR.message_types_by_name['Location'] = _LOCATION
 DESCRIPTOR.message_types_by_name['TaskQueryResponse'] = _TASKQUERYRESPONSE
 DESCRIPTOR.message_types_by_name['TaskInfo'] = _TASKINFO
 DESCRIPTOR.message_types_by_name['TaskEndNotify'] = _TASKENDNOTIFY
+DESCRIPTOR.message_types_by_name['TaskStartOrContinueNotify'] = _TASKSTARTORCONTINUENOTIFY
+DESCRIPTOR.message_types_by_name['VoiceEventItems'] = _VOICEEVENTITEMS
+DESCRIPTOR.message_types_by_name['VoiceEventReport'] = _VOICEEVENTREPORT
 DESCRIPTOR.enum_types_by_name['TaskState'] = _TASKSTATE
+DESCRIPTOR.enum_types_by_name['VoiceEvent'] = _VOICEEVENT
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 TaskQueryRequest = _reflection.GeneratedProtocolMessageType('TaskQueryRequest', (_message.Message,), dict(
@@ -415,6 +657,27 @@ TaskEndNotify = _reflection.GeneratedProtocolMessageType('TaskEndNotify', (_mess
   # @@protoc_insertion_point(class_scope:taskmgr.TaskEndNotify)
   ))
 _sym_db.RegisterMessage(TaskEndNotify)
+
+TaskStartOrContinueNotify = _reflection.GeneratedProtocolMessageType('TaskStartOrContinueNotify', (_message.Message,), dict(
+  DESCRIPTOR = _TASKSTARTORCONTINUENOTIFY,
+  __module__ = 'tm_info_pb2'
+  # @@protoc_insertion_point(class_scope:taskmgr.TaskStartOrContinueNotify)
+  ))
+_sym_db.RegisterMessage(TaskStartOrContinueNotify)
+
+VoiceEventItems = _reflection.GeneratedProtocolMessageType('VoiceEventItems', (_message.Message,), dict(
+  DESCRIPTOR = _VOICEEVENTITEMS,
+  __module__ = 'tm_info_pb2'
+  # @@protoc_insertion_point(class_scope:taskmgr.VoiceEventItems)
+  ))
+_sym_db.RegisterMessage(VoiceEventItems)
+
+VoiceEventReport = _reflection.GeneratedProtocolMessageType('VoiceEventReport', (_message.Message,), dict(
+  DESCRIPTOR = _VOICEEVENTREPORT,
+  __module__ = 'tm_info_pb2'
+  # @@protoc_insertion_point(class_scope:taskmgr.VoiceEventReport)
+  ))
+_sym_db.RegisterMessage(VoiceEventReport)
 
 
 # @@protoc_insertion_point(module_scope)

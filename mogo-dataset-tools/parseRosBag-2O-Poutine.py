@@ -73,7 +73,7 @@ def quaternion_to_rotation_matrix(qx, qy, qz, qw):
 
 def build_rotation_matrix_from_yaw(yaw):
     """
-    从yaw角度构建旋转矩阵（绕Z轴旋转）
+    从yaw角度构建旋转矩阵（绕Z轴旋转） 
     
     参数:
         yaw: 航向角（弧度），从北向（Y轴正方向）逆时针旋转的角度
@@ -514,17 +514,20 @@ class BagDataHandler:
         MAX_MATCH_JUNCTION = 2     # 最多匹配2个路口
 
         # 路口动作映射
+        #    ========== 修正后的路口动作映射 ==========
         ACTION_MAP = {
-            LaneType.LANE_TYPE_JuncTurnLeft: "turn left",
-            LaneType.LANE_TYPE_JuncStraight: "straight",
-            LaneType.LANE_TYPE_JuncTurnRight: "turn right",
-            LaneType.LANE_TYPE_Turn: "u turn"
+            LaneType.Value("LANE_TYPE_JuncTurnLeft"): "turn left",
+            LaneType.Value("LANE_TYPE_JuncStraight"): "straight",
+            LaneType.Value("LANE_TYPE_JuncTurnRight"): "turn right",
+            LaneType.Value("LANE_TYPE_Turn"): "u turn"
         }
+
+        # ========== 修正后的目标lane类型集合 ==========
         target_lane_types = {
-            LaneType.LANE_TYPE_JuncTurnLeft,
-            LaneType.LANE_TYPE_JuncStraight,
-            LaneType.LANE_TYPE_JuncTurnRight,
-            LaneType.LANE_TYPE_Turn
+            LaneType.Value("LANE_TYPE_JuncTurnLeft"),
+            LaneType.Value("LANE_TYPE_JuncStraight"),
+            LaneType.Value("LANE_TYPE_JuncTurnRight"),
+            LaneType.Value("LANE_TYPE_Turn")
         }
 
         # ========== 辅助函数 ==========
@@ -536,7 +539,7 @@ class BagDataHandler:
             to_junc = lane_link.to_junction if lane_link.HasField("to_junction") else False
             return f"{from_road}_{to_road}_{from_junc}_{to_junc}"
  
-        def calculate_path_distance(current_loc, tar_junction):
+        def calculate_path_distance(index, current_loc, tar_junction):
             """
             计算自车到目标roadlink的路径距离（正序索引逻辑）
             :param current_loc: 自车当前位置（x/y）
@@ -549,8 +552,8 @@ class BagDataHandler:
             
             has_direction = False
             dir_x, dir_y = 0.0, 0.0
-            if len(self.sampled_2hz_locations) >= 2:
-                prev_loc = self.sampled_2hz_locations[max(0, self.sampled_2hz_locations.index(current_loc)-1)]
+            if len(self.sampled_2hz_locations) >= 2 and index >= 1:
+                prev_loc = self.sampled_2hz_locations[index-1].position
                 dir_x = current_loc.x - prev_loc.x
                 dir_y = current_loc.y - prev_loc.y
                 dir_norm = math.hypot(dir_x, dir_y)
@@ -610,7 +613,7 @@ class BagDataHandler:
 
         # ========== 第一步：解析路由数据 ==========
         self.route_result = None
-        for topic, msg in self.master_bag.read_messages(topics=["/hadmap_engine/route_result_msg"]):
+        for topic, msg, time_stamp in self.master_bag.read_messages(topics=["/hadmap_engine/route_result_msg"]):
             try:
                 route_roads = RoutingResult()  
                 route_roads.ParseFromString(msg.data)
@@ -723,12 +726,13 @@ class BagDataHandler:
 
         # ========== 第四步：匹配自车到路口的路径距离（正序逻辑） ==========
         self.high_order_intent = []
-        for current_loc in self.sampled_2hz_locations:
+        for index, current_loc in enumerate(self.sampled_2hz_locations):
+            curr_position = current_loc.position
             matched_junctions = []
             candidate_junctions = []
 
             for junc in junction_list:
-                path_dist = calculate_path_distance(current_loc, junc)
+                path_dist = calculate_path_distance(index, curr_position, junc)
                 
                 if math.isnan(path_dist) or path_dist > MAX_PATH_DISTANCE:
                     continue
@@ -1430,7 +1434,7 @@ class BagDataHandler:
             return None
 
         future_trajectory_data = np.zeros((future_window, 2), dtype=np.float32)
-        for i in range(future_locations):
+        for i in range(len(future_locations)):
             loc = future_locations[i]
             # 获取位置（UTM坐标）
             if hasattr(loc, 'position') and loc.position:
@@ -1474,7 +1478,7 @@ class BagDataHandler:
                 cam_paths_prev_2[key] = path_prev_2
 
         # 获取 meta action 和 scenario type
-        relative_ts = current_ts - current_ts_loc[0]
+        relative_ts = current_ts - current_ts_loc
         meta_action = self.match_action_by_timestamp(relative_ts, action_dict)
         scenario_type = self.match_scenario_by_timestamp(relative_ts, scenario_dict)
 
@@ -1563,7 +1567,7 @@ if __name__ == '__main__':
     print("[INFO]   脚本会自动遍历该目录下的所有bag文件夹并处理")
     
     # 默认bags根目录
-    default_bags_root = "/D2/NXT/vlm/dataset/MOGO/test_data/2O-bags"
+    default_bags_root = "/media/lanxx/T7/VLA/luxian_1"
     
     try:
         bags_root_dir = sys.argv[1] if len(sys.argv) > 1 else default_bags_root

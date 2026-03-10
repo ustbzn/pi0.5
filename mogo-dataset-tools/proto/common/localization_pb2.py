@@ -22,7 +22,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='localization',
   syntax='proto2',
   serialized_options=None,
-  serialized_pb=_b('\n\x12localization.proto\x12\x0clocalization\x1a\x0cheader.proto\x1a\x0egeometry.proto\"\x87\x06\n\x0cLocalization\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x32\n\x04mode\x18\x02 \x01(\x0e\x32\x1e.localization.LocalizationMode:\x04GNSS\x12\x35\n\x05\x66rame\x18\x03 \x01(\x0e\x32\x1f.localization.LocalizationFrame:\x05WGS84\x12\x17\n\x0flocal_frame_seq\x18\x04 \x01(\r\x12\x15\n\ttransform\x18\x05 \x03(\x01\x42\x02\x10\x01\x12!\n\x08position\x18\x07 \x01(\x0b\x32\x0f.geometry.Point\x12\x11\n\tlongitude\x18\x08 \x01(\x01\x12\x10\n\x08latitude\x18\t \x01(\x01\x12\x10\n\x08\x61ltitude\x18\n \x01(\x01\x12\x0c\n\x04roll\x18\x0b \x01(\x01\x12\r\n\x05pitch\x18\x0c \x01(\x01\x12\x0b\n\x03yaw\x18\r \x01(\x01\x12\x0e\n\x06roll_v\x18\x0e \x01(\x01\x12\x0f\n\x07pitch_v\x18\x0f \x01(\x01\x12\r\n\x05yaw_v\x18\x10 \x01(\x01\x12\x11\n\tlateral_v\x18\x11 \x01(\x01\x12\x16\n\x0elongitudinal_v\x18\x12 \x01(\x01\x12\x12\n\nvertical_v\x18\x13 \x01(\x01\x12\x11\n\tlateral_a\x18\x14 \x01(\x01\x12\x16\n\x0elongitudinal_a\x18\x15 \x01(\x01\x12\x12\n\nvertical_a\x18\x16 \x01(\x01\x12\x14\n\x0chorizontal_v\x18\x17 \x01(\x01\x12\x10\n\x08utm_zone\x18\x18 \x01(\x01\x12\x16\n\x0egnss_sys_dtime\x18\x19 \x01(\x01\x12\x10\n\x08gnss_num\x18\x1a \x01(\x01\x12\x13\n\x0bgnss_status\x18\x1b \x01(\x05\x12\x12\n\nloc_status\x18\x1c \x01(\x05\x12\x14\n\x0cloc_long_cov\x18\x1d \x01(\x01\x12\x13\n\x0bloc_lat_cov\x18\x1e \x01(\x01\x12\x16\n\x0eslam_map_vaild\x18\x1f \x01(\x05\x12\x18\n\x10loc_error_status\x18  \x01(\x05\x12\x14\n\x0c\x65nu2utm_dyaw\x18! \x01(\x01\x12\x1c\n\x14sensors_error_status\x18\" \x01(\x05*-\n\x10LocalizationMode\x12\x08\n\x04GNSS\x10\x00\x12\x0f\n\x0bLIDAR_BASED\x10\x01*)\n\x11LocalizationFrame\x12\t\n\x05LOCAL\x10\x00\x12\t\n\x05WGS84\x10\x01')
+  serialized_pb=_b('\n\x12localization.proto\x12\x0clocalization\x1a\x0cheader.proto\x1a\x0egeometry.proto\"\xef\x06\n\x0cLocalization\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x32\n\x04mode\x18\x02 \x01(\x0e\x32\x1e.localization.LocalizationMode:\x04GNSS\x12\x35\n\x05\x66rame\x18\x03 \x01(\x0e\x32\x1f.localization.LocalizationFrame:\x05WGS84\x12\x17\n\x0flocal_frame_seq\x18\x04 \x01(\r\x12\x15\n\ttransform\x18\x05 \x03(\x01\x42\x02\x10\x01\x12!\n\x08position\x18\x07 \x01(\x0b\x32\x0f.geometry.Point\x12\x11\n\tlongitude\x18\x08 \x01(\x01\x12\x10\n\x08latitude\x18\t \x01(\x01\x12\x10\n\x08\x61ltitude\x18\n \x01(\x01\x12\x0c\n\x04roll\x18\x0b \x01(\x01\x12\r\n\x05pitch\x18\x0c \x01(\x01\x12\x0b\n\x03yaw\x18\r \x01(\x01\x12\x0e\n\x06roll_v\x18\x0e \x01(\x01\x12\x0f\n\x07pitch_v\x18\x0f \x01(\x01\x12\r\n\x05yaw_v\x18\x10 \x01(\x01\x12\x11\n\tlateral_v\x18\x11 \x01(\x01\x12\x16\n\x0elongitudinal_v\x18\x12 \x01(\x01\x12\x12\n\nvertical_v\x18\x13 \x01(\x01\x12\x11\n\tlateral_a\x18\x14 \x01(\x01\x12\x16\n\x0elongitudinal_a\x18\x15 \x01(\x01\x12\x12\n\nvertical_a\x18\x16 \x01(\x01\x12\x14\n\x0chorizontal_v\x18\x17 \x01(\x01\x12\x10\n\x08utm_zone\x18\x18 \x01(\x01\x12\x16\n\x0egnss_sys_dtime\x18\x19 \x01(\x01\x12\x10\n\x08gnss_num\x18\x1a \x01(\x01\x12\x13\n\x0bgnss_status\x18\x1b \x01(\x05\x12\x12\n\nloc_status\x18\x1c \x01(\x05\x12\x14\n\x0cloc_long_cov\x18\x1d \x01(\x01\x12\x13\n\x0bloc_lat_cov\x18\x1e \x01(\x01\x12\x16\n\x0eslam_map_vaild\x18\x1f \x01(\x05\x12\x18\n\x10loc_error_status\x18  \x01(\x05\x12\x14\n\x0c\x65nu2utm_dyaw\x18! \x01(\x01\x12\x1c\n\x14sensors_error_status\x18\" \x01(\x05\x12\x18\n\x10\x63ov_latitude_std\x18# \x01(\x02\x12\x19\n\x11\x63ov_longitude_std\x18$ \x01(\x02\x12\x18\n\x10\x63ov_altitude_std\x18% \x01(\x02\x12\x17\n\x0fvertical_a_no_g\x18& \x01(\x02*-\n\x10LocalizationMode\x12\x08\n\x04GNSS\x10\x00\x12\x0f\n\x0bLIDAR_BASED\x10\x01*)\n\x11LocalizationFrame\x12\t\n\x05LOCAL\x10\x00\x12\t\n\x05WGS84\x10\x01')
   ,
   dependencies=[header__pb2.DESCRIPTOR,geometry__pb2.DESCRIPTOR,])
 
@@ -43,8 +43,8 @@ _LOCALIZATIONMODE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=844,
-  serialized_end=889,
+  serialized_start=948,
+  serialized_end=993,
 )
 _sym_db.RegisterEnumDescriptor(_LOCALIZATIONMODE)
 
@@ -66,8 +66,8 @@ _LOCALIZATIONFRAME = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=891,
-  serialized_end=932,
+  serialized_start=995,
+  serialized_end=1036,
 )
 _sym_db.RegisterEnumDescriptor(_LOCALIZATIONFRAME)
 
@@ -317,6 +317,34 @@ _LOCALIZATION = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='cov_latitude_std', full_name='localization.Localization.cov_latitude_std', index=33,
+      number=35, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='cov_longitude_std', full_name='localization.Localization.cov_longitude_std', index=34,
+      number=36, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='cov_altitude_std', full_name='localization.Localization.cov_altitude_std', index=35,
+      number=37, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='vertical_a_no_g', full_name='localization.Localization.vertical_a_no_g', index=36,
+      number=38, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -330,7 +358,7 @@ _LOCALIZATION = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=67,
-  serialized_end=842,
+  serialized_end=946,
 )
 
 _LOCALIZATION.fields_by_name['header'].message_type = header__pb2._HEADER

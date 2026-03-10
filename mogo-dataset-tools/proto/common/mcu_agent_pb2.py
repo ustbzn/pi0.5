@@ -21,7 +21,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='mcu',
   syntax='proto3',
   serialized_options=None,
-  serialized_pb=_b('\n\x0fmcu_agent.proto\x12\x03mcu\x1a\x0cheader.proto\"w\n\tMcuStates\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12,\n\x0fmcu_agent_state\x18\x02 \x01(\x0e\x32\x13.mcu.McuAgentStates\x12\x1c\n\x14soc_to_mcu_comm_lost\x18\x0b \x01(\x08*N\n\x0eMcuAgentStates\x12\x0b\n\x07MCU_OFF\x10\x00\x12\x10\n\x0cMCU_TRANSFER\x10\x06\x12\x0b\n\x07MCU_MRM\x10\n\x12\x10\n\x0cMCU_MRM_OVER\x10\x0b\x62\x06proto3')
+  serialized_pb=_b('\n\x0fmcu_agent.proto\x12\x03mcu\x1a\x0cheader.proto\"\xb1\x01\n\tMcuStates\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12,\n\x0fmcu_agent_state\x18\x02 \x01(\x0e\x32\x13.mcu.McuAgentStates\x12\x38\n\x16mcu_safety_stop_reason\x18\x03 \x01(\x0e\x32\x18.mcu.McuSafetyStopReason\x12\x1c\n\x14soc_to_mcu_comm_lost\x18\x0b \x01(\x08*N\n\x0eMcuAgentStates\x12\x0b\n\x07MCU_OFF\x10\x00\x12\x10\n\x0cMCU_TRANSFER\x10\x06\x12\x0b\n\x07MCU_MRM\x10\n\x12\x10\n\x0cMCU_MRM_OVER\x10\x0b*\xf1\x01\n\x13McuSafetyStopReason\x12\x0b\n\x07NO_STOP\x10\x00\x12\x11\n\rCHASSIS_FAULT\x10\x01\x12\x14\n\x10SOC_TO_MCU_DELAY\x10\x02\x12\x13\n\x0fSOC_TO_MCU_LOST\x10\x03\x12\x1b\n\x17SOC_TO_MCU_DATA_INVALID\x10\x04\x12\x16\n\x12SOC_SOFTWARE_FAULT\x10\x0b\x12\x16\n\x12SOC_HARDWARE_FAULT\x10\x0c\x12\x16\n\x12MCU_SOFTWARE_FAULT\x10\r\x12\x16\n\x12MCU_HARDWARE_FAULT\x10\x0e\x12\x12\n\x0e\x43OLLISION_RISK\x10\x14\x62\x06proto3')
   ,
   dependencies=[header__pb2.DESCRIPTOR,])
 
@@ -50,16 +50,81 @@ _MCUAGENTSTATES = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=159,
-  serialized_end=237,
+  serialized_start=218,
+  serialized_end=296,
 )
 _sym_db.RegisterEnumDescriptor(_MCUAGENTSTATES)
 
 McuAgentStates = enum_type_wrapper.EnumTypeWrapper(_MCUAGENTSTATES)
+_MCUSAFETYSTOPREASON = _descriptor.EnumDescriptor(
+  name='McuSafetyStopReason',
+  full_name='mcu.McuSafetyStopReason',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='NO_STOP', index=0, number=0,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='CHASSIS_FAULT', index=1, number=1,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='SOC_TO_MCU_DELAY', index=2, number=2,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='SOC_TO_MCU_LOST', index=3, number=3,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='SOC_TO_MCU_DATA_INVALID', index=4, number=4,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='SOC_SOFTWARE_FAULT', index=5, number=11,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='SOC_HARDWARE_FAULT', index=6, number=12,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='MCU_SOFTWARE_FAULT', index=7, number=13,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='MCU_HARDWARE_FAULT', index=8, number=14,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='COLLISION_RISK', index=9, number=20,
+      serialized_options=None,
+      type=None),
+  ],
+  containing_type=None,
+  serialized_options=None,
+  serialized_start=299,
+  serialized_end=540,
+)
+_sym_db.RegisterEnumDescriptor(_MCUSAFETYSTOPREASON)
+
+McuSafetyStopReason = enum_type_wrapper.EnumTypeWrapper(_MCUSAFETYSTOPREASON)
 MCU_OFF = 0
 MCU_TRANSFER = 6
 MCU_MRM = 10
 MCU_MRM_OVER = 11
+NO_STOP = 0
+CHASSIS_FAULT = 1
+SOC_TO_MCU_DELAY = 2
+SOC_TO_MCU_LOST = 3
+SOC_TO_MCU_DATA_INVALID = 4
+SOC_SOFTWARE_FAULT = 11
+SOC_HARDWARE_FAULT = 12
+MCU_SOFTWARE_FAULT = 13
+MCU_HARDWARE_FAULT = 14
+COLLISION_RISK = 20
 
 
 
@@ -85,7 +150,14 @@ _MCUSTATES = _descriptor.Descriptor(
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='soc_to_mcu_comm_lost', full_name='mcu.McuStates.soc_to_mcu_comm_lost', index=2,
+      name='mcu_safety_stop_reason', full_name='mcu.McuStates.mcu_safety_stop_reason', index=2,
+      number=3, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='soc_to_mcu_comm_lost', full_name='mcu.McuStates.soc_to_mcu_comm_lost', index=3,
       number=11, type=8, cpp_type=7, label=1,
       has_default_value=False, default_value=False,
       message_type=None, enum_type=None, containing_type=None,
@@ -103,14 +175,16 @@ _MCUSTATES = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=38,
-  serialized_end=157,
+  serialized_start=39,
+  serialized_end=216,
 )
 
 _MCUSTATES.fields_by_name['header'].message_type = header__pb2._HEADER
 _MCUSTATES.fields_by_name['mcu_agent_state'].enum_type = _MCUAGENTSTATES
+_MCUSTATES.fields_by_name['mcu_safety_stop_reason'].enum_type = _MCUSAFETYSTOPREASON
 DESCRIPTOR.message_types_by_name['McuStates'] = _MCUSTATES
 DESCRIPTOR.enum_types_by_name['McuAgentStates'] = _MCUAGENTSTATES
+DESCRIPTOR.enum_types_by_name['McuSafetyStopReason'] = _MCUSAFETYSTOPREASON
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 McuStates = _reflection.GeneratedProtocolMessageType('McuStates', (_message.Message,), dict(

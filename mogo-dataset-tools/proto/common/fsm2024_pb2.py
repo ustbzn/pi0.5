@@ -21,7 +21,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='fsm',
   syntax='proto2',
   serialized_options=None,
-  serialized_pb=_b('\n\rfsm2024.proto\x12\x03\x66sm\x1a\x0cheader.proto\"\x94\x01\n\x07Session\x12,\n\x13session_active_mode\x18\x01 \x01(\x0e\x32\x0f.fsm.ActiveMode\x12\x12\n\nsession_id\x18\x02 \x01(\x04\x12*\n\x0esession_result\x18\x03 \x01(\x0e\x32\x12.fsm.SessionResult\x12\x1b\n\x13session_fail_reason\x18\x04 \x01(\t\"\x81\x01\n\nExitActive\x12)\n\x10\x65xit_active_mode\x18\x01 \x01(\x0e\x32\x0f.fsm.ActiveMode\x12 \n\texit_type\x18\x02 \x01(\x0e\x32\r.fsm.ExitType\x12\x13\n\x0b\x65xit_reason\x18\x03 \x01(\t\x12\x11\n\texit_time\x18\x04 \x01(\t\"\xe4\x06\n\x0b\x46SMStateMsg\x12\x1e\n\x06header\x18\x01 \x02(\x0b\x32\x0e.common.Header\x12\"\n\x0e\x66unction_state\x18\x02 \x02(\x0e\x32\n.fsm.State\x12\x31\n\x14\x66sm_safety_stop_mode\x18\x04 \x02(\x0e\x32\x13.fsm.SafetyStopMode\x12$\n\x0b\x61\x63tive_mode\x18\x06 \x02(\x0e\x32\x0f.fsm.ActiveMode\x12\x16\n\x0e\x62\x65\x61utiful_mode\x18\x07 \x02(\x08\x12\x10\n\x08order_id\x18\x08 \x01(\t\x12\x0f\n\x07version\x18\t \x02(\t\x12\x14\n\x0cnew_msg_flag\x18\n \x02(\x08\x12\x1a\n\x12pilot_standby_flag\x18\x0b \x02(\x08\x12\x1d\n\x15parallel_standby_flag\x18\x0c \x02(\x08\x12\x1c\n\x14m1steer_standby_flag\x18\r \x02(\x08\x12&\n\x0corder_status\x18\x10 \x01(\x0e\x32\x10.fsm.OrderStatus\x12 \n\x18place_order_standby_flag\x18\x11 \x01(\x08\x12 \n\x18pilot_not_standby_reason\x18\x15 \x01(\t\x12#\n\x1bparallel_not_standby_reason\x18\x16 \x01(\t\x12\"\n\x1am1steer_not_standby_reason\x18\x17 \x01(\t\x12)\n!repeated_pilot_not_standby_reason\x18\x1a \x03(\t\x12,\n$repeated_parallel_not_standby_reason\x18\x1b \x03(\t\x12+\n#repeated_m1steer_not_standby_reason\x18\x1c \x03(\t\x12\x1d\n\x07session\x18\x1e \x01(\x0b\x32\x0c.fsm.Session\x12 \n\x18\x66\x61il_to_pilot_session_id\x18$ \x01(\x04\x12#\n\x1b\x66\x61il_to_parallel_session_id\x18% \x01(\x04\x12\"\n\x1a\x66\x61il_to_m1steer_session_id\x18& \x01(\x04\x12#\n\x1b\x61\x62normal_state_trans_reason\x18) \x01(\t\x12$\n\x0b\x65xit_active\x18* \x01(\x0b\x32\x0f.fsm.ExitActive*\xa5\x01\n\x05State\x12\x07\n\x03OFF\x10\x00\x12\x0e\n\nREQUESTING\x10\x01\x12\x0e\n\nACTIVATING\x10\x02\x12\n\n\x06\x41\x43TIVE\x10\x06\x12\x0f\n\x0bSAFETY_STOP\x10\n\x12\x12\n\x0eSAFETY_STOPPED\x10\x0b\x12\x0b\n\x07STANDBY\x10P\x12\x18\n\x14PILOT_DRIVING_ACTIVE\x10Q\x12\x1b\n\x17PARALLEL_DRIVING_ACTIVE\x10R*\x8d\x01\n\x0eSafetyStopMode\x12\x0e\n\nNOT_NEEDED\x10\x00\x12\x1b\n\x17\x43ONTROLLER_COMFORT_STOP\x10\x01\x12\x1d\n\x19\x43ONTROLLER_EMERGENCY_STOP\x10\x02\x12\x18\n\x14PLANNER_COMFORT_STOP\x10\x03\x12\x15\n\x11PLANNER_PULL_OVER\x10\x04*X\n\nActiveMode\x12\x0e\n\nNOT_ACTIVE\x10\x00\x12\x10\n\x0cPILOT_ACTIVE\x10\x01\x12\x13\n\x0fPARALLEL_ACTIVE\x10\x06\x12\x13\n\x0fM1_STEER_ACTIVE\x10\t*a\n\rSessionResult\x12\x17\n\x13NO_REQUEST_RECEIVED\x10\x00\x12\x0e\n\nATTEMPTING\x10\x01\x12\x13\n\x0fREQUEST_SUCCEED\x10\x02\x12\x12\n\x0eREQUEST_FAILED\x10\x03*;\n\x08\x45xitType\x12\x0b\n\x07NO_EXIT\x10\x00\x12\x0f\n\x0bNORMAL_EXIT\x10\x01\x12\x11\n\rABNORMAL_EXIT\x10\x02*A\n\x0bOrderStatus\x12\x15\n\x11OLDER_SSM_VERSION\x10\x00\x12\x0c\n\x08NO_ORDER\x10\x01\x12\r\n\tHAS_ORDER\x10\x02')
+  serialized_pb=_b('\n\rfsm2024.proto\x12\x03\x66sm\x1a\x0cheader.proto\"\x94\x01\n\x07Session\x12,\n\x13session_active_mode\x18\x01 \x01(\x0e\x32\x0f.fsm.ActiveMode\x12\x12\n\nsession_id\x18\x02 \x01(\x04\x12*\n\x0esession_result\x18\x03 \x01(\x0e\x32\x12.fsm.SessionResult\x12\x1b\n\x13session_fail_reason\x18\x04 \x01(\t\"\x81\x01\n\nExitActive\x12)\n\x10\x65xit_active_mode\x18\x01 \x01(\x0e\x32\x0f.fsm.ActiveMode\x12 \n\texit_type\x18\x02 \x01(\x0e\x32\r.fsm.ExitType\x12\x13\n\x0b\x65xit_reason\x18\x03 \x01(\t\x12\x11\n\texit_time\x18\x04 \x01(\t\"\x9b\t\n\x0b\x46SMStateMsg\x12\x1e\n\x06header\x18\x01 \x02(\x0b\x32\x0e.common.Header\x12\"\n\x0e\x66unction_state\x18\x02 \x02(\x0e\x32\n.fsm.State\x12\x31\n\x14\x66sm_safety_stop_mode\x18\x04 \x02(\x0e\x32\x13.fsm.SafetyStopMode\x12$\n\x0b\x61\x63tive_mode\x18\x06 \x02(\x0e\x32\x0f.fsm.ActiveMode\x12\x16\n\x0e\x62\x65\x61utiful_mode\x18\x07 \x02(\x08\x12\x10\n\x08order_id\x18\x08 \x01(\t\x12\x0f\n\x07version\x18\t \x02(\t\x12\x14\n\x0cnew_msg_flag\x18\n \x02(\x08\x12\x1a\n\x12pilot_standby_flag\x18\x0b \x02(\x08\x12\x1d\n\x15parallel_standby_flag\x18\x0c \x02(\x08\x12\x1c\n\x14m1steer_standby_flag\x18\r \x02(\x08\x12\x18\n\x10\x61pp_standby_flag\x18\x0e \x01(\x08\x12&\n\x0corder_status\x18\x10 \x01(\x0e\x32\x10.fsm.OrderStatus\x12 \n\x18place_order_standby_flag\x18\x11 \x01(\x08\x12 \n\x18pilot_not_standby_reason\x18\x15 \x01(\t\x12#\n\x1bparallel_not_standby_reason\x18\x16 \x01(\t\x12\"\n\x1am1steer_not_standby_reason\x18\x17 \x01(\t\x12)\n!repeated_pilot_not_standby_reason\x18\x1a \x03(\t\x12,\n$repeated_parallel_not_standby_reason\x18\x1b \x03(\t\x12+\n#repeated_m1steer_not_standby_reason\x18\x1c \x03(\t\x12\'\n\x1frepeated_app_not_standby_reason\x18\x1d \x03(\t\x12\x1d\n\x07session\x18\x1e \x01(\x0b\x32\x0c.fsm.Session\x12 \n\x18\x66\x61il_to_pilot_session_id\x18$ \x01(\x04\x12#\n\x1b\x66\x61il_to_parallel_session_id\x18% \x01(\x04\x12\"\n\x1a\x66\x61il_to_m1steer_session_id\x18& \x01(\x04\x12#\n\x1b\x61\x62normal_state_trans_reason\x18) \x01(\t\x12$\n\x0b\x65xit_active\x18* \x01(\x0b\x32\x0f.fsm.ExitActive\x12%\n\x1dpilot_not_standby_reasons_eng\x18\x32 \x03(\t\x12(\n parallel_not_standby_reasons_eng\x18\x33 \x03(\t\x12\'\n\x1fm1steer_not_standby_reasons_eng\x18\x34 \x03(\t\x12%\n\x1dpilot_not_standby_reasons_int\x18\x37 \x03(\r\x12(\n parallel_not_standby_reasons_int\x18\x38 \x03(\r\x12\'\n\x1fm1steer_not_standby_reasons_int\x18\x39 \x03(\r\"_\n\x0cTransReasons\x12\x10\n\x08language\x18\x01 \x01(\t\x12\x1a\n\x12transition_reasons\x18\x02 \x03(\t\x12!\n\x19simple_transition_reasons\x18\x03 \x03(\t\"\x8a\x02\n\x0b\x46smEventInt\x12$\n\x0b\x61\x63tive_mode\x18\x01 \x01(\x0e\x32\x0f.fsm.ActiveMode\x12\x19\n\x05\x65vent\x18\x02 \x01(\x0e\x32\n.fsm.Event\x12\x1a\n\x12transition_reasons\x18\x03 \x03(\r\x12\x11\n\tfm_faults\x18\x04 \x03(\t\x12\x1a\n\x04time\x18\x05 \x01(\x0b\x32\x0c.common.Time\x12\x14\n\x0c\x62roken_nodes\x18\x06 \x01(\t\x12\x1f\n\x17transition_reasons_code\x18\x07 \x03(\t\x12\x38\n\x1dtransition_reasons_multi_lang\x18\n \x03(\x0b\x32\x11.fsm.TransReasons\"V\n\x0b\x46smEventMsg\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\'\n\rfsm_event_int\x18\x02 \x01(\x0b\x32\x10.fsm.FsmEventInt*\xa5\x01\n\x05State\x12\x07\n\x03OFF\x10\x00\x12\x0e\n\nREQUESTING\x10\x01\x12\x0e\n\nACTIVATING\x10\x02\x12\n\n\x06\x41\x43TIVE\x10\x06\x12\x0f\n\x0bSAFETY_STOP\x10\n\x12\x12\n\x0eSAFETY_STOPPED\x10\x0b\x12\x0b\n\x07STANDBY\x10P\x12\x18\n\x14PILOT_DRIVING_ACTIVE\x10Q\x12\x1b\n\x17PARALLEL_DRIVING_ACTIVE\x10R*\x8d\x01\n\x0eSafetyStopMode\x12\x0e\n\nNOT_NEEDED\x10\x00\x12\x1b\n\x17\x43ONTROLLER_COMFORT_STOP\x10\x01\x12\x1d\n\x19\x43ONTROLLER_EMERGENCY_STOP\x10\x02\x12\x18\n\x14PLANNER_COMFORT_STOP\x10\x03\x12\x15\n\x11PLANNER_PULL_OVER\x10\x04*h\n\nActiveMode\x12\x0e\n\nNOT_ACTIVE\x10\x00\x12\x10\n\x0cPILOT_ACTIVE\x10\x01\x12\x13\n\x0fPARALLEL_ACTIVE\x10\x06\x12\x0e\n\nAPP_ACTIVE\x10\x07\x12\x13\n\x0fM1_STEER_ACTIVE\x10\t*a\n\rSessionResult\x12\x17\n\x13NO_REQUEST_RECEIVED\x10\x00\x12\x0e\n\nATTEMPTING\x10\x01\x12\x13\n\x0fREQUEST_SUCCEED\x10\x02\x12\x12\n\x0eREQUEST_FAILED\x10\x03*;\n\x08\x45xitType\x12\x0b\n\x07NO_EXIT\x10\x00\x12\x0f\n\x0bNORMAL_EXIT\x10\x01\x12\x11\n\rABNORMAL_EXIT\x10\x02*A\n\x0bOrderStatus\x12\x15\n\x11OLDER_SSM_VERSION\x10\x00\x12\x0c\n\x08NO_ORDER\x10\x01\x12\r\n\tHAS_ORDER\x10\x02*~\n\x05\x45vent\x12\x0c\n\x08NO_EVENT\x10\x00\x12\x1b\n\x17SUCCEED_TO_ENTER_ACTIVE\x10\x01\x12\x18\n\x14\x46\x41IL_TO_ENTER_ACTIVE\x10\x02\x12\x16\n\x12NORMAL_EXIT_ACTIVE\x10\x03\x12\x18\n\x14\x41\x42NORMAL_EXIT_ACTIVE\x10\x04')
   ,
   dependencies=[header__pb2.DESCRIPTOR,])
 
@@ -70,8 +70,8 @@ _STATE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=1191,
-  serialized_end=1356,
+  serialized_start=1956,
+  serialized_end=2121,
 )
 _sym_db.RegisterEnumDescriptor(_STATE)
 
@@ -105,8 +105,8 @@ _SAFETYSTOPMODE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=1359,
-  serialized_end=1500,
+  serialized_start=2124,
+  serialized_end=2265,
 )
 _sym_db.RegisterEnumDescriptor(_SAFETYSTOPMODE)
 
@@ -130,14 +130,18 @@ _ACTIVEMODE = _descriptor.EnumDescriptor(
       serialized_options=None,
       type=None),
     _descriptor.EnumValueDescriptor(
-      name='M1_STEER_ACTIVE', index=3, number=9,
+      name='APP_ACTIVE', index=3, number=7,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='M1_STEER_ACTIVE', index=4, number=9,
       serialized_options=None,
       type=None),
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=1502,
-  serialized_end=1590,
+  serialized_start=2267,
+  serialized_end=2371,
 )
 _sym_db.RegisterEnumDescriptor(_ACTIVEMODE)
 
@@ -167,8 +171,8 @@ _SESSIONRESULT = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=1592,
-  serialized_end=1689,
+  serialized_start=2373,
+  serialized_end=2470,
 )
 _sym_db.RegisterEnumDescriptor(_SESSIONRESULT)
 
@@ -194,8 +198,8 @@ _EXITTYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=1691,
-  serialized_end=1750,
+  serialized_start=2472,
+  serialized_end=2531,
 )
 _sym_db.RegisterEnumDescriptor(_EXITTYPE)
 
@@ -221,12 +225,47 @@ _ORDERSTATUS = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=1752,
-  serialized_end=1817,
+  serialized_start=2533,
+  serialized_end=2598,
 )
 _sym_db.RegisterEnumDescriptor(_ORDERSTATUS)
 
 OrderStatus = enum_type_wrapper.EnumTypeWrapper(_ORDERSTATUS)
+_EVENT = _descriptor.EnumDescriptor(
+  name='Event',
+  full_name='fsm.Event',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='NO_EVENT', index=0, number=0,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='SUCCEED_TO_ENTER_ACTIVE', index=1, number=1,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='FAIL_TO_ENTER_ACTIVE', index=2, number=2,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='NORMAL_EXIT_ACTIVE', index=3, number=3,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='ABNORMAL_EXIT_ACTIVE', index=4, number=4,
+      serialized_options=None,
+      type=None),
+  ],
+  containing_type=None,
+  serialized_options=None,
+  serialized_start=2600,
+  serialized_end=2726,
+)
+_sym_db.RegisterEnumDescriptor(_EVENT)
+
+Event = enum_type_wrapper.EnumTypeWrapper(_EVENT)
 OFF = 0
 REQUESTING = 1
 ACTIVATING = 2
@@ -244,6 +283,7 @@ PLANNER_PULL_OVER = 4
 NOT_ACTIVE = 0
 PILOT_ACTIVE = 1
 PARALLEL_ACTIVE = 6
+APP_ACTIVE = 7
 M1_STEER_ACTIVE = 9
 NO_REQUEST_RECEIVED = 0
 ATTEMPTING = 1
@@ -255,6 +295,11 @@ ABNORMAL_EXIT = 2
 OLDER_SSM_VERSION = 0
 NO_ORDER = 1
 HAS_ORDER = 2
+NO_EVENT = 0
+SUCCEED_TO_ENTER_ACTIVE = 1
+FAIL_TO_ENTER_ACTIVE = 2
+NORMAL_EXIT_ACTIVE = 3
+ABNORMAL_EXIT_ACTIVE = 4
 
 
 
@@ -447,100 +492,156 @@ _FSMSTATEMSG = _descriptor.Descriptor(
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='order_status', full_name='fsm.FSMStateMsg.order_status', index=11,
+      name='app_standby_flag', full_name='fsm.FSMStateMsg.app_standby_flag', index=11,
+      number=14, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='order_status', full_name='fsm.FSMStateMsg.order_status', index=12,
       number=16, type=14, cpp_type=8, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='place_order_standby_flag', full_name='fsm.FSMStateMsg.place_order_standby_flag', index=12,
+      name='place_order_standby_flag', full_name='fsm.FSMStateMsg.place_order_standby_flag', index=13,
       number=17, type=8, cpp_type=7, label=1,
       has_default_value=False, default_value=False,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='pilot_not_standby_reason', full_name='fsm.FSMStateMsg.pilot_not_standby_reason', index=13,
+      name='pilot_not_standby_reason', full_name='fsm.FSMStateMsg.pilot_not_standby_reason', index=14,
       number=21, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=_b("").decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='parallel_not_standby_reason', full_name='fsm.FSMStateMsg.parallel_not_standby_reason', index=14,
+      name='parallel_not_standby_reason', full_name='fsm.FSMStateMsg.parallel_not_standby_reason', index=15,
       number=22, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=_b("").decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='m1steer_not_standby_reason', full_name='fsm.FSMStateMsg.m1steer_not_standby_reason', index=15,
+      name='m1steer_not_standby_reason', full_name='fsm.FSMStateMsg.m1steer_not_standby_reason', index=16,
       number=23, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=_b("").decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='repeated_pilot_not_standby_reason', full_name='fsm.FSMStateMsg.repeated_pilot_not_standby_reason', index=16,
+      name='repeated_pilot_not_standby_reason', full_name='fsm.FSMStateMsg.repeated_pilot_not_standby_reason', index=17,
       number=26, type=9, cpp_type=9, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='repeated_parallel_not_standby_reason', full_name='fsm.FSMStateMsg.repeated_parallel_not_standby_reason', index=17,
+      name='repeated_parallel_not_standby_reason', full_name='fsm.FSMStateMsg.repeated_parallel_not_standby_reason', index=18,
       number=27, type=9, cpp_type=9, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='repeated_m1steer_not_standby_reason', full_name='fsm.FSMStateMsg.repeated_m1steer_not_standby_reason', index=18,
+      name='repeated_m1steer_not_standby_reason', full_name='fsm.FSMStateMsg.repeated_m1steer_not_standby_reason', index=19,
       number=28, type=9, cpp_type=9, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='session', full_name='fsm.FSMStateMsg.session', index=19,
+      name='repeated_app_not_standby_reason', full_name='fsm.FSMStateMsg.repeated_app_not_standby_reason', index=20,
+      number=29, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='session', full_name='fsm.FSMStateMsg.session', index=21,
       number=30, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='fail_to_pilot_session_id', full_name='fsm.FSMStateMsg.fail_to_pilot_session_id', index=20,
+      name='fail_to_pilot_session_id', full_name='fsm.FSMStateMsg.fail_to_pilot_session_id', index=22,
       number=36, type=4, cpp_type=4, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='fail_to_parallel_session_id', full_name='fsm.FSMStateMsg.fail_to_parallel_session_id', index=21,
+      name='fail_to_parallel_session_id', full_name='fsm.FSMStateMsg.fail_to_parallel_session_id', index=23,
       number=37, type=4, cpp_type=4, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='fail_to_m1steer_session_id', full_name='fsm.FSMStateMsg.fail_to_m1steer_session_id', index=22,
+      name='fail_to_m1steer_session_id', full_name='fsm.FSMStateMsg.fail_to_m1steer_session_id', index=24,
       number=38, type=4, cpp_type=4, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='abnormal_state_trans_reason', full_name='fsm.FSMStateMsg.abnormal_state_trans_reason', index=23,
+      name='abnormal_state_trans_reason', full_name='fsm.FSMStateMsg.abnormal_state_trans_reason', index=25,
       number=41, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=_b("").decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
     _descriptor.FieldDescriptor(
-      name='exit_active', full_name='fsm.FSMStateMsg.exit_active', index=24,
+      name='exit_active', full_name='fsm.FSMStateMsg.exit_active', index=26,
       number=42, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='pilot_not_standby_reasons_eng', full_name='fsm.FSMStateMsg.pilot_not_standby_reasons_eng', index=27,
+      number=50, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='parallel_not_standby_reasons_eng', full_name='fsm.FSMStateMsg.parallel_not_standby_reasons_eng', index=28,
+      number=51, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='m1steer_not_standby_reasons_eng', full_name='fsm.FSMStateMsg.m1steer_not_standby_reasons_eng', index=29,
+      number=52, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='pilot_not_standby_reasons_int', full_name='fsm.FSMStateMsg.pilot_not_standby_reasons_int', index=30,
+      number=55, type=13, cpp_type=3, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='parallel_not_standby_reasons_int', full_name='fsm.FSMStateMsg.parallel_not_standby_reasons_int', index=31,
+      number=56, type=13, cpp_type=3, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='m1steer_not_standby_reasons_int', full_name='fsm.FSMStateMsg.m1steer_not_standby_reasons_int', index=32,
+      number=57, type=13, cpp_type=3, label=3,
+      has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
@@ -557,7 +658,170 @@ _FSMSTATEMSG = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=320,
-  serialized_end=1188,
+  serialized_end=1499,
+)
+
+
+_TRANSREASONS = _descriptor.Descriptor(
+  name='TransReasons',
+  full_name='fsm.TransReasons',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='language', full_name='fsm.TransReasons.language', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='transition_reasons', full_name='fsm.TransReasons.transition_reasons', index=1,
+      number=2, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='simple_transition_reasons', full_name='fsm.TransReasons.simple_transition_reasons', index=2,
+      number=3, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1501,
+  serialized_end=1596,
+)
+
+
+_FSMEVENTINT = _descriptor.Descriptor(
+  name='FsmEventInt',
+  full_name='fsm.FsmEventInt',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='active_mode', full_name='fsm.FsmEventInt.active_mode', index=0,
+      number=1, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='event', full_name='fsm.FsmEventInt.event', index=1,
+      number=2, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='transition_reasons', full_name='fsm.FsmEventInt.transition_reasons', index=2,
+      number=3, type=13, cpp_type=3, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='fm_faults', full_name='fsm.FsmEventInt.fm_faults', index=3,
+      number=4, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='time', full_name='fsm.FsmEventInt.time', index=4,
+      number=5, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='broken_nodes', full_name='fsm.FsmEventInt.broken_nodes', index=5,
+      number=6, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='transition_reasons_code', full_name='fsm.FsmEventInt.transition_reasons_code', index=6,
+      number=7, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='transition_reasons_multi_lang', full_name='fsm.FsmEventInt.transition_reasons_multi_lang', index=7,
+      number=10, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1599,
+  serialized_end=1865,
+)
+
+
+_FSMEVENTMSG = _descriptor.Descriptor(
+  name='FsmEventMsg',
+  full_name='fsm.FsmEventMsg',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='header', full_name='fsm.FsmEventMsg.header', index=0,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='fsm_event_int', full_name='fsm.FsmEventMsg.fsm_event_int', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1867,
+  serialized_end=1953,
 )
 
 _SESSION.fields_by_name['session_active_mode'].enum_type = _ACTIVEMODE
@@ -571,15 +835,25 @@ _FSMSTATEMSG.fields_by_name['active_mode'].enum_type = _ACTIVEMODE
 _FSMSTATEMSG.fields_by_name['order_status'].enum_type = _ORDERSTATUS
 _FSMSTATEMSG.fields_by_name['session'].message_type = _SESSION
 _FSMSTATEMSG.fields_by_name['exit_active'].message_type = _EXITACTIVE
+_FSMEVENTINT.fields_by_name['active_mode'].enum_type = _ACTIVEMODE
+_FSMEVENTINT.fields_by_name['event'].enum_type = _EVENT
+_FSMEVENTINT.fields_by_name['time'].message_type = header__pb2._TIME
+_FSMEVENTINT.fields_by_name['transition_reasons_multi_lang'].message_type = _TRANSREASONS
+_FSMEVENTMSG.fields_by_name['header'].message_type = header__pb2._HEADER
+_FSMEVENTMSG.fields_by_name['fsm_event_int'].message_type = _FSMEVENTINT
 DESCRIPTOR.message_types_by_name['Session'] = _SESSION
 DESCRIPTOR.message_types_by_name['ExitActive'] = _EXITACTIVE
 DESCRIPTOR.message_types_by_name['FSMStateMsg'] = _FSMSTATEMSG
+DESCRIPTOR.message_types_by_name['TransReasons'] = _TRANSREASONS
+DESCRIPTOR.message_types_by_name['FsmEventInt'] = _FSMEVENTINT
+DESCRIPTOR.message_types_by_name['FsmEventMsg'] = _FSMEVENTMSG
 DESCRIPTOR.enum_types_by_name['State'] = _STATE
 DESCRIPTOR.enum_types_by_name['SafetyStopMode'] = _SAFETYSTOPMODE
 DESCRIPTOR.enum_types_by_name['ActiveMode'] = _ACTIVEMODE
 DESCRIPTOR.enum_types_by_name['SessionResult'] = _SESSIONRESULT
 DESCRIPTOR.enum_types_by_name['ExitType'] = _EXITTYPE
 DESCRIPTOR.enum_types_by_name['OrderStatus'] = _ORDERSTATUS
+DESCRIPTOR.enum_types_by_name['Event'] = _EVENT
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 Session = _reflection.GeneratedProtocolMessageType('Session', (_message.Message,), dict(
@@ -602,6 +876,27 @@ FSMStateMsg = _reflection.GeneratedProtocolMessageType('FSMStateMsg', (_message.
   # @@protoc_insertion_point(class_scope:fsm.FSMStateMsg)
   ))
 _sym_db.RegisterMessage(FSMStateMsg)
+
+TransReasons = _reflection.GeneratedProtocolMessageType('TransReasons', (_message.Message,), dict(
+  DESCRIPTOR = _TRANSREASONS,
+  __module__ = 'fsm2024_pb2'
+  # @@protoc_insertion_point(class_scope:fsm.TransReasons)
+  ))
+_sym_db.RegisterMessage(TransReasons)
+
+FsmEventInt = _reflection.GeneratedProtocolMessageType('FsmEventInt', (_message.Message,), dict(
+  DESCRIPTOR = _FSMEVENTINT,
+  __module__ = 'fsm2024_pb2'
+  # @@protoc_insertion_point(class_scope:fsm.FsmEventInt)
+  ))
+_sym_db.RegisterMessage(FsmEventInt)
+
+FsmEventMsg = _reflection.GeneratedProtocolMessageType('FsmEventMsg', (_message.Message,), dict(
+  DESCRIPTOR = _FSMEVENTMSG,
+  __module__ = 'fsm2024_pb2'
+  # @@protoc_insertion_point(class_scope:fsm.FsmEventMsg)
+  ))
+_sym_db.RegisterMessage(FsmEventMsg)
 
 
 # @@protoc_insertion_point(module_scope)

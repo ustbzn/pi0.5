@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='system_master',
   syntax='proto2',
   serialized_options=None,
-  serialized_pb=_b('\n\x0essm_info.proto\x12\rsystem_master\"Z\n\x07NodeInf\x12\x11\n\tnode_name\x18\x01 \x01(\t\x12\x13\n\x0blaunch_name\x18\x02 \x01(\t\x12\'\n\x05state\x18\x03 \x01(\x0e\x32\x18.system_master.NodeState\"_\n\tHealthInf\x12\x0c\n\x04name\x18\x01 \x02(\t\x12(\n\x05state\x18\x02 \x02(\x0e\x32\x19.system_master.HealthStat\x12\x0c\n\x04\x63ode\x18\x03 \x01(\t\x12\x0c\n\x04\x64\x65sc\x18\x04 \x01(\t\"\x80\x04\n\x0cSsmStatusInf\x12,\n\nmode_state\x18\x01 \x02(\x0e\x32\x18.system_master.ModeState\x12\x13\n\x0bmap_version\x18\x02 \x01(\t\x12\x16\n\x0emaster_version\x18\x03 \x01(\t\x12\x18\n\x10\x61uto_pilot_ready\x18\x04 \x02(\x08\x12\x1a\n\x12remote_pilot_ready\x18\x05 \x02(\x08\x12\x37\n\x17\x61uto_pilot_unready_list\x18\x06 \x03(\x0b\x32\x16.system_master.NodeInf\x12\x39\n\x19remote_pilot_unready_list\x18\x07 \x03(\x0b\x32\x16.system_master.NodeInf\x12!\n\x19\x61uto_pilot_unready_reason\x18\x08 \x01(\t\x12#\n\x1bremote_pilot_unready_reason\x18\t \x01(\t\x12-\n\x0bhealth_info\x18\n \x03(\x0b\x32\x18.system_master.HealthInf\x12\x1a\n\x0f\x63ur_used_lineid\x18\x14 \x01(\x04:\x01\x30\x12\x12\n\nhd_map_ver\x18\x15 \x01(\t\x12\x14\n\x0cslam_map_ver\x18\x16 \x01(\t\x12\x14\n\x0cgrid_map_ver\x18\x17 \x01(\t\x12\x18\n\x10\x63old_start_state\x18\x1e \x01(\r\"\x86\x01\n\x08\x41gentInf\x12\x12\n\nagent_host\x18\x01 \x02(\t\x12.\n\x0b\x61gent_state\x18\x02 \x02(\x0e\x32\x19.system_master.AgentState\x12\x10\n\x08node_sum\x18\x03 \x02(\x05\x12$\n\x04node\x18\x04 \x03(\x0b\x32\x16.system_master.NodeInf\"y\n\rSsmAgentState\x12,\n\nmode_state\x18\x01 \x02(\x0e\x32\x18.system_master.ModeState\x12\x11\n\tagent_sum\x18\x02 \x02(\x05\x12\'\n\x06\x61gents\x18\x03 \x03(\x0b\x32\x17.system_master.AgentInf\"\x9a\x02\n\rSsmPilotState\x12\x18\n\x10\x61uto_pilot_ready\x18\x01 \x02(\x08\x12\x1a\n\x12remote_pilot_ready\x18\x02 \x02(\x08\x12!\n\x19\x61uto_pilot_unready_reason\x18\x03 \x01(\t\x12#\n\x1bremote_pilot_unready_reason\x18\x04 \x01(\t\x12\x34\n\x0eunready_reason\x18\x05 \x03(\x0e\x32\x1c.system_master.UnreadyReason\x12\x43\n\x0corder_status\x18\x06 \x01(\x0e\x32\x1a.system_master.OrderStatus:\x11OLDER_SSM_VERSION\x12\x10\n\x08order_id\x18\x07 \x01(\t\"}\n\x0bSsmPilotCmd\x12\x11\n\tpilot_cmd\x18\x01 \x02(\r\x12\x0f\n\x07line_id\x18\x02 \x02(\x04\x12\x0f\n\x07md5_sum\x18\x03 \x02(\t\x12\x1c\n\x14\x61utopilot_session_id\x18\x04 \x01(\x04\x12\x1b\n\x13parallel_session_id\x18\x05 \x01(\x04\"i\n\tPadSsmMsg\x12\r\n\x05token\x18\x01 \x02(\x04\x12,\n\x08msg_type\x18\x02 \x02(\x0e\x32\x1a.system_master.MessageType\x12\x11\n\ttimestamp\x18\x03 \x02(\x01\x12\x0c\n\x04\x64\x61ta\x18\x06 \x01(\x0c\"@\n\x0cNotification\x12#\n\x05level\x18\x01 \x02(\x0e\x32\x14.system_master.Level\x12\x0b\n\x03msg\x18\x02 \x02(\t\"\x8b\x01\n\x12OtaDownloadRequest\x12\x11\n\tota_token\x18\x01 \x02(\t\x12(\n\x08ota_type\x18\x02 \x02(\x0e\x32\x16.system_master.OtaType\x12\x14\n\x0cneed_restart\x18\x03 \x02(\x08\x12\x14\n\x0cproduct_name\x18\x04 \x02(\t\x12\x0c\n\x04size\x18\x05 \x01(\x01\"\x19\n\x08OtaToken\x12\r\n\x05token\x18\x01 \x02(\t\"R\n\x13OtaDownloadResponse\x12\r\n\x05token\x18\x01 \x02(\t\x12,\n\nif_upgrade\x18\x02 \x02(\x0e\x32\x18.system_master.IfUpgrade\"N\n\x11OtaLoadingProgess\x12\x11\n\tota_token\x18\x01 \x02(\t\x12\x13\n\x0b\x63urrentSize\x18\x02 \x02(\x01\x12\x11\n\ttotalSize\x18\x03 \x02(\x01\"~\n\tOtaStatus\x12\x33\n\x08ota_info\x18\x01 \x02(\x0b\x32!.system_master.OtaDownloadRequest\x12,\n\x06status\x18\x02 \x02(\x0e\x32\x1c.system_master.UpgradeStatus\x12\x0e\n\x06reason\x18\x03 \x01(\t\"o\n\rColdStartNode\x12\x11\n\tnode_name\x18\x01 \x02(\t\x12\x12\n\nevent_code\x18\x02 \x02(\t\x12)\n\x06status\x18\x03 \x02(\x0e\x32\x19.system_master.NodeStatus\x12\x0c\n\x04\x64\x65sc\x18\x04 \x02(\t\"\xba\x01\n\x0e\x43oldStartState\x12.\n\x0eprocess_status\x18\x01 \x02(\x0e\x32\x16.system_master.CSState\x12,\n\x0c\x65vent_status\x18\x02 \x02(\x0e\x32\x16.system_master.CSState\x12*\n\x04node\x18\x03 \x03(\x0b\x32\x1c.system_master.ColdStartNode\x12\x1e\n\x16process_timeout_reason\x18\x04 \x01(\t\"N\n\rAutoPilotInfo\x12\x1c\n\x14\x66irst_autopilot_flag\x18\x01 \x02(\x08\x12\x10\n\x08order_id\x18\x02 \x02(\t\x12\r\n\x05\x63ount\x18\x03 \x02(\r\"\x1d\n\tOrderInfo\x12\x10\n\x08order_id\x18\x01 \x02(\t\"B\n\x10\x41utoPilotStation\x12\x1c\n\x14\x61rrived_station_flag\x18\x01 \x02(\x08\x12\x10\n\x08order_id\x18\x02 \x01(\t*r\n\tNodeState\x12\x08\n\x04NONE\x10\x00\x12\x0b\n\x07WAITING\x10\x01\x12\x0c\n\x08STARTING\x10\x02\x12\x0b\n\x07RUNNING\x10\x03\x12\x0c\n\x08STOPPING\x10\x04\x12\n\n\x06\x42ROKEN\x10\x05\x12\x0b\n\x07MAN_RUN\x10\x06\x12\x0c\n\x08MAN_STOP\x10\x07*+\n\nAgentState\x12\x0e\n\nDISCONNECT\x10\x00\x12\r\n\tCONNECTED\x10\x01*\x8d\x01\n\tModeState\x12\x15\n\x11MODE_STOP_UNREADY\x10\x00\x12\x13\n\x0fMODE_STOP_READY\x10\x01\x12\x14\n\x10MODE_RUN_UNREADY\x10\x02\x12\x12\n\x0eMODE_RUN_READY\x10\x03\x12\x15\n\x11MODE_IDLE_UNREADY\x10\x04\x12\x13\n\x0fMODE_IDLE_READY\x10\x05*D\n\nHealthStat\x12\x11\n\rHEALTH_NORMAL\x10\x00\x12\x10\n\x0cHEALTH_FAULT\x10\x01\x12\x11\n\rHEALTH_UNKNOW\x10\x02*A\n\x0bOrderStatus\x12\x15\n\x11OLDER_SSM_VERSION\x10\x00\x12\x0c\n\x08NO_ORDER\x10\x01\x12\r\n\tHAS_ORDER\x10\x02*\x89\x01\n\rUnreadyReason\x12\x10\n\x0cNODE_UNREADY\x10\x00\x12\x18\n\x14TARJ_INIT_UNFINISHED\x10\x01\x12\x1c\n\x18TARJ_DOWNLOAD_UNFINISHED\x10\x02\x12\x1a\n\x16\x45NGINE_INIT_UNFINISHED\x10\x03\x12\x12\n\x0e\x43RITICAL_FAULT\x10\x04*\xfd\x01\n\x0bMessageType\x12\x10\n\x0cNOTIFICATION\x10\x00\x12\x18\n\x14OTA_DOWNLOAD_REQUEST\x10\x01\x12\x19\n\x15OTA_DOWNLOAD_RESPONSE\x10\x02\x12\x18\n\x14OTA_LOADING_PROGRESS\x10\x03\x12\x0e\n\nOTA_STATUS\x10\x04\x12\x14\n\x10OTA_STATUS_QUERY\x10\x05\x12\x1c\n\x18\x43OLD_START_STATUS_REPORT\x10\x06\x12\x1a\n\x16\x43OLD_START_STATE_QUERY\x10\x07\x12\x13\n\x0f\x41UTO_PILOT_INFO\x10\x08\x12\x18\n\x14STATION_STATUS_QUERY\x10\t*5\n\x05Level\x12\x0c\n\x08INFO_MSG\x10\x00\x12\x0f\n\x0bWARNING_MSG\x10\x01\x12\r\n\tERROR_MSG\x10\x02*8\n\x07OtaType\x12\t\n\x05IMAGE\x10\x01\x12\x0c\n\x08\x46IRMWARE\x10\x02\x12\x07\n\x03MAP\x10\x03\x12\x0b\n\x07PROFILE\x10\x04*\'\n\tIfUpgrade\x12\x0f\n\x0bIMMEDIATELY\x10\x01\x12\t\n\x05\x44\x45LAY\x10\x02*\x7f\n\rUpgradeStatus\x12\x13\n\x0fUPGRADE_DEFAULT\x10\x00\x12\x17\n\x13UPGRADE_DOWNLOADING\x10\x01\x12\x1b\n\x17UPGRADE_DOWNLOAD_FINISH\x10\x02\x12\x11\n\rUPGRADE_FINSH\x10\x03\x12\x10\n\x0cUPGRADE_FAIL\x10\x04*\x80\x01\n\x07\x43SState\x12\x16\n\x12\x43OLD_START_DEFAULT\x10\x00\x12\x17\n\x13\x43OLD_START_STARTING\x10\x01\x12\x14\n\x10\x43OLD_START_READY\x10\x02\x12\x16\n\x12\x43OLD_START_UNREADY\x10\x03\x12\x16\n\x12\x43OLD_START_TIMEOUT\x10\x04*S\n\nNodeStatus\x12\x11\n\rNODE_STARTING\x10\x00\x12\x0f\n\x0bNODE_FINISH\x10\x01\x12\x0f\n\x0bNODE_FAILED\x10\x02\x12\x10\n\x0cNODE_TIMEOUT\x10\x03')
+  serialized_pb=_b('\n\x0essm_info.proto\x12\rsystem_master\"Z\n\x07NodeInf\x12\x11\n\tnode_name\x18\x01 \x01(\t\x12\x13\n\x0blaunch_name\x18\x02 \x01(\t\x12\'\n\x05state\x18\x03 \x01(\x0e\x32\x18.system_master.NodeState\"_\n\tHealthInf\x12\x0c\n\x04name\x18\x01 \x02(\t\x12(\n\x05state\x18\x02 \x02(\x0e\x32\x19.system_master.HealthStat\x12\x0c\n\x04\x63ode\x18\x03 \x01(\t\x12\x0c\n\x04\x64\x65sc\x18\x04 \x01(\t\"\x80\x04\n\x0cSsmStatusInf\x12,\n\nmode_state\x18\x01 \x02(\x0e\x32\x18.system_master.ModeState\x12\x13\n\x0bmap_version\x18\x02 \x01(\t\x12\x16\n\x0emaster_version\x18\x03 \x01(\t\x12\x18\n\x10\x61uto_pilot_ready\x18\x04 \x02(\x08\x12\x1a\n\x12remote_pilot_ready\x18\x05 \x02(\x08\x12\x37\n\x17\x61uto_pilot_unready_list\x18\x06 \x03(\x0b\x32\x16.system_master.NodeInf\x12\x39\n\x19remote_pilot_unready_list\x18\x07 \x03(\x0b\x32\x16.system_master.NodeInf\x12!\n\x19\x61uto_pilot_unready_reason\x18\x08 \x01(\t\x12#\n\x1bremote_pilot_unready_reason\x18\t \x01(\t\x12-\n\x0bhealth_info\x18\n \x03(\x0b\x32\x18.system_master.HealthInf\x12\x1a\n\x0f\x63ur_used_lineid\x18\x14 \x01(\x04:\x01\x30\x12\x12\n\nhd_map_ver\x18\x15 \x01(\t\x12\x14\n\x0cslam_map_ver\x18\x16 \x01(\t\x12\x14\n\x0cgrid_map_ver\x18\x17 \x01(\t\x12\x18\n\x10\x63old_start_state\x18\x1e \x01(\r\"\x86\x01\n\x08\x41gentInf\x12\x12\n\nagent_host\x18\x01 \x02(\t\x12.\n\x0b\x61gent_state\x18\x02 \x02(\x0e\x32\x19.system_master.AgentState\x12\x10\n\x08node_sum\x18\x03 \x02(\x05\x12$\n\x04node\x18\x04 \x03(\x0b\x32\x16.system_master.NodeInf\"y\n\rSsmAgentState\x12,\n\nmode_state\x18\x01 \x02(\x0e\x32\x18.system_master.ModeState\x12\x11\n\tagent_sum\x18\x02 \x02(\x05\x12\'\n\x06\x61gents\x18\x03 \x03(\x0b\x32\x17.system_master.AgentInf\"\xb0\x03\n\rSsmPilotState\x12\x18\n\x10\x61uto_pilot_ready\x18\x01 \x02(\x08\x12\x1a\n\x12remote_pilot_ready\x18\x02 \x02(\x08\x12!\n\x19\x61uto_pilot_unready_reason\x18\x03 \x01(\t\x12#\n\x1bremote_pilot_unready_reason\x18\x04 \x01(\t\x12\x34\n\x0eunready_reason\x18\x05 \x03(\x0e\x32\x1c.system_master.UnreadyReason\x12\x43\n\x0corder_status\x18\x06 \x01(\x0e\x32\x1a.system_master.OrderStatus:\x11OLDER_SSM_VERSION\x12\x10\n\x08order_id\x18\x07 \x01(\t\x12&\n\x1e\x61uto_pilot_unready_int_reasons\x18\n \x03(\r\x12\x1f\n\x17\x61uto_pilot_broken_nodes\x18\x0b \x01(\t\x12(\n remote_pilot_unready_int_reasons\x18\x0c \x03(\r\x12!\n\x19remote_pilot_broken_nodes\x18\r \x01(\t\"}\n\x0bSsmPilotCmd\x12\x11\n\tpilot_cmd\x18\x01 \x02(\r\x12\x0f\n\x07line_id\x18\x02 \x02(\x04\x12\x0f\n\x07md5_sum\x18\x03 \x02(\t\x12\x1c\n\x14\x61utopilot_session_id\x18\x04 \x01(\x04\x12\x1b\n\x13parallel_session_id\x18\x05 \x01(\x04\"i\n\tPadSsmMsg\x12\r\n\x05token\x18\x01 \x02(\x04\x12,\n\x08msg_type\x18\x02 \x02(\x0e\x32\x1a.system_master.MessageType\x12\x11\n\ttimestamp\x18\x03 \x02(\x01\x12\x0c\n\x04\x64\x61ta\x18\x06 \x01(\x0c\"@\n\x0cNotification\x12#\n\x05level\x18\x01 \x02(\x0e\x32\x14.system_master.Level\x12\x0b\n\x03msg\x18\x02 \x02(\t\"\x17\n\x07PureStr\x12\x0c\n\x04\x64\x61ta\x18\x01 \x02(\t\"\x8b\x01\n\x12OtaDownloadRequest\x12\x11\n\tota_token\x18\x01 \x02(\t\x12(\n\x08ota_type\x18\x02 \x02(\x0e\x32\x16.system_master.OtaType\x12\x14\n\x0cneed_restart\x18\x03 \x02(\x08\x12\x14\n\x0cproduct_name\x18\x04 \x02(\t\x12\x0c\n\x04size\x18\x05 \x01(\x01\"\x19\n\x08OtaToken\x12\r\n\x05token\x18\x01 \x02(\t\"R\n\x13OtaDownloadResponse\x12\r\n\x05token\x18\x01 \x02(\t\x12,\n\nif_upgrade\x18\x02 \x02(\x0e\x32\x18.system_master.IfUpgrade\"N\n\x11OtaLoadingProgess\x12\x11\n\tota_token\x18\x01 \x02(\t\x12\x13\n\x0b\x63urrentSize\x18\x02 \x02(\x01\x12\x11\n\ttotalSize\x18\x03 \x02(\x01\"~\n\tOtaStatus\x12\x33\n\x08ota_info\x18\x01 \x02(\x0b\x32!.system_master.OtaDownloadRequest\x12,\n\x06status\x18\x02 \x02(\x0e\x32\x1c.system_master.UpgradeStatus\x12\x0e\n\x06reason\x18\x03 \x01(\t\"\x81\x01\n\rColdStartNode\x12\x11\n\tnode_name\x18\x01 \x02(\t\x12\x12\n\nevent_code\x18\x02 \x02(\t\x12)\n\x06status\x18\x03 \x02(\x0e\x32\x19.system_master.NodeStatus\x12\x0c\n\x04\x64\x65sc\x18\x04 \x02(\t\x12\x10\n\x08have_flt\x18\x05 \x03(\t\"\x1a\n\x08StartFlt\x12\x0e\n\x06\x66lt_id\x18\x01 \x02(\t\"\x97\x02\n\x0e\x43oldStartState\x12.\n\x0eprocess_status\x18\x01 \x02(\x0e\x32\x16.system_master.CSState\x12,\n\x0c\x65vent_status\x18\x02 \x02(\x0e\x32\x16.system_master.CSState\x12*\n\x04node\x18\x03 \x03(\x0b\x32\x1c.system_master.ColdStartNode\x12\x1e\n\x16process_timeout_reason\x18\x04 \x01(\t\x12.\n\rhardware_node\x18\x05 \x03(\x0b\x32\x17.system_master.StartFlt\x12+\n\nother_flts\x18\x06 \x03(\x0b\x32\x17.system_master.StartFlt\"N\n\rAutoPilotInfo\x12\x1c\n\x14\x66irst_autopilot_flag\x18\x01 \x02(\x08\x12\x10\n\x08order_id\x18\x02 \x02(\t\x12\r\n\x05\x63ount\x18\x03 \x02(\r\"\x1d\n\tOrderInfo\x12\x10\n\x08order_id\x18\x01 \x02(\t\"B\n\x10\x41utoPilotStation\x12\x1c\n\x14\x61rrived_station_flag\x18\x01 \x02(\x08\x12\x10\n\x08order_id\x18\x02 \x01(\t\"\'\n\rOperateStatus\x12\x16\n\x0eoperate_status\x18\x01 \x02(\r*r\n\tNodeState\x12\x08\n\x04NONE\x10\x00\x12\x0b\n\x07WAITING\x10\x01\x12\x0c\n\x08STARTING\x10\x02\x12\x0b\n\x07RUNNING\x10\x03\x12\x0c\n\x08STOPPING\x10\x04\x12\n\n\x06\x42ROKEN\x10\x05\x12\x0b\n\x07MAN_RUN\x10\x06\x12\x0c\n\x08MAN_STOP\x10\x07*+\n\nAgentState\x12\x0e\n\nDISCONNECT\x10\x00\x12\r\n\tCONNECTED\x10\x01*\x8d\x01\n\tModeState\x12\x15\n\x11MODE_STOP_UNREADY\x10\x00\x12\x13\n\x0fMODE_STOP_READY\x10\x01\x12\x14\n\x10MODE_RUN_UNREADY\x10\x02\x12\x12\n\x0eMODE_RUN_READY\x10\x03\x12\x15\n\x11MODE_IDLE_UNREADY\x10\x04\x12\x13\n\x0fMODE_IDLE_READY\x10\x05*D\n\nHealthStat\x12\x11\n\rHEALTH_NORMAL\x10\x00\x12\x10\n\x0cHEALTH_FAULT\x10\x01\x12\x11\n\rHEALTH_UNKNOW\x10\x02*A\n\x0bOrderStatus\x12\x15\n\x11OLDER_SSM_VERSION\x10\x00\x12\x0c\n\x08NO_ORDER\x10\x01\x12\r\n\tHAS_ORDER\x10\x02*\x89\x01\n\rUnreadyReason\x12\x10\n\x0cNODE_UNREADY\x10\x00\x12\x18\n\x14TARJ_INIT_UNFINISHED\x10\x01\x12\x1c\n\x18TARJ_DOWNLOAD_UNFINISHED\x10\x02\x12\x1a\n\x16\x45NGINE_INIT_UNFINISHED\x10\x03\x12\x12\n\x0e\x43RITICAL_FAULT\x10\x04*\xa2\x02\n\x0bMessageType\x12\x10\n\x0cNOTIFICATION\x10\x00\x12\x18\n\x14OTA_DOWNLOAD_REQUEST\x10\x01\x12\x19\n\x15OTA_DOWNLOAD_RESPONSE\x10\x02\x12\x18\n\x14OTA_LOADING_PROGRESS\x10\x03\x12\x0e\n\nOTA_STATUS\x10\x04\x12\x14\n\x10OTA_STATUS_QUERY\x10\x05\x12\x1c\n\x18\x43OLD_START_STATUS_REPORT\x10\x06\x12\x1a\n\x16\x43OLD_START_STATE_QUERY\x10\x07\x12\x13\n\x0f\x41UTO_PILOT_INFO\x10\x08\x12\x18\n\x14STATION_STATUS_QUERY\x10\t\x12\x12\n\x0eOPERATE_STATUS\x10\n\x12\x0f\n\x0bOTA_PAD_MSG\x10\x0b*5\n\x05Level\x12\x0c\n\x08INFO_MSG\x10\x00\x12\x0f\n\x0bWARNING_MSG\x10\x01\x12\r\n\tERROR_MSG\x10\x02*8\n\x07OtaType\x12\t\n\x05IMAGE\x10\x01\x12\x0c\n\x08\x46IRMWARE\x10\x02\x12\x07\n\x03MAP\x10\x03\x12\x0b\n\x07PROFILE\x10\x04*\'\n\tIfUpgrade\x12\x0f\n\x0bIMMEDIATELY\x10\x01\x12\t\n\x05\x44\x45LAY\x10\x02*\x7f\n\rUpgradeStatus\x12\x13\n\x0fUPGRADE_DEFAULT\x10\x00\x12\x17\n\x13UPGRADE_DOWNLOADING\x10\x01\x12\x1b\n\x17UPGRADE_DOWNLOAD_FINISH\x10\x02\x12\x11\n\rUPGRADE_FINSH\x10\x03\x12\x10\n\x0cUPGRADE_FAIL\x10\x04*\x80\x01\n\x07\x43SState\x12\x16\n\x12\x43OLD_START_DEFAULT\x10\x00\x12\x17\n\x13\x43OLD_START_STARTING\x10\x01\x12\x14\n\x10\x43OLD_START_READY\x10\x02\x12\x16\n\x12\x43OLD_START_UNREADY\x10\x03\x12\x16\n\x12\x43OLD_START_TIMEOUT\x10\x04*S\n\nNodeStatus\x12\x11\n\rNODE_STARTING\x10\x00\x12\x0f\n\x0bNODE_FINISH\x10\x01\x12\x0f\n\x0bNODE_FAILED\x10\x02\x12\x10\n\x0cNODE_TIMEOUT\x10\x03')
 )
 
 _NODESTATE = _descriptor.EnumDescriptor(
@@ -64,8 +64,8 @@ _NODESTATE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=2524,
-  serialized_end=2638,
+  serialized_start=2880,
+  serialized_end=2994,
 )
 _sym_db.RegisterEnumDescriptor(_NODESTATE)
 
@@ -87,8 +87,8 @@ _AGENTSTATE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=2640,
-  serialized_end=2683,
+  serialized_start=2996,
+  serialized_end=3039,
 )
 _sym_db.RegisterEnumDescriptor(_AGENTSTATE)
 
@@ -126,8 +126,8 @@ _MODESTATE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=2686,
-  serialized_end=2827,
+  serialized_start=3042,
+  serialized_end=3183,
 )
 _sym_db.RegisterEnumDescriptor(_MODESTATE)
 
@@ -153,8 +153,8 @@ _HEALTHSTAT = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=2829,
-  serialized_end=2897,
+  serialized_start=3185,
+  serialized_end=3253,
 )
 _sym_db.RegisterEnumDescriptor(_HEALTHSTAT)
 
@@ -180,8 +180,8 @@ _ORDERSTATUS = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=2899,
-  serialized_end=2964,
+  serialized_start=3255,
+  serialized_end=3320,
 )
 _sym_db.RegisterEnumDescriptor(_ORDERSTATUS)
 
@@ -215,8 +215,8 @@ _UNREADYREASON = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=2967,
-  serialized_end=3104,
+  serialized_start=3323,
+  serialized_end=3460,
 )
 _sym_db.RegisterEnumDescriptor(_UNREADYREASON)
 
@@ -267,11 +267,19 @@ _MESSAGETYPE = _descriptor.EnumDescriptor(
       name='STATION_STATUS_QUERY', index=9, number=9,
       serialized_options=None,
       type=None),
+    _descriptor.EnumValueDescriptor(
+      name='OPERATE_STATUS', index=10, number=10,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='OTA_PAD_MSG', index=11, number=11,
+      serialized_options=None,
+      type=None),
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3107,
-  serialized_end=3360,
+  serialized_start=3463,
+  serialized_end=3753,
 )
 _sym_db.RegisterEnumDescriptor(_MESSAGETYPE)
 
@@ -297,8 +305,8 @@ _LEVEL = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3362,
-  serialized_end=3415,
+  serialized_start=3755,
+  serialized_end=3808,
 )
 _sym_db.RegisterEnumDescriptor(_LEVEL)
 
@@ -328,8 +336,8 @@ _OTATYPE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3417,
-  serialized_end=3473,
+  serialized_start=3810,
+  serialized_end=3866,
 )
 _sym_db.RegisterEnumDescriptor(_OTATYPE)
 
@@ -351,8 +359,8 @@ _IFUPGRADE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3475,
-  serialized_end=3514,
+  serialized_start=3868,
+  serialized_end=3907,
 )
 _sym_db.RegisterEnumDescriptor(_IFUPGRADE)
 
@@ -386,8 +394,8 @@ _UPGRADESTATUS = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3516,
-  serialized_end=3643,
+  serialized_start=3909,
+  serialized_end=4036,
 )
 _sym_db.RegisterEnumDescriptor(_UPGRADESTATUS)
 
@@ -421,8 +429,8 @@ _CSSTATE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3646,
-  serialized_end=3774,
+  serialized_start=4039,
+  serialized_end=4167,
 )
 _sym_db.RegisterEnumDescriptor(_CSSTATE)
 
@@ -452,8 +460,8 @@ _NODESTATUS = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3776,
-  serialized_end=3859,
+  serialized_start=4169,
+  serialized_end=4252,
 )
 _sym_db.RegisterEnumDescriptor(_NODESTATUS)
 
@@ -495,6 +503,8 @@ COLD_START_STATUS_REPORT = 6
 COLD_START_STATE_QUERY = 7
 AUTO_PILOT_INFO = 8
 STATION_STATUS_QUERY = 9
+OPERATE_STATUS = 10
+OTA_PAD_MSG = 11
 INFO_MSG = 0
 WARNING_MSG = 1
 ERROR_MSG = 2
@@ -900,6 +910,34 @@ _SSMPILOTSTATE = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='auto_pilot_unready_int_reasons', full_name='system_master.SsmPilotState.auto_pilot_unready_int_reasons', index=7,
+      number=10, type=13, cpp_type=3, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='auto_pilot_broken_nodes', full_name='system_master.SsmPilotState.auto_pilot_broken_nodes', index=8,
+      number=11, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='remote_pilot_unready_int_reasons', full_name='system_master.SsmPilotState.remote_pilot_unready_int_reasons', index=9,
+      number=12, type=13, cpp_type=3, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='remote_pilot_broken_nodes', full_name='system_master.SsmPilotState.remote_pilot_broken_nodes', index=10,
+      number=13, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -913,7 +951,7 @@ _SSMPILOTSTATE = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=998,
-  serialized_end=1280,
+  serialized_end=1430,
 )
 
 
@@ -971,8 +1009,8 @@ _SSMPILOTCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1282,
-  serialized_end=1407,
+  serialized_start=1432,
+  serialized_end=1557,
 )
 
 
@@ -1023,8 +1061,8 @@ _PADSSMMSG = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1409,
-  serialized_end=1514,
+  serialized_start=1559,
+  serialized_end=1664,
 )
 
 
@@ -1061,8 +1099,39 @@ _NOTIFICATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1516,
-  serialized_end=1580,
+  serialized_start=1666,
+  serialized_end=1730,
+)
+
+
+_PURESTR = _descriptor.Descriptor(
+  name='PureStr',
+  full_name='system_master.PureStr',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='data', full_name='system_master.PureStr.data', index=0,
+      number=1, type=9, cpp_type=9, label=2,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=1732,
+  serialized_end=1755,
 )
 
 
@@ -1120,8 +1189,8 @@ _OTADOWNLOADREQUEST = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1583,
-  serialized_end=1722,
+  serialized_start=1758,
+  serialized_end=1897,
 )
 
 
@@ -1151,8 +1220,8 @@ _OTATOKEN = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1724,
-  serialized_end=1749,
+  serialized_start=1899,
+  serialized_end=1924,
 )
 
 
@@ -1189,8 +1258,8 @@ _OTADOWNLOADRESPONSE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1751,
-  serialized_end=1833,
+  serialized_start=1926,
+  serialized_end=2008,
 )
 
 
@@ -1234,8 +1303,8 @@ _OTALOADINGPROGESS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1835,
-  serialized_end=1913,
+  serialized_start=2010,
+  serialized_end=2088,
 )
 
 
@@ -1279,8 +1348,8 @@ _OTASTATUS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1915,
-  serialized_end=2041,
+  serialized_start=2090,
+  serialized_end=2216,
 )
 
 
@@ -1319,6 +1388,13 @@ _COLDSTARTNODE = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='have_flt', full_name='system_master.ColdStartNode.have_flt', index=4,
+      number=5, type=9, cpp_type=9, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -1331,8 +1407,39 @@ _COLDSTARTNODE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2043,
-  serialized_end=2154,
+  serialized_start=2219,
+  serialized_end=2348,
+)
+
+
+_STARTFLT = _descriptor.Descriptor(
+  name='StartFlt',
+  full_name='system_master.StartFlt',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='flt_id', full_name='system_master.StartFlt.flt_id', index=0,
+      number=1, type=9, cpp_type=9, label=2,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=2350,
+  serialized_end=2376,
 )
 
 
@@ -1371,6 +1478,20 @@ _COLDSTARTSTATE = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='hardware_node', full_name='system_master.ColdStartState.hardware_node', index=4,
+      number=5, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='other_flts', full_name='system_master.ColdStartState.other_flts', index=5,
+      number=6, type=11, cpp_type=10, label=3,
+      has_default_value=False, default_value=[],
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -1383,8 +1504,8 @@ _COLDSTARTSTATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2157,
-  serialized_end=2343,
+  serialized_start=2379,
+  serialized_end=2658,
 )
 
 
@@ -1428,8 +1549,8 @@ _AUTOPILOTINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2345,
-  serialized_end=2423,
+  serialized_start=2660,
+  serialized_end=2738,
 )
 
 
@@ -1459,8 +1580,8 @@ _ORDERINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2425,
-  serialized_end=2454,
+  serialized_start=2740,
+  serialized_end=2769,
 )
 
 
@@ -1497,8 +1618,39 @@ _AUTOPILOTSTATION = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2456,
-  serialized_end=2522,
+  serialized_start=2771,
+  serialized_end=2837,
+)
+
+
+_OPERATESTATUS = _descriptor.Descriptor(
+  name='OperateStatus',
+  full_name='system_master.OperateStatus',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='operate_status', full_name='system_master.OperateStatus.operate_status', index=0,
+      number=1, type=13, cpp_type=3, label=2,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto2',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=2839,
+  serialized_end=2878,
 )
 
 _NODEINF.fields_by_name['state'].enum_type = _NODESTATE
@@ -1523,6 +1675,8 @@ _COLDSTARTNODE.fields_by_name['status'].enum_type = _NODESTATUS
 _COLDSTARTSTATE.fields_by_name['process_status'].enum_type = _CSSTATE
 _COLDSTARTSTATE.fields_by_name['event_status'].enum_type = _CSSTATE
 _COLDSTARTSTATE.fields_by_name['node'].message_type = _COLDSTARTNODE
+_COLDSTARTSTATE.fields_by_name['hardware_node'].message_type = _STARTFLT
+_COLDSTARTSTATE.fields_by_name['other_flts'].message_type = _STARTFLT
 DESCRIPTOR.message_types_by_name['NodeInf'] = _NODEINF
 DESCRIPTOR.message_types_by_name['HealthInf'] = _HEALTHINF
 DESCRIPTOR.message_types_by_name['SsmStatusInf'] = _SSMSTATUSINF
@@ -1532,16 +1686,19 @@ DESCRIPTOR.message_types_by_name['SsmPilotState'] = _SSMPILOTSTATE
 DESCRIPTOR.message_types_by_name['SsmPilotCmd'] = _SSMPILOTCMD
 DESCRIPTOR.message_types_by_name['PadSsmMsg'] = _PADSSMMSG
 DESCRIPTOR.message_types_by_name['Notification'] = _NOTIFICATION
+DESCRIPTOR.message_types_by_name['PureStr'] = _PURESTR
 DESCRIPTOR.message_types_by_name['OtaDownloadRequest'] = _OTADOWNLOADREQUEST
 DESCRIPTOR.message_types_by_name['OtaToken'] = _OTATOKEN
 DESCRIPTOR.message_types_by_name['OtaDownloadResponse'] = _OTADOWNLOADRESPONSE
 DESCRIPTOR.message_types_by_name['OtaLoadingProgess'] = _OTALOADINGPROGESS
 DESCRIPTOR.message_types_by_name['OtaStatus'] = _OTASTATUS
 DESCRIPTOR.message_types_by_name['ColdStartNode'] = _COLDSTARTNODE
+DESCRIPTOR.message_types_by_name['StartFlt'] = _STARTFLT
 DESCRIPTOR.message_types_by_name['ColdStartState'] = _COLDSTARTSTATE
 DESCRIPTOR.message_types_by_name['AutoPilotInfo'] = _AUTOPILOTINFO
 DESCRIPTOR.message_types_by_name['OrderInfo'] = _ORDERINFO
 DESCRIPTOR.message_types_by_name['AutoPilotStation'] = _AUTOPILOTSTATION
+DESCRIPTOR.message_types_by_name['OperateStatus'] = _OPERATESTATUS
 DESCRIPTOR.enum_types_by_name['NodeState'] = _NODESTATE
 DESCRIPTOR.enum_types_by_name['AgentState'] = _AGENTSTATE
 DESCRIPTOR.enum_types_by_name['ModeState'] = _MODESTATE
@@ -1620,6 +1777,13 @@ Notification = _reflection.GeneratedProtocolMessageType('Notification', (_messag
   ))
 _sym_db.RegisterMessage(Notification)
 
+PureStr = _reflection.GeneratedProtocolMessageType('PureStr', (_message.Message,), dict(
+  DESCRIPTOR = _PURESTR,
+  __module__ = 'ssm_info_pb2'
+  # @@protoc_insertion_point(class_scope:system_master.PureStr)
+  ))
+_sym_db.RegisterMessage(PureStr)
+
 OtaDownloadRequest = _reflection.GeneratedProtocolMessageType('OtaDownloadRequest', (_message.Message,), dict(
   DESCRIPTOR = _OTADOWNLOADREQUEST,
   __module__ = 'ssm_info_pb2'
@@ -1662,6 +1826,13 @@ ColdStartNode = _reflection.GeneratedProtocolMessageType('ColdStartNode', (_mess
   ))
 _sym_db.RegisterMessage(ColdStartNode)
 
+StartFlt = _reflection.GeneratedProtocolMessageType('StartFlt', (_message.Message,), dict(
+  DESCRIPTOR = _STARTFLT,
+  __module__ = 'ssm_info_pb2'
+  # @@protoc_insertion_point(class_scope:system_master.StartFlt)
+  ))
+_sym_db.RegisterMessage(StartFlt)
+
 ColdStartState = _reflection.GeneratedProtocolMessageType('ColdStartState', (_message.Message,), dict(
   DESCRIPTOR = _COLDSTARTSTATE,
   __module__ = 'ssm_info_pb2'
@@ -1689,6 +1860,13 @@ AutoPilotStation = _reflection.GeneratedProtocolMessageType('AutoPilotStation', 
   # @@protoc_insertion_point(class_scope:system_master.AutoPilotStation)
   ))
 _sym_db.RegisterMessage(AutoPilotStation)
+
+OperateStatus = _reflection.GeneratedProtocolMessageType('OperateStatus', (_message.Message,), dict(
+  DESCRIPTOR = _OPERATESTATUS,
+  __module__ = 'ssm_info_pb2'
+  # @@protoc_insertion_point(class_scope:system_master.OperateStatus)
+  ))
+_sym_db.RegisterMessage(OperateStatus)
 
 
 # @@protoc_insertion_point(module_scope)

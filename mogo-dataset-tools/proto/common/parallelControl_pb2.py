@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='parallel',
   syntax='proto3',
   serialized_options=None,
-  serialized_pb=_b('\n\x15parallelControl.proto\x12\x08parallel\"\xb9\x03\n\x12ParallelControlCMD\x12+\n\x04gear\x18\x01 \x01(\x0e\x32\x1d.parallel.CockpitGearPosition\x12\x0c\n\x04horn\x18\x02 \x01(\x08\x12\x14\n\x0cparkingBrake\x18\x03 \x01(\x08\x12\x0e\n\x06wipers\x18\x04 \x01(\x05\x12\x10\n\x08highBeam\x18\x05 \x01(\x08\x12\x0f\n\x07lowBeam\x18\x06 \x01(\x08\x12\x10\n\x08\x66ogLight\x18\x07 \x01(\x08\x12\x16\n\x0e\x63learanceLamps\x18\x08 \x01(\x08\x12\x11\n\twarnLight\x18\t \x01(\x08\x12+\n\x05light\x18\n \x01(\x0e\x32\x1c.parallel.CockpitLightSwitch\x12\x12\n\nbrakeLight\x18\x0b \x01(\x08\x12\r\n\x05\x62rake\x18\x0c \x01(\x02\x12\x0b\n\x03\x61\x63\x63\x18\r \x01(\x02\x12\x10\n\x08steering\x18\x0e \x01(\x02\x12\r\n\x05\x61\x63\x63\x65l\x18\x0f \x01(\x02\x12\x0c\n\x04\x64oor\x18\x10 \x01(\x08\x12\x10\n\x08\x64oorLock\x18\x11 \x01(\x08\x12\x15\n\rfillLightLeft\x18\x12 \x01(\x08\x12\x16\n\x0e\x66illLightRight\x18\x13 \x01(\x08\x12\x15\n\rfillLightBack\x18\x14 \x01(\x08\"h\n\x07\x43ontrol\x12\x12\n\ncontrolCMD\x18\x01 \x01(\x0c\x12\x10\n\x08takeOver\x18\x02 \x01(\r\x12\n\n\x02sn\x18\x03 \x01(\t\x12\x17\n\x0fstartTimeMillis\x18\x04 \x01(\x04\x12\x12\n\ntimeMillis\x18\x05 \x01(\x04*T\n\x13\x43ockpitGearPosition\x12\r\n\tGEAR_NONE\x10\x00\x12\n\n\x06GEAR_N\x10\x01\x12\n\n\x06GEAR_R\x10\x02\x12\n\n\x06GEAR_P\x10\x03\x12\n\n\x06GEAR_D\x10\x04*x\n\x12\x43ockpitLightSwitch\x12\x0e\n\nLIGHT_NONE\x10\x00\x12\x0e\n\nLIGHT_LEFT\x10\x01\x12\x0f\n\x0bLIGHT_RIGHT\x10\x02\x12\x0f\n\x0bLIGHT_FLASH\x10\x03\x12\x10\n\x0cLIGHT_MANUAL\x10\x04\x12\x0e\n\nLIGHT_AUTO\x10\x05\x62\x06proto3')
+  serialized_pb=_b('\n\x15parallelControl.proto\x12\x08parallel\"\xd2\x03\n\x12ParallelControlCMD\x12+\n\x04gear\x18\x01 \x01(\x0e\x32\x1d.parallel.CockpitGearPosition\x12\x0c\n\x04horn\x18\x02 \x01(\x08\x12\x14\n\x0cparkingBrake\x18\x03 \x01(\x08\x12\x0e\n\x06wipers\x18\x04 \x01(\x05\x12\x10\n\x08highBeam\x18\x05 \x01(\x08\x12\x0f\n\x07lowBeam\x18\x06 \x01(\x08\x12\x10\n\x08\x66ogLight\x18\x07 \x01(\x08\x12\x16\n\x0e\x63learanceLamps\x18\x08 \x01(\x08\x12\x11\n\twarnLight\x18\t \x01(\x08\x12+\n\x05light\x18\n \x01(\x0e\x32\x1c.parallel.CockpitLightSwitch\x12\x12\n\nbrakeLight\x18\x0b \x01(\x08\x12\r\n\x05\x62rake\x18\x0c \x01(\x02\x12\x0b\n\x03\x61\x63\x63\x18\r \x01(\x02\x12\x10\n\x08steering\x18\x0e \x01(\x02\x12\r\n\x05\x61\x63\x63\x65l\x18\x0f \x01(\x02\x12\x0c\n\x04\x64oor\x18\x10 \x01(\x08\x12\x10\n\x08\x64oorLock\x18\x11 \x01(\x08\x12\x15\n\rfillLightLeft\x18\x12 \x01(\x08\x12\x16\n\x0e\x66illLightRight\x18\x13 \x01(\x08\x12\x15\n\rfillLightBack\x18\x14 \x01(\x08\x12\x17\n\x0fspeedLimitInMps\x18\x15 \x01(\x02\"h\n\x07\x43ontrol\x12\x12\n\ncontrolCMD\x18\x01 \x01(\x0c\x12\x10\n\x08takeOver\x18\x02 \x01(\r\x12\n\n\x02sn\x18\x03 \x01(\t\x12\x17\n\x0fstartTimeMillis\x18\x04 \x01(\x04\x12\x12\n\ntimeMillis\x18\x05 \x01(\x04*T\n\x13\x43ockpitGearPosition\x12\r\n\tGEAR_NONE\x10\x00\x12\n\n\x06GEAR_N\x10\x01\x12\n\n\x06GEAR_R\x10\x02\x12\n\n\x06GEAR_P\x10\x03\x12\n\n\x06GEAR_D\x10\x04*x\n\x12\x43ockpitLightSwitch\x12\x0e\n\nLIGHT_NONE\x10\x00\x12\x0e\n\nLIGHT_LEFT\x10\x01\x12\x0f\n\x0bLIGHT_RIGHT\x10\x02\x12\x0f\n\x0bLIGHT_FLASH\x10\x03\x12\x10\n\x0cLIGHT_MANUAL\x10\x04\x12\x0e\n\nLIGHT_AUTO\x10\x05\x62\x06proto3')
 )
 
 _COCKPITGEARPOSITION = _descriptor.EnumDescriptor(
@@ -52,8 +52,8 @@ _COCKPITGEARPOSITION = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=585,
-  serialized_end=669,
+  serialized_start=610,
+  serialized_end=694,
 )
 _sym_db.RegisterEnumDescriptor(_COCKPITGEARPOSITION)
 
@@ -91,8 +91,8 @@ _COCKPITLIGHTSWITCH = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=671,
-  serialized_end=791,
+  serialized_start=696,
+  serialized_end=816,
 )
 _sym_db.RegisterEnumDescriptor(_COCKPITLIGHTSWITCH)
 
@@ -258,6 +258,13 @@ _PARALLELCONTROLCMD = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='speedLimitInMps', full_name='parallel.ParallelControlCMD.speedLimitInMps', index=20,
+      number=21, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -271,7 +278,7 @@ _PARALLELCONTROLCMD = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=36,
-  serialized_end=477,
+  serialized_end=502,
 )
 
 
@@ -329,8 +336,8 @@ _CONTROL = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=479,
-  serialized_end=583,
+  serialized_start=504,
+  serialized_end=608,
 )
 
 _PARALLELCONTROLCMD.fields_by_name['gear'].enum_type = _COCKPITGEARPOSITION

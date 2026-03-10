@@ -22,7 +22,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   package='control25',
   syntax='proto3',
   serialized_options=None,
-  serialized_pb=_b('\n\x11\x63ontrol2025.proto\x12\tcontrol25\x1a\x0cheader.proto\x1a\x11\x63hassis2025.proto\"\x9f\x01\n\x0e\x44riveSystemCmd\x12\x14\n\x0c\x64rive_enable\x18\x01 \x01(\x08\x12\x10\n\x08throttle\x18\x02 \x01(\x02\x12\r\n\x05\x61\x63\x63\x65l\x18\x03 \x01(\x02\x12\x0e\n\x06torque\x18\x04 \x01(\x02\x12\r\n\x05speed\x18\x05 \x01(\x02\x12\x37\n\x12\x64rive_control_mode\x18\x06 \x01(\x0e\x32\x1b.control25.DriveControlMode\"\xfb\x01\n\x0e\x42rakeSystemCmd\x12\x14\n\x0c\x62rake_enable\x18\x01 \x01(\x08\x12\x13\n\x0b\x62rake_pedal\x18\x02 \x01(\x02\x12\x1a\n\x12\x62rake_acceleration\x18\x03 \x01(\x02\x12\x16\n\x0e\x62rake_pressure\x18\x04 \x01(\x02\x12\x37\n\x12\x62rake_control_mode\x18\x05 \x01(\x0e\x32\x1b.control25.BrakeControlMode\x12\x17\n\x0f\x62rake_work_mode\x18\x06 \x01(\r\x12\x16\n\x0e\x62rake_priority\x18\x08 \x01(\r\x12 \n\x18\x62rake_allows_arbitration\x18\t \x01(\r\"\xc8\x01\n\x0eSteerSystemCmd\x12\x14\n\x0csteer_enable\x18\x01 \x01(\x08\x12\x15\n\reps_work_mode\x18\x02 \x01(\r\x12\x19\n\x11steer_wheel_angle\x18\x03 \x01(\x02\x12\x19\n\x11steer_wheel_speed\x18\x04 \x01(\x02\x12\x1a\n\x12steer_wheel_torque\x18\x05 \x01(\x02\x12\x37\n\x12steer_control_mode\x18\x0b \x01(\x0e\x32\x1b.control25.SteerControlMode\"K\n\rGearSystemCmd\x12\x13\n\x0bgear_enable\x18\x01 \x01(\x08\x12%\n\x04gear\x18\x03 \x01(\x0e\x32\x17.chassis25.GearPosition\"H\n\x0c\x45pbSystemCmd\x12\x12\n\nepb_enable\x18\x01 \x01(\x08\x12$\n\x03\x65pb\x18\x02 \x01(\x0e\x32\x17.chassis25.EpbWorkState\"a\n\x0e\x43hassisWireCmd\x12\x1b\n\x13\x63hassis_wire_enable\x18\x01 \x01(\x08\x12\x17\n\x0frequest_rec_bag\x18\x06 \x01(\x08\x12\x19\n\x11\x63trl_not_recv_fsm\x18\x0b \x01(\x08\"\xdf\x06\n\x0f\x43\x31TaskSystemCmd\x12\x46\n\x15sweeper_task_sys_mode\x18\x01 \x01(\x0e\x32\'.control25.SweeperTaskSystemControlMode\x12\x1a\n\x12\x63lean_rem_ctrl_cmd\x18\x02 \x01(\x08\x12\x1c\n\x14\x63lean_motor_work_cmd\x18\x03 \x01(\x08\x12$\n\x1c\x63lean_dup_tail_door_open_cmd\x18\x04 \x01(\x08\x12%\n\x1d\x63lean_dup_tail_door_close_cmd\x18\x05 \x01(\x08\x12\x1e\n\x16\x63lean_dup_tail_tip_cmd\x18\x06 \x01(\x08\x12\x1e\n\x16\x63lean_dup_tail_ret_cmd\x18\x07 \x01(\x08\x12\x1c\n\x14\x63lean_work_stand_cmd\x18\x08 \x01(\x08\x12\x1d\n\x15\x63lean_work_strong_cmd\x18\t \x01(\x08\x12(\n clean_suction_nozzlefle_open_cmd\x18\n \x01(\x08\x12\x1c\n\x14\x63lean_dusk_close_cmd\x18\x0b \x01(\x08\x12\x1b\n\x13\x63lean_work_left_cmd\x18\x0c \x01(\x08\x12\"\n\x1a\x63lean_work_onbothsides_cmd\x18\r \x01(\x08\x12\x1c\n\x14\x63lean_work_right_cmd\x18\x0e \x01(\x08\x12\x1a\n\x12\x63lean_work_ton_cmd\x18\x0f \x01(\x08\x12 \n\x18\x63lean_work_spray_gun_cmd\x18\x10 \x01(\x08\x12\x1e\n\x16\x63lean_work_enc_des_cmd\x18\x11 \x01(\x08\x12 \n\x18\x63lean_mod_wash_sweep_cmd\x18\x12 \x01(\x08\x12\x1a\n\x12\x63lean_mod_wash_cmd\x18\x13 \x01(\x08\x12\x1f\n\x17\x63lean_sweepdisk_red_cmd\x18\x14 \x01(\x08\x12\x1f\n\x17\x63lean_sweepdisk_acc_cmd\x18\x15 \x01(\x08\x12\x1d\n\x15\x63lean_arrow_light_cmd\x18\x16 \x01(\x08\x12\x1c\n\x14\x63lean_floodlight_cmd\x18\x17 \x01(\x08\x12\x17\n\x0f\x63lean_music_cmd\x18\x18 \x01(\x08\x12%\n\x1dsewage_water_tank_full_switch\x18\x19 \x01(\x08\"\xc6\x03\n\x0f\x43\x33TaskSystemCmd\x12\x17\n\x0f\x63\x33_sz_work_mode\x18\x01 \x01(\r\x12\x19\n\x11\x63\x33_sz_motor_start\x18\x02 \x01(\r\x12\x1e\n\x16\x63\x33_sz_xikoufanban_open\x18\x03 \x01(\r\x12\x1f\n\x17\x63\x33_sz_xikoufanban_close\x18\x04 \x01(\r\x12\x1a\n\x12\x63\x33_sz_chuchen_open\x18\x05 \x01(\r\x12\x1c\n\x14\x63\x33_sz_zhaoming_start\x18\x06 \x01(\r\x12\x1c\n\x14\x63\x33_sz_fj_speed_model\x18\x07 \x01(\r\x12\x1a\n\x12\x63\x33_sz_saopan_model\x18\x08 \x01(\r\x12\x1f\n\x17\x63\x33_sz_traffic_light_red\x18\t \x01(\r\x12\"\n\x1a\x63\x33_sz_traffic_light_yellow\x18\n \x01(\r\x12!\n\x19\x63\x33_sz_traffic_light_green\x18\x0b \x01(\r\x12\x1e\n\x16\x63\x33_sz_arrow_light_left\x18\x0c \x01(\r\x12\x1f\n\x17\x63\x33_sz_arrow_light_right\x18\r \x01(\r\x12!\n\x19\x63\x33_sz_arrow_light_baoshan\x18\x0e \x01(\r\"\xa6\x03\n\x0f\x43\x34TaskSystemCmd\x12\x11\n\twork_mode\x18\x01 \x01(\r\x12\x10\n\x08motor_on\x18\x02 \x01(\x08\x12\x11\n\tunload_on\x18\x03 \x01(\x08\x12\x11\n\tspeed_add\x18\x04 \x01(\x08\x12\x11\n\tspeed_sub\x18\x05 \x01(\x08\x12\x16\n\x0esweepdisk_mode\x18\x06 \x01(\r\x12\x11\n\twater_add\x18\x07 \x01(\x08\x12\x12\n\nwarning_on\x18\x08 \x01(\x08\x12\x10\n\x08music_on\x18\t \x01(\x08\x12\x10\n\x08spray_on\x18\n \x01(\x08\x12\x17\n\x0f\x64ust_removal_on\x18\x0b \x01(\x08\x12\x12\n\ntime_erase\x18\x0c \x01(\x08\x12\x19\n\x11traffic_light_red\x18\r \x01(\x08\x12\x1c\n\x14traffic_light_yellow\x18\x0e \x01(\x08\x12\x1b\n\x13traffic_light_green\x18\x0f \x01(\x08\x12\x18\n\x10\x61rrow_light_left\x18\x10 \x01(\x08\x12\x19\n\x11\x61rrow_light_right\x18\x11 \x01(\x08\x12\x1a\n\x12\x61rrow_light_strobe\x18\x12 \x01(\x08\"\xb7\x01\n\rTaskSystemCmd\x12\x36\n\x12\x63\x31_task_system_cmd\x18\x01 \x01(\x0b\x32\x1a.control25.C1TaskSystemCmd\x12\x36\n\x12\x63\x33_task_system_cmd\x18\x02 \x01(\x0b\x32\x1a.control25.C3TaskSystemCmd\x12\x36\n\x12\x63\x34_task_system_cmd\x18\x03 \x01(\x0b\x32\x1a.control25.C4TaskSystemCmd\"o\n\x15VehicleAccessoriesCmd\x12\x1b\n\x13left_fill_light_cmd\x18\x01 \x01(\r\x12\x1c\n\x14right_fill_light_cmd\x18\x02 \x01(\r\x12\x1b\n\x13\x62\x61\x63k_fill_light_cmd\x18\x03 \x01(\r\"\xb8\x04\n\x0e\x43ontrolCommand\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x33\n\x10\x64rive_system_cmd\x18\x03 \x01(\x0b\x32\x19.control25.DriveSystemCmd\x12\x33\n\x10\x62rake_system_cmd\x18\x04 \x01(\x0b\x32\x19.control25.BrakeSystemCmd\x12\x33\n\x10steer_system_cmd\x18\x05 \x01(\x0b\x32\x19.control25.SteerSystemCmd\x12\x31\n\x0fgear_system_cmd\x18\x06 \x01(\x0b\x32\x18.control25.GearSystemCmd\x12/\n\x0e\x65pb_system_cmd\x18\x07 \x01(\x0b\x32\x17.control25.EpbSystemCmd\x12,\n\x0e\x62\x63m_system_cmd\x18\x08 \x01(\x0b\x32\x14.chassis25.BcmSystem\x12*\n\rac_system_cmd\x18\t \x01(\x0b\x32\x13.chassis25.AcSystem\x12\x33\n\x10\x63hassis_wire_cmd\x18\n \x01(\x0b\x32\x19.control25.ChassisWireCmd\x12\x31\n\x0ftask_system_cmd\x18\x0b \x01(\x0b\x32\x18.control25.TaskSystemCmd\x12\x41\n\x17vehicle_accessories_cmd\x18\x0c \x01(\x0b\x32 .control25.VehicleAccessoriesCmd*X\n\x10\x44riveControlMode\x12\x17\n\x13\x44RIVE_THROTTLE_MODE\x10\x00\x12\x14\n\x10\x44RIVE_ACCEL_MODE\x10\x01\x12\x15\n\x11\x44RIVE_TORQUE_MODE\x10\x02*W\n\x10\x42rakeControlMode\x12\x14\n\x10\x42RAKE_PEDAL_MODE\x10\x00\x12\x14\n\x10\x42RAKE_DECEL_MODE\x10\x01\x12\x17\n\x13\x42REAK_PRESSURE_MODE\x10\x02*@\n\x10SteerControlMode\x12\x15\n\x11STEER_DEGREE_MODE\x10\x00\x12\x15\n\x11STEER_TORQUE_MODE\x10\x01*\xdc\x04\n\x1cSweeperTaskSystemControlMode\x12\x19\n\x15SWEEPER_TASK_OFF_LINE\x10\x00\x12\x16\n\x12SWEEPER_TASK_READY\x10\x01\x12\x1d\n\x19SWEEPER_TASK_WORK_STANDBY\x10\x02\x12!\n\x1dSWEEPER_TASK_SWEEPING_STANDBY\x10\x03\x12(\n$SWEEPER_TASK_SWEEPING_BOTH_SIDE_WORK\x10\x04\x12#\n\x1fSWEEPER_TASK_SWEEPING_LEFT_WORK\x10\x05\x12$\n SWEEPER_TASK_SWEEPING_RIGHT_WORK\x10\x06\x12\"\n\x1eSWEEPER_TASK_WASHSWEEP_STANDBY\x10\x07\x12)\n%SWEEPER_TASK_WASHSWEEP_BOTH_SIDE_WORK\x10\x08\x12$\n SWEEPER_TASK_WASHSWEEP_LEFT_WORK\x10\t\x12%\n!SWEEPER_TASK_WASHSWEEP_RIGHT_WORK\x10\n\x12!\n\x1dSWEEPER_TASK_PUREWASH_STANDBY\x10\x0b\x12(\n$SWEEPER_TASK_PUREWASH_BOTH_SIDE_WORK\x10\x0c\x12#\n\x1fSWEEPER_TASK_PUREWASH_LEFT_WORK\x10\r\x12$\n SWEEPER_TASK_PUREWASH_RIGHT_WORK\x10\x0e\x12\x1e\n\x1aSWEEPER_TASK_PUREDRAW_WORK\x10\x0f*)\n\x06SWTICH\x12\x0e\n\nDO_NOTHING\x10\x00\x12\x06\n\x02ON\x10\x01\x12\x07\n\x03OFF\x10\x02\x62\x06proto3')
+  serialized_pb=_b('\n\x11\x63ontrol2025.proto\x12\tcontrol25\x1a\x0cheader.proto\x1a\x11\x63hassis2025.proto\"\xb5\x01\n\x0e\x44riveSystemCmd\x12\x14\n\x0c\x64rive_enable\x18\x01 \x01(\x08\x12\x10\n\x08throttle\x18\x02 \x01(\x02\x12\r\n\x05\x61\x63\x63\x65l\x18\x03 \x01(\x02\x12\x0e\n\x06torque\x18\x04 \x01(\x02\x12\r\n\x05speed\x18\x05 \x01(\x02\x12\x37\n\x12\x64rive_control_mode\x18\x06 \x01(\x0e\x32\x1b.control25.DriveControlMode\x12\x14\n\x0c\x61\x63\x63\x65l_mapped\x18\x07 \x01(\x02\"\xfb\x01\n\x0e\x42rakeSystemCmd\x12\x14\n\x0c\x62rake_enable\x18\x01 \x01(\x08\x12\x13\n\x0b\x62rake_pedal\x18\x02 \x01(\x02\x12\x1a\n\x12\x62rake_acceleration\x18\x03 \x01(\x02\x12\x16\n\x0e\x62rake_pressure\x18\x04 \x01(\x02\x12\x37\n\x12\x62rake_control_mode\x18\x05 \x01(\x0e\x32\x1b.control25.BrakeControlMode\x12\x17\n\x0f\x62rake_work_mode\x18\x06 \x01(\r\x12\x16\n\x0e\x62rake_priority\x18\x08 \x01(\r\x12 \n\x18\x62rake_allows_arbitration\x18\t \x01(\r\"\xc8\x01\n\x0eSteerSystemCmd\x12\x14\n\x0csteer_enable\x18\x01 \x01(\x08\x12\x15\n\reps_work_mode\x18\x02 \x01(\r\x12\x19\n\x11steer_wheel_angle\x18\x03 \x01(\x02\x12\x19\n\x11steer_wheel_speed\x18\x04 \x01(\x02\x12\x1a\n\x12steer_wheel_torque\x18\x05 \x01(\x02\x12\x37\n\x12steer_control_mode\x18\x0b \x01(\x0e\x32\x1b.control25.SteerControlMode\"K\n\rGearSystemCmd\x12\x13\n\x0bgear_enable\x18\x01 \x01(\x08\x12%\n\x04gear\x18\x03 \x01(\x0e\x32\x17.chassis25.GearPosition\"H\n\x0c\x45pbSystemCmd\x12\x12\n\nepb_enable\x18\x01 \x01(\x08\x12$\n\x03\x65pb\x18\x02 \x01(\x0e\x32\x17.chassis25.EpbWorkState\"a\n\x0e\x43hassisWireCmd\x12\x1b\n\x13\x63hassis_wire_enable\x18\x01 \x01(\x08\x12\x17\n\x0frequest_rec_bag\x18\x06 \x01(\x08\x12\x19\n\x11\x63trl_not_recv_fsm\x18\x0b \x01(\x08\"\xdf\x06\n\x0f\x43\x31TaskSystemCmd\x12\x46\n\x15sweeper_task_sys_mode\x18\x01 \x01(\x0e\x32\'.control25.SweeperTaskSystemControlMode\x12\x1a\n\x12\x63lean_rem_ctrl_cmd\x18\x02 \x01(\x08\x12\x1c\n\x14\x63lean_motor_work_cmd\x18\x03 \x01(\x08\x12$\n\x1c\x63lean_dup_tail_door_open_cmd\x18\x04 \x01(\x08\x12%\n\x1d\x63lean_dup_tail_door_close_cmd\x18\x05 \x01(\x08\x12\x1e\n\x16\x63lean_dup_tail_tip_cmd\x18\x06 \x01(\x08\x12\x1e\n\x16\x63lean_dup_tail_ret_cmd\x18\x07 \x01(\x08\x12\x1c\n\x14\x63lean_work_stand_cmd\x18\x08 \x01(\x08\x12\x1d\n\x15\x63lean_work_strong_cmd\x18\t \x01(\x08\x12(\n clean_suction_nozzlefle_open_cmd\x18\n \x01(\x08\x12\x1c\n\x14\x63lean_dusk_close_cmd\x18\x0b \x01(\x08\x12\x1b\n\x13\x63lean_work_left_cmd\x18\x0c \x01(\x08\x12\"\n\x1a\x63lean_work_onbothsides_cmd\x18\r \x01(\x08\x12\x1c\n\x14\x63lean_work_right_cmd\x18\x0e \x01(\x08\x12\x1a\n\x12\x63lean_work_ton_cmd\x18\x0f \x01(\x08\x12 \n\x18\x63lean_work_spray_gun_cmd\x18\x10 \x01(\x08\x12\x1e\n\x16\x63lean_work_enc_des_cmd\x18\x11 \x01(\x08\x12 \n\x18\x63lean_mod_wash_sweep_cmd\x18\x12 \x01(\x08\x12\x1a\n\x12\x63lean_mod_wash_cmd\x18\x13 \x01(\x08\x12\x1f\n\x17\x63lean_sweepdisk_red_cmd\x18\x14 \x01(\x08\x12\x1f\n\x17\x63lean_sweepdisk_acc_cmd\x18\x15 \x01(\x08\x12\x1d\n\x15\x63lean_arrow_light_cmd\x18\x16 \x01(\x08\x12\x1c\n\x14\x63lean_floodlight_cmd\x18\x17 \x01(\x08\x12\x17\n\x0f\x63lean_music_cmd\x18\x18 \x01(\x08\x12%\n\x1dsewage_water_tank_full_switch\x18\x19 \x01(\x08\"\xc6\x03\n\x0f\x43\x33TaskSystemCmd\x12\x17\n\x0f\x63\x33_sz_work_mode\x18\x01 \x01(\r\x12\x19\n\x11\x63\x33_sz_motor_start\x18\x02 \x01(\r\x12\x1e\n\x16\x63\x33_sz_xikoufanban_open\x18\x03 \x01(\r\x12\x1f\n\x17\x63\x33_sz_xikoufanban_close\x18\x04 \x01(\r\x12\x1a\n\x12\x63\x33_sz_chuchen_open\x18\x05 \x01(\r\x12\x1c\n\x14\x63\x33_sz_zhaoming_start\x18\x06 \x01(\r\x12\x1c\n\x14\x63\x33_sz_fj_speed_model\x18\x07 \x01(\r\x12\x1a\n\x12\x63\x33_sz_saopan_model\x18\x08 \x01(\r\x12\x1f\n\x17\x63\x33_sz_traffic_light_red\x18\t \x01(\r\x12\"\n\x1a\x63\x33_sz_traffic_light_yellow\x18\n \x01(\r\x12!\n\x19\x63\x33_sz_traffic_light_green\x18\x0b \x01(\r\x12\x1e\n\x16\x63\x33_sz_arrow_light_left\x18\x0c \x01(\r\x12\x1f\n\x17\x63\x33_sz_arrow_light_right\x18\r \x01(\r\x12!\n\x19\x63\x33_sz_arrow_light_baoshan\x18\x0e \x01(\r\"\xa6\x03\n\x0f\x43\x34TaskSystemCmd\x12\x11\n\twork_mode\x18\x01 \x01(\r\x12\x10\n\x08motor_on\x18\x02 \x01(\x08\x12\x11\n\tunload_on\x18\x03 \x01(\x08\x12\x11\n\tspeed_add\x18\x04 \x01(\x08\x12\x11\n\tspeed_sub\x18\x05 \x01(\x08\x12\x16\n\x0esweepdisk_mode\x18\x06 \x01(\r\x12\x11\n\twater_add\x18\x07 \x01(\x08\x12\x12\n\nwarning_on\x18\x08 \x01(\x08\x12\x10\n\x08music_on\x18\t \x01(\x08\x12\x10\n\x08spray_on\x18\n \x01(\x08\x12\x17\n\x0f\x64ust_removal_on\x18\x0b \x01(\x08\x12\x12\n\ntime_erase\x18\x0c \x01(\x08\x12\x19\n\x11traffic_light_red\x18\r \x01(\x08\x12\x1c\n\x14traffic_light_yellow\x18\x0e \x01(\x08\x12\x1b\n\x13traffic_light_green\x18\x0f \x01(\x08\x12\x18\n\x10\x61rrow_light_left\x18\x10 \x01(\x08\x12\x19\n\x11\x61rrow_light_right\x18\x11 \x01(\x08\x12\x1a\n\x12\x61rrow_light_strobe\x18\x12 \x01(\x08\"\xb7\x01\n\rTaskSystemCmd\x12\x36\n\x12\x63\x31_task_system_cmd\x18\x01 \x01(\x0b\x32\x1a.control25.C1TaskSystemCmd\x12\x36\n\x12\x63\x33_task_system_cmd\x18\x02 \x01(\x0b\x32\x1a.control25.C3TaskSystemCmd\x12\x36\n\x12\x63\x34_task_system_cmd\x18\x03 \x01(\x0b\x32\x1a.control25.C4TaskSystemCmd\"o\n\x15VehicleAccessoriesCmd\x12\x1b\n\x13left_fill_light_cmd\x18\x01 \x01(\r\x12\x1c\n\x14right_fill_light_cmd\x18\x02 \x01(\r\x12\x1b\n\x13\x62\x61\x63k_fill_light_cmd\x18\x03 \x01(\r\"\xb8\x04\n\x0e\x43ontrolCommand\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12\x33\n\x10\x64rive_system_cmd\x18\x03 \x01(\x0b\x32\x19.control25.DriveSystemCmd\x12\x33\n\x10\x62rake_system_cmd\x18\x04 \x01(\x0b\x32\x19.control25.BrakeSystemCmd\x12\x33\n\x10steer_system_cmd\x18\x05 \x01(\x0b\x32\x19.control25.SteerSystemCmd\x12\x31\n\x0fgear_system_cmd\x18\x06 \x01(\x0b\x32\x18.control25.GearSystemCmd\x12/\n\x0e\x65pb_system_cmd\x18\x07 \x01(\x0b\x32\x17.control25.EpbSystemCmd\x12,\n\x0e\x62\x63m_system_cmd\x18\x08 \x01(\x0b\x32\x14.chassis25.BcmSystem\x12*\n\rac_system_cmd\x18\t \x01(\x0b\x32\x13.chassis25.AcSystem\x12\x33\n\x10\x63hassis_wire_cmd\x18\n \x01(\x0b\x32\x19.control25.ChassisWireCmd\x12\x31\n\x0ftask_system_cmd\x18\x0b \x01(\x0b\x32\x18.control25.TaskSystemCmd\x12\x41\n\x17vehicle_accessories_cmd\x18\x0c \x01(\x0b\x32 .control25.VehicleAccessoriesCmd\"o\n\x12TmToControlCommand\x12\x1c\n\x14\x63\x61rgo_left_door_open\x18\x01 \x01(\x08\x12\x1d\n\x15\x63\x61rgo_right_door_open\x18\x02 \x01(\x08\x12\x1c\n\x14\x63\x61rgo_rear_door_open\x18\x03 \x01(\x08\"\x93\x01\n\x13\x41ppToControlCommand\x12\x1e\n\x06header\x18\x01 \x01(\x0b\x32\x0e.common.Header\x12-\n\rapp_drive_cmd\x18\x02 \x01(\x0e\x32\x16.control25.AppDriveCmd\x12-\n\rapp_steer_cmd\x18\x03 \x01(\x0e\x32\x16.control25.AppSteerCmd*X\n\x10\x44riveControlMode\x12\x17\n\x13\x44RIVE_THROTTLE_MODE\x10\x00\x12\x14\n\x10\x44RIVE_ACCEL_MODE\x10\x01\x12\x15\n\x11\x44RIVE_TORQUE_MODE\x10\x02*W\n\x10\x42rakeControlMode\x12\x14\n\x10\x42RAKE_PEDAL_MODE\x10\x00\x12\x14\n\x10\x42RAKE_DECEL_MODE\x10\x01\x12\x17\n\x13\x42REAK_PRESSURE_MODE\x10\x02*@\n\x10SteerControlMode\x12\x15\n\x11STEER_DEGREE_MODE\x10\x00\x12\x15\n\x11STEER_TORQUE_MODE\x10\x01*\xdc\x04\n\x1cSweeperTaskSystemControlMode\x12\x19\n\x15SWEEPER_TASK_OFF_LINE\x10\x00\x12\x16\n\x12SWEEPER_TASK_READY\x10\x01\x12\x1d\n\x19SWEEPER_TASK_WORK_STANDBY\x10\x02\x12!\n\x1dSWEEPER_TASK_SWEEPING_STANDBY\x10\x03\x12(\n$SWEEPER_TASK_SWEEPING_BOTH_SIDE_WORK\x10\x04\x12#\n\x1fSWEEPER_TASK_SWEEPING_LEFT_WORK\x10\x05\x12$\n SWEEPER_TASK_SWEEPING_RIGHT_WORK\x10\x06\x12\"\n\x1eSWEEPER_TASK_WASHSWEEP_STANDBY\x10\x07\x12)\n%SWEEPER_TASK_WASHSWEEP_BOTH_SIDE_WORK\x10\x08\x12$\n SWEEPER_TASK_WASHSWEEP_LEFT_WORK\x10\t\x12%\n!SWEEPER_TASK_WASHSWEEP_RIGHT_WORK\x10\n\x12!\n\x1dSWEEPER_TASK_PUREWASH_STANDBY\x10\x0b\x12(\n$SWEEPER_TASK_PUREWASH_BOTH_SIDE_WORK\x10\x0c\x12#\n\x1fSWEEPER_TASK_PUREWASH_LEFT_WORK\x10\r\x12$\n SWEEPER_TASK_PUREWASH_RIGHT_WORK\x10\x0e\x12\x1e\n\x1aSWEEPER_TASK_PUREDRAW_WORK\x10\x0f*)\n\x06SWTICH\x12\x0e\n\nDO_NOTHING\x10\x00\x12\x06\n\x02ON\x10\x01\x12\x07\n\x03OFF\x10\x02*c\n\x0b\x41ppSteerCmd\x12\x15\n\x11\x41PP_STEER_STANDBY\x10\x00\x12\x14\n\x10\x41PP_STEER_CENTER\x10\x01\x12\x12\n\x0e\x41PP_STEER_LEFT\x10\x02\x12\x13\n\x0f\x41PP_STEER_RIGHT\x10\x03*h\n\x0b\x41ppDriveCmd\x12\x15\n\x11\x41PP_DRIVE_STANDBY\x10\x00\x12\x15\n\x11\x41PP_DRIVE_FORWARD\x10\x01\x12\x16\n\x12\x41PP_DRIVE_BACKWARD\x10\x02\x12\x13\n\x0f\x41PP_DRIVE_BRAKE\x10\x03\x62\x06proto3')
   ,
   dependencies=[header__pb2.DESCRIPTOR,chassis2025__pb2.DESCRIPTOR,])
 
@@ -47,8 +47,8 @@ _DRIVECONTROLMODE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3552,
-  serialized_end=3640,
+  serialized_start=3837,
+  serialized_end=3925,
 )
 _sym_db.RegisterEnumDescriptor(_DRIVECONTROLMODE)
 
@@ -74,8 +74,8 @@ _BRAKECONTROLMODE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3642,
-  serialized_end=3729,
+  serialized_start=3927,
+  serialized_end=4014,
 )
 _sym_db.RegisterEnumDescriptor(_BRAKECONTROLMODE)
 
@@ -97,8 +97,8 @@ _STEERCONTROLMODE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3731,
-  serialized_end=3795,
+  serialized_start=4016,
+  serialized_end=4080,
 )
 _sym_db.RegisterEnumDescriptor(_STEERCONTROLMODE)
 
@@ -176,8 +176,8 @@ _SWEEPERTASKSYSTEMCONTROLMODE = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=3798,
-  serialized_end=4402,
+  serialized_start=4083,
+  serialized_end=4687,
 )
 _sym_db.RegisterEnumDescriptor(_SWEEPERTASKSYSTEMCONTROLMODE)
 
@@ -203,12 +203,74 @@ _SWTICH = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   serialized_options=None,
-  serialized_start=4404,
-  serialized_end=4445,
+  serialized_start=4689,
+  serialized_end=4730,
 )
 _sym_db.RegisterEnumDescriptor(_SWTICH)
 
 SWTICH = enum_type_wrapper.EnumTypeWrapper(_SWTICH)
+_APPSTEERCMD = _descriptor.EnumDescriptor(
+  name='AppSteerCmd',
+  full_name='control25.AppSteerCmd',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='APP_STEER_STANDBY', index=0, number=0,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='APP_STEER_CENTER', index=1, number=1,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='APP_STEER_LEFT', index=2, number=2,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='APP_STEER_RIGHT', index=3, number=3,
+      serialized_options=None,
+      type=None),
+  ],
+  containing_type=None,
+  serialized_options=None,
+  serialized_start=4732,
+  serialized_end=4831,
+)
+_sym_db.RegisterEnumDescriptor(_APPSTEERCMD)
+
+AppSteerCmd = enum_type_wrapper.EnumTypeWrapper(_APPSTEERCMD)
+_APPDRIVECMD = _descriptor.EnumDescriptor(
+  name='AppDriveCmd',
+  full_name='control25.AppDriveCmd',
+  filename=None,
+  file=DESCRIPTOR,
+  values=[
+    _descriptor.EnumValueDescriptor(
+      name='APP_DRIVE_STANDBY', index=0, number=0,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='APP_DRIVE_FORWARD', index=1, number=1,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='APP_DRIVE_BACKWARD', index=2, number=2,
+      serialized_options=None,
+      type=None),
+    _descriptor.EnumValueDescriptor(
+      name='APP_DRIVE_BRAKE', index=3, number=3,
+      serialized_options=None,
+      type=None),
+  ],
+  containing_type=None,
+  serialized_options=None,
+  serialized_start=4833,
+  serialized_end=4937,
+)
+_sym_db.RegisterEnumDescriptor(_APPDRIVECMD)
+
+AppDriveCmd = enum_type_wrapper.EnumTypeWrapper(_APPDRIVECMD)
 DRIVE_THROTTLE_MODE = 0
 DRIVE_ACCEL_MODE = 1
 DRIVE_TORQUE_MODE = 2
@@ -236,6 +298,14 @@ SWEEPER_TASK_PUREDRAW_WORK = 15
 DO_NOTHING = 0
 ON = 1
 OFF = 2
+APP_STEER_STANDBY = 0
+APP_STEER_CENTER = 1
+APP_STEER_LEFT = 2
+APP_STEER_RIGHT = 3
+APP_DRIVE_STANDBY = 0
+APP_DRIVE_FORWARD = 1
+APP_DRIVE_BACKWARD = 2
+APP_DRIVE_BRAKE = 3
 
 
 
@@ -288,6 +358,13 @@ _DRIVESYSTEMCMD = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='accel_mapped', full_name='control25.DriveSystemCmd.accel_mapped', index=6,
+      number=7, type=2, cpp_type=6, label=1,
+      has_default_value=False, default_value=float(0),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
   ],
   extensions=[
   ],
@@ -301,7 +378,7 @@ _DRIVESYSTEMCMD = _descriptor.Descriptor(
   oneofs=[
   ],
   serialized_start=66,
-  serialized_end=225,
+  serialized_end=247,
 )
 
 
@@ -380,8 +457,8 @@ _BRAKESYSTEMCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=228,
-  serialized_end=479,
+  serialized_start=250,
+  serialized_end=501,
 )
 
 
@@ -446,8 +523,8 @@ _STEERSYSTEMCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=482,
-  serialized_end=682,
+  serialized_start=504,
+  serialized_end=704,
 )
 
 
@@ -484,8 +561,8 @@ _GEARSYSTEMCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=684,
-  serialized_end=759,
+  serialized_start=706,
+  serialized_end=781,
 )
 
 
@@ -522,8 +599,8 @@ _EPBSYSTEMCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=761,
-  serialized_end=833,
+  serialized_start=783,
+  serialized_end=855,
 )
 
 
@@ -567,8 +644,8 @@ _CHASSISWIRECMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=835,
-  serialized_end=932,
+  serialized_start=857,
+  serialized_end=954,
 )
 
 
@@ -766,8 +843,8 @@ _C1TASKSYSTEMCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=935,
-  serialized_end=1798,
+  serialized_start=957,
+  serialized_end=1820,
 )
 
 
@@ -888,8 +965,8 @@ _C3TASKSYSTEMCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1801,
-  serialized_end=2255,
+  serialized_start=1823,
+  serialized_end=2277,
 )
 
 
@@ -1038,8 +1115,8 @@ _C4TASKSYSTEMCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2258,
-  serialized_end=2680,
+  serialized_start=2280,
+  serialized_end=2702,
 )
 
 
@@ -1083,8 +1160,8 @@ _TASKSYSTEMCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2683,
-  serialized_end=2866,
+  serialized_start=2705,
+  serialized_end=2888,
 )
 
 
@@ -1128,8 +1205,8 @@ _VEHICLEACCESSORIESCMD = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2868,
-  serialized_end=2979,
+  serialized_start=2890,
+  serialized_end=3001,
 )
 
 
@@ -1229,8 +1306,98 @@ _CONTROLCOMMAND = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2982,
-  serialized_end=3550,
+  serialized_start=3004,
+  serialized_end=3572,
+)
+
+
+_TMTOCONTROLCOMMAND = _descriptor.Descriptor(
+  name='TmToControlCommand',
+  full_name='control25.TmToControlCommand',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='cargo_left_door_open', full_name='control25.TmToControlCommand.cargo_left_door_open', index=0,
+      number=1, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='cargo_right_door_open', full_name='control25.TmToControlCommand.cargo_right_door_open', index=1,
+      number=2, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='cargo_rear_door_open', full_name='control25.TmToControlCommand.cargo_rear_door_open', index=2,
+      number=3, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=3574,
+  serialized_end=3685,
+)
+
+
+_APPTOCONTROLCOMMAND = _descriptor.Descriptor(
+  name='AppToControlCommand',
+  full_name='control25.AppToControlCommand',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='header', full_name='control25.AppToControlCommand.header', index=0,
+      number=1, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='app_drive_cmd', full_name='control25.AppToControlCommand.app_drive_cmd', index=1,
+      number=2, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+    _descriptor.FieldDescriptor(
+      name='app_steer_cmd', full_name='control25.AppToControlCommand.app_steer_cmd', index=2,
+      number=3, type=14, cpp_type=8, label=1,
+      has_default_value=False, default_value=0,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      serialized_options=None, file=DESCRIPTOR),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  serialized_options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=3688,
+  serialized_end=3835,
 )
 
 _DRIVESYSTEMCMD.fields_by_name['drive_control_mode'].enum_type = _DRIVECONTROLMODE
@@ -1253,6 +1420,9 @@ _CONTROLCOMMAND.fields_by_name['ac_system_cmd'].message_type = chassis2025__pb2.
 _CONTROLCOMMAND.fields_by_name['chassis_wire_cmd'].message_type = _CHASSISWIRECMD
 _CONTROLCOMMAND.fields_by_name['task_system_cmd'].message_type = _TASKSYSTEMCMD
 _CONTROLCOMMAND.fields_by_name['vehicle_accessories_cmd'].message_type = _VEHICLEACCESSORIESCMD
+_APPTOCONTROLCOMMAND.fields_by_name['header'].message_type = header__pb2._HEADER
+_APPTOCONTROLCOMMAND.fields_by_name['app_drive_cmd'].enum_type = _APPDRIVECMD
+_APPTOCONTROLCOMMAND.fields_by_name['app_steer_cmd'].enum_type = _APPSTEERCMD
 DESCRIPTOR.message_types_by_name['DriveSystemCmd'] = _DRIVESYSTEMCMD
 DESCRIPTOR.message_types_by_name['BrakeSystemCmd'] = _BRAKESYSTEMCMD
 DESCRIPTOR.message_types_by_name['SteerSystemCmd'] = _STEERSYSTEMCMD
@@ -1265,11 +1435,15 @@ DESCRIPTOR.message_types_by_name['C4TaskSystemCmd'] = _C4TASKSYSTEMCMD
 DESCRIPTOR.message_types_by_name['TaskSystemCmd'] = _TASKSYSTEMCMD
 DESCRIPTOR.message_types_by_name['VehicleAccessoriesCmd'] = _VEHICLEACCESSORIESCMD
 DESCRIPTOR.message_types_by_name['ControlCommand'] = _CONTROLCOMMAND
+DESCRIPTOR.message_types_by_name['TmToControlCommand'] = _TMTOCONTROLCOMMAND
+DESCRIPTOR.message_types_by_name['AppToControlCommand'] = _APPTOCONTROLCOMMAND
 DESCRIPTOR.enum_types_by_name['DriveControlMode'] = _DRIVECONTROLMODE
 DESCRIPTOR.enum_types_by_name['BrakeControlMode'] = _BRAKECONTROLMODE
 DESCRIPTOR.enum_types_by_name['SteerControlMode'] = _STEERCONTROLMODE
 DESCRIPTOR.enum_types_by_name['SweeperTaskSystemControlMode'] = _SWEEPERTASKSYSTEMCONTROLMODE
 DESCRIPTOR.enum_types_by_name['SWTICH'] = _SWTICH
+DESCRIPTOR.enum_types_by_name['AppSteerCmd'] = _APPSTEERCMD
+DESCRIPTOR.enum_types_by_name['AppDriveCmd'] = _APPDRIVECMD
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
 DriveSystemCmd = _reflection.GeneratedProtocolMessageType('DriveSystemCmd', (_message.Message,), dict(
@@ -1355,6 +1529,20 @@ ControlCommand = _reflection.GeneratedProtocolMessageType('ControlCommand', (_me
   # @@protoc_insertion_point(class_scope:control25.ControlCommand)
   ))
 _sym_db.RegisterMessage(ControlCommand)
+
+TmToControlCommand = _reflection.GeneratedProtocolMessageType('TmToControlCommand', (_message.Message,), dict(
+  DESCRIPTOR = _TMTOCONTROLCOMMAND,
+  __module__ = 'control2025_pb2'
+  # @@protoc_insertion_point(class_scope:control25.TmToControlCommand)
+  ))
+_sym_db.RegisterMessage(TmToControlCommand)
+
+AppToControlCommand = _reflection.GeneratedProtocolMessageType('AppToControlCommand', (_message.Message,), dict(
+  DESCRIPTOR = _APPTOCONTROLCOMMAND,
+  __module__ = 'control2025_pb2'
+  # @@protoc_insertion_point(class_scope:control25.AppToControlCommand)
+  ))
+_sym_db.RegisterMessage(AppToControlCommand)
 
 
 # @@protoc_insertion_point(module_scope)
