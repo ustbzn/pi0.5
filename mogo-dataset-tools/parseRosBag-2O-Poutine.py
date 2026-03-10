@@ -1,9 +1,8 @@
-#!/usr/bin/python2.7
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-python2.7 /D2/NXT/vlm/miaobinqi/Senna/mogo_test/mogo-dataset-tools/parseRosBag-2O_py27.py /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags
+python3 /D2/NXT/vlm/miaobinqi/Senna/mogo_test/mogo-dataset-tools/parseRosBag-2O_py27.py /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags
 """
-from __future__ import print_function
 import sys
 import os
 import pickle
@@ -33,7 +32,6 @@ def calculate_header_timestamp(header):
 def serialize_for_json(obj):
     """
     将数据序列化为JSON兼容格式
-    处理numpy数组和bytes类型
     """
     if isinstance(obj, np.ndarray):
         return {
@@ -45,7 +43,7 @@ def serialize_for_json(obj):
     elif isinstance(obj, (bytes, bytearray)):
         return {
             '__bytes__': True,
-            'data': base64.b64encode(obj)
+            'data': base64.b64encode(obj).decode('utf-8')
         }
     elif isinstance(obj, (np.integer, np.floating)):
         return obj.item()
@@ -58,12 +56,10 @@ def serialize_for_json(obj):
 
 def quaternion_to_rotation_matrix(qx, qy, qz, qw):
     """将四元数转换为旋转矩阵"""
-    # 归一化四元数
     norm = np.sqrt(qx*qx + qy*qy + qz*qz + qw*qw)
     if norm > 0:
         qx, qy, qz, qw = qx/norm, qy/norm, qz/norm, qw/norm
     
-    # 转换为旋转矩阵
     R = np.array([
         [1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qw*qz), 2*(qx*qz + qw*qy)],
         [2*(qx*qy + qw*qz), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qw*qx)],
@@ -84,8 +80,6 @@ def build_rotation_matrix_from_yaw(yaw):
     cos_yaw = np.cos(yaw)
     sin_yaw = np.sin(yaw)
     
-    # 右手坐标系：X轴指向车头前方，Y轴指向车身左侧，Z轴垂直向上
-    # 从世界坐标系（UTM：X东，Y北）到自车坐标系（X前，Y左）的旋转矩阵
     R = np.array([
         [sin_yaw,  cos_yaw, 0.0],  # X轴：前进方向
         [-cos_yaw, sin_yaw, 0.0],  # Y轴：左侧方向
@@ -277,8 +271,10 @@ class BagDataHandler:
                 print("[INFO] 成功打开 action_sequence.txt：{}".format(self.file_path_action_sequence))
             except Exception as e:
                 # 打开失败时清理已打开的文件
-                if self.file_action_sequence is not None:
-                    self.file_action_sequence.close()
+                try:
+                    if self.file_action_sequence is not None:
+                        self.file_action_sequence.close()
+                finally:
                     self.file_action_sequence = None
                 raise RuntimeError("打开 action_sequence.txt 失败：{}".format(e))
         else:
@@ -291,8 +287,10 @@ class BagDataHandler:
                 print("[INFO] 成功打开 scenario_sequence.txt：{}".format(self.file_path_scenario_sequence))
             except Exception as e:
                 # 打开失败时清理已打开的文件
-                if self.file_scenario_sequence is not None:
-                    self.file_scenario_sequence.close()
+                try:
+                    if self.file_scenario_sequence is not None:
+                        self.file_scenario_sequence.close()
+                finally:
                     self.file_scenario_sequence = None
                 raise RuntimeError("打开 scenario_sequence.txt 失败：{}".format(e))
         else:
@@ -720,7 +718,7 @@ class BagDataHandler:
         trajectory_topics = ["/planning/trajectory", "/trajectory", "/planning/trajectory_plan"]
         
         found_topic = None
-        master_topics = self.master_bag.get_type_and_topic_info()[1].keys()
+        master_topics = list(self.master_bag.get_type_and_topic_info()[1].keys())
         for topic_name in trajectory_topics:
             if topic_name in master_topics:
                 found_topic = topic_name
@@ -790,7 +788,7 @@ class BagDataHandler:
                 
                 # 分割动作类型和时间段部分（按第一个冒号分割）
                 if ':' not in line:
-                    print(f"[WARN] 第{line_num}行格式错误，无冒号分隔: {line}")
+                    print("[WARN] 第{}行格式错误，无冒号分隔: {}".format(line_num, line))
                     continue
                 
                 action_type, time_str = line.split(':', 1)
@@ -812,7 +810,7 @@ class BagDataHandler:
                                 start, end = sorted(interval)
                                 valid_intervals.append([start, end])
                             else:
-                                print(f"[WARN] 第{line_num}行{action_type}的时间段格式无效: {interval}")
+                                print("[WARN] 第{}行{}的时间段格式无效: {}".format(line_num, action_type, interval))
                     
                     # 核心调整：仅当有效时间段非空时，才加入字典
                     if valid_intervals:
@@ -820,11 +818,11 @@ class BagDataHandler:
                     # 空时间段则直接跳过，不加入字典
                         
                 except Exception as e:
-                    print(f"[WARN] 第{line_num}行解析失败: {line}, 错误: {str(e)}")
+                    print("[WARN] 第{}行解析失败: {}, 错误: {}".format(line_num, line, str(e)))
                     # 解析失败也跳过该动作，不加入字典
         
         except Exception as e:
-            print(f"[ERROR] 解析action_sequence.txt失败: {str(e)}")
+            print("[ERROR] 解析action_sequence.txt失败: {}".format(str(e)))
         
         return action_dict
 
@@ -856,8 +854,7 @@ class BagDataHandler:
             print("[WARN] 动作字典为空或格式非法")
             return "lane_keeping_and_centering"
         
-        # Python2.7 字典遍历：使用keys()保证顺序（需确保action_dict是有序插入的）
-        for action_name in action_dict.keys():
+        for action_name in list(action_dict.keys()):
             time_intervals = action_dict[action_name]
             # 遍历当前动作的所有时间段
             for interval in time_intervals:
@@ -914,7 +911,7 @@ class BagDataHandler:
                 
                 # 分割场景类型和时间段部分（按第一个冒号分割）
                 if ':' not in line:
-                    print(f"[WARN] 第{line_num}行格式错误，无冒号分隔: {line}")
+                    print("[WARN] 第{}行格式错误，无冒号分隔: {}".format(line_num, line))
                     continue
                 
                 scenario_type, time_str = line.split(':', 1)
@@ -936,7 +933,7 @@ class BagDataHandler:
                                 start, end = sorted(interval)
                                 valid_intervals.append([start, end])
                             else:
-                                print(f"[WARN] 第{line_num}行{scenario_type}的时间段格式无效: {interval}")
+                                print("[WARN] 第{}行{}的时间段格式无效: {}".format(line_num, scenario_type, interval))
                     
                     # 核心规则：仅当有效时间段非空时，才加入字典
                     if valid_intervals:
@@ -944,11 +941,11 @@ class BagDataHandler:
                     # 空时间段则直接跳过，不加入字典
                         
                 except Exception as e:
-                    print(f"[WARN] 第{line_num}行解析失败: {line}, 错误: {str(e)}")
+                    print("[WARN] 第{}行解析失败: {}, 错误: {}".format(line_num, line, str(e)))
                     # 解析失败也跳过该场景，不加入字典
         
         except Exception as e:
-            print(f"[ERROR] 解析scenario_sequence.txt失败: {str(e)}")
+            print("[ERROR] 解析scenario_sequence.txt失败: {}".format(str(e)))
         
         return scenario_dict
 
@@ -980,8 +977,7 @@ class BagDataHandler:
             print("[WARN] 场景字典为空或格式非法")
             return "lane_keep"
         
-        # Python2.7 字典遍历：使用keys()保证顺序（需确保scenario_dict是有序插入的）
-        for scenario_name in scenario_dict.keys():
+        for scenario_name in list(scenario_dict.keys()):
             time_intervals = scenario_dict[scenario_name]
             # 遍历当前场景的所有时间段
             for interval in time_intervals:
@@ -1503,7 +1499,7 @@ class BagDataHandler:
 
 if __name__ == '__main__':
     print("[INFO] 脚本启动")
-    print("[INFO] 使用方法: python2.7 parseRosBag-2O_py27.py <bags_root_dir>")
+    print("[INFO] 使用方法: python3 parseRosBag-2O_Poutine.py <bags_root_dir>")
     print("[INFO]   bags_root_dir: 包含多个bag文件夹的根目录（必需）")
     print("[INFO]   脚本会自动遍历该目录下的所有bag文件夹并处理")
     
