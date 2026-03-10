@@ -10,7 +10,7 @@ import torch
 from omegaconf import OmegaConf
 from PIL import Image
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, Qwen3VLProcessor
 
 import swanlab
 # import wandb
@@ -126,11 +126,32 @@ class DrivePiZeroTrainAgent:
         if cfg.get(
             "use_torch_compile", True
         ):  # model being compiled in the first batch which takes some time
-            self.model = torch.compile(
-                self.model,
-                mode="default",  # "reduce-overhead" speeds up a lot and reduces VRAM usage a lot more, but causes nan loss on L40, maybe issue with cudagraphs or 8-bit optimizer; max-autotune works on H100s, takes a while to compile
-                # backend="inductor", # default: inductor; cudagraphs
+            # self.model = torch.compile(
+            #     self.model,
+            #     mode="default",  # "reduce-overhead" speeds up a lot and reduces VRAM usage a lot more, but causes nan loss on L40, maybe issue with cudagraphs or 8-bit optimizer; max-autotune works on H100s, takes a while to compile
+            #     # backend="inductor", # default: inductor; cudagraphs
+            # )
+            # vision_tower 使用官方实现，内部有 .item() 调用，不能被 compile
+    # 只 compile 除 vision_tower 之外的部分
+            self.model.joint_model = torch.compile(
+                self.model.joint_model,
+                mode="default",
             )
+            self.model.action_encoder = torch.compile(
+                self.model.action_encoder,
+                mode="default",
+            )
+            self.model.action_decoder = torch.compile(
+                self.model.action_decoder,
+                mode="default",
+            )
+            self.model.proprio_encoder = torch.compile(
+                self.model.proprio_encoder,
+                mode="default",
+            )
+            log.info("Compiled joint_model, action_encoder, action_decoder, proprio_encoder")
+            # vision_tower 不 compile，避免 graph break
+            log.info("Skipped compiling vision_tower (contains .item() calls incompatible with compile)")
         # modes: https://pytorch.org/docs/main/generated/torch.compile.html
         # backends: https://pytorch.org/docs/stable/torch.compiler.html
         log.info(f"Using cuda device: {self.device}, dtype: {self.dtype}")
@@ -254,14 +275,24 @@ class DrivePiZeroTrainAgent:
 
         # processor --- assume paligemma for now
         self.tokenizer = AutoTokenizer.from_pretrained(
-            cfg.pretrained_model_path, padding_side="right"
+            cfg.pretrained_model_path, 
+            trust_remote_code=True,
+            padding_side="right"
         )
-        self.processor = VLAProcessor(
-            self.tokenizer,
-            num_image_tokens=cfg.vision.config.num_image_tokens,
-            max_seq_len=cfg.max_seq_len,
-            tokenizer_padding=cfg.tokenizer_padding,
+
+        self.processor = Qwen3VLProcessor.from_pretrained(
+            cfg.pretrained_model_path,
+            trust_remote_code=True,
         )
+        # 单独保存，供调用时使用
+        self.processor_padding = cfg.tokenizer_padding
+        self.processor_max_length = cfg.max_seq_len
+        self.image_token_id = self.processor.image_token_id
+        print(f"image_token_id: {self.image_token_id}")
+        # 验证聊天模板正常
+        test_msg = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "test"}]}]
+        test_text = self.processor.apply_chat_template(test_msg, tokenize=False, add_generation_prompt=True)
+        print(f"Chat template test: {test_text[:100]}...")
         print('agent done')
 
     def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
@@ -294,24 +325,68 @@ class DrivePiZeroTrainAgent:
             # Drive-Pi0 only uses fixed images
             # use images as you want
             # the current code fetchs 2 images, if you want to change the number of images, you need to change the config file
-            images_front = batch["image_front"]
-            images_front_history = batch["image_front_time"]
+            images_front = batch["image_front"] # torch.Size([16, 224, 224, 3])
+            images_front_history = batch["image_front_time"] # torch.Size([16, 224, 224, 3])
             # images_back = batch["image_back"]
             
             batch_size = images_front.shape[0]
             
-            state = batch["state"]
-            trajectory = batch["trajectory"].squeeze(1)  # remove the time dimension
+            state = batch["state"] # torch.Size([16, 5, 10])
+            trajectory = batch["trajectory"].squeeze(1)  # remove the time dimension torch.Size([16, 7, 2])
             texts = batch["language_instruction"]
-            images_front = einops.rearrange(images_front, "B H W C -> B C H W")  # remove cond_steps dimension
-            images_front = images_front.unsqueeze(1)
-            images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")  # remove cond_steps dimension
-            images_front_history = images_front_history.unsqueeze(1)
+            images_front = einops.rearrange(images_front, "B H W C -> B C H W")  # remove cond_steps dimension torch.Size([16, 3, 224, 224])
+            images_front = images_front.unsqueeze(1) # torch.Size([16, 1, 3, 224, 224])
+            images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")  # remove cond_steps dimension torch.Size([16, 3, 224, 224])
+            images_front_history = images_front_history.unsqueeze(1) # torch.Size([16, 1, 3, 224, 224])
             # images_back = einops.rearrange(images_back, "B H W C -> B C H W")  # remove cond_steps dimension
             # images_back = images_back.unsqueeze(1)
             
-            images = torch.cat((images_front, images_front_history), dim=1) # cat
-            model_inputs = self.processor(text=texts, images=images)
+            images = torch.cat((images_front, images_front_history), dim=1) # cat torch.Size([16, 2, 3, 224, 224])
+            # 注意：Qwen3VLProcessor要求images是PIL.Image列表
+            # 假设images是[B, N, H, W, C]的numpy数组（uint8），需转换为PIL
+            pil_images = []
+            for i in range(images.shape[0]):
+                for j in range(images.shape[1]):
+                    # 转换为PIL Image (HWC -> RGB)
+                    # img = Image.fromarray(images[i, j].cpu().numpy().astype(np.uint8))
+                    img = Image.fromarray(images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0))  # 如果图像是CHW格式，先转置为HWC
+                    pil_images.append(img)
+            
+            # ===== 关键修改：构建 Qwen3VL 聊天格式 =====
+            # 每个样本有2张图，需要在文本中插入对应数量的图像占位
+            num_images_per_sample = images.shape[1]  # 2
+            chat_texts = []
+            for i, text in enumerate(texts):
+                # 构建包含图像的消息列表
+                content = []
+                # 插入所有图像
+                for _ in range(num_images_per_sample):
+                    content.append({"type": "image"})
+                # 插入文本
+                content.append({"type": "text", "text": text})
+                
+                messages = [{"role": "user", "content": content}]
+                # 应用聊天模板
+                chat_text = self.processor.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                chat_texts.append(chat_text)
+            # ===== 修改结束 =====
+            
+            model_inputs = self.processor(
+                text=chat_texts,  # ✅ 传入修改后的聊天文本列表
+                images=pil_images,
+                return_tensors="pt",
+                padding=self.processor_padding,
+                max_length=self.processor_max_length,
+                truncation=True,
+            ).to(self.device)
+            
+            # 验证图像token数量（对应正确调用代码中的验证逻辑）
+            num_image_tokens = (model_inputs["input_ids"] == self.processor.image_token_id).sum().item()
+            # print(f"input_ids 中图像token数量: {num_image_tokens}, pixel_values shape: {model_inputs['pixel_values'].shape}")
 
             # build causal mask and position ids for trajectory
             causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
@@ -323,6 +398,8 @@ class DrivePiZeroTrainAgent:
             inputs = {
                 "input_ids": model_inputs["input_ids"],
                 "pixel_values": model_inputs["pixel_values"].to(self.dtype),
+                "image_grid_thw": model_inputs["image_grid_thw"],
+                # "vlm_causal_mask": vlm_causal_mask,
                 "vlm_position_ids": vlm_position_ids,
                 "proprio_position_ids": state_position_ids,
                 "action_position_ids": action_position_ids,

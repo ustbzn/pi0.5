@@ -16,6 +16,10 @@ from src.model.paligemma.modules import (
     GemmaRMSNorm,
     GemmaRotaryEmbedding,
 )
+from src.model.qwen3.modules import (
+    Qwen3MLP, 
+    Qwen3RMSNorm, 
+    Qwen3RotaryEmbedding)
 from src.model.utils import apply_rotary_pos_emb, repeat_kv
 from src.model.DrivePi0.modules import AdaptiveLayerscale, AdaptiveRMSNorm
 
@@ -218,12 +222,58 @@ class MixtureAttention(nn.Module):
     def forward_o_proj(self, x: torch.FloatTensor) -> torch.FloatTensor:
         return self.o_proj(x)
 
-    def forward_rotary_emb(
-        self, x: torch.FloatTensor, position_ids: torch.LongTensor
-    ) -> torch.FloatTensor:
-        # [Batch_Size, Seq_Len, Head_Dim], [Batch_Size, Seq_Len, Head_Dim]
-        cos, sin = self.rotary_emb(x, position_ids, seq_len=None)
+    def forward_rotary_emb(self, query_states, position_ids):
+        """
+        统一处理不同版本 transformers 的 Qwen3RotaryEmbedding 输出格式：
+        - 新版：[max_pos, D]           (2D, 全缓存，需手动按 position_ids 索引)
+        - 旧版：[1, S, D] 或 [B, S, D] (3D, 已部分处理)
+        """
+        cos, sin = self.rotary_emb(query_states, position_ids)
+        bsz, seq_len = position_ids.shape
+
+        if cos.dim() == 2:
+            # [max_pos, D] → 用 position_ids 索引 → [B, S, D]
+            # 注意：position_ids 的值必须 < max_pos（通常满足）
+            cos = cos[position_ids]   # [B, S, D]
+            sin = sin[position_ids]
+
+        elif cos.dim() == 3:
+            if cos.shape[0] == 1 and bsz != 1:
+                # [1, S, D] → [B, S, D]（广播形式）
+                cos = cos.expand(bsz, -1, -1)[:, :seq_len, :]
+                sin = sin.expand(bsz, -1, -1)[:, :seq_len, :]
+            elif cos.shape[0] != bsz:
+                # 其他不匹配情况：尝试 squeeze 后重新索引
+                cos = cos.reshape(-1, cos.shape[-1])[position_ids.reshape(-1)].reshape(bsz, seq_len, -1)
+                sin = sin.reshape(-1, sin.shape[-1])[position_ids.reshape(-1)].reshape(bsz, seq_len, -1)
+            else:
+                # [B, S, D]，已正确，截取实际 seq_len
+                cos = cos[:, :seq_len, :]
+                sin = sin[:, :seq_len, :]
+        # dim == 4 时（multimodal RoPE）：透传给 forward_apply_rotary_emb 处理
+
         return cos, sin
+    
+    # def forward_rotary_emb(
+    #     self,
+    #     x: torch.FloatTensor,
+    #     position_ids: torch.LongTensor,
+    # ):
+    #     """
+    #     x: [B, H, L, D]
+    #     position_ids: [B, L]
+    #     """
+
+    #     B, H, L, D = x.shape
+
+    #     # 只根据 position_ids 生成 cos/sin
+    #     cos, sin = self.rotary_emb(position_ids)
+
+    #     # rotary_emb 返回 [B, L, D]
+    #     assert cos.shape == (B, L, D)
+    #     assert sin.shape == (B, L, D)
+
+    #     return cos, sin
 
     def forward_apply_rotary_emb(
         self,
@@ -232,6 +282,30 @@ class MixtureAttention(nn.Module):
         sin: torch.FloatTensor,
     ) -> torch.FloatTensor:
         # [Batch_Size, Num_Heads_Q / Num_Heads_KV, Seq_Len, Head_Dim]
+        bsz, num_heads, seq_len, head_dim = states.shape
+        if cos.dim() == 2:
+            # 漏网之鱼：[max_pos, D] → 截取 → [S, D] → [1, 1, S, D]
+            cos = cos[:seq_len].unsqueeze(0).unsqueeze(0)
+            sin = sin[:seq_len].unsqueeze(0).unsqueeze(0)
+        elif cos.dim() == 3:
+            # [B, S, D] → [B, 1, S, D]
+            if cos.shape[0] != bsz:
+                B = cos.shape[0]
+                H = states.shape[0] // B
+                # cos = cos.repeat_interleave(H, dim=0)
+                # sin = sin.repeat_interleave(H, dim=0)
+                raise ValueError(
+                    f"forward_apply_rotary_emb: cos batch {cos.shape[0]} != states batch {bsz}. "
+                    f"states={states.shape}, cos={cos.shape}. "
+                    f"Check forward_rotary_emb is returning [B, S, D]."
+                    f"B = {B}, H = {H} (batch size // num_key_value_heads)"
+                )
+            cos = cos.unsqueeze(1)   # [B, 1, S, D]
+            sin = sin.unsqueeze(1)
+        elif cos.dim() == 4 and cos.shape[0] != bsz:
+            # 异常 4D（非 head-expanded），修正
+            cos = cos[:, :seq_len, :].unsqueeze(0) if cos.shape[0] == 1 else cos
+            sin = sin[:, :seq_len, :].unsqueeze(0) if sin.shape[0] == 1 else sin
         states = apply_rotary_pos_emb(states, cos, sin)
         return states
 

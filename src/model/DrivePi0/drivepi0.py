@@ -22,6 +22,8 @@ from src.model.DrivePi0.modules import (
 from src.utils.decorator import NoSyncBase
 from src.utils.monitor import log_execution_time
 
+from transformers import Qwen3VLVisionModel
+
 log = logging.getLogger(__name__)
 
 
@@ -65,8 +67,29 @@ class DrivePiZero(nn.Module, NoSyncBase):
         )  # 0.527B parameters
 
         # Vision
-        self.vision_tower = hydra.utils.instantiate(cfg.vision)
-        self.multi_modal_projector = hydra.utils.instantiate(cfg.vision_projector)
+        # self.vision_tower = hydra.utils.instantiate(cfg.vision)
+        # self.multi_modal_projector = hydra.utils.instantiate(cfg.vision_projector)
+        
+        # self.vision_tower = Qwen3VLVisionModel.from_pretrained(
+        #     cfg.pretrained_model_path,
+        #     trust_remote_code=True,
+        # )
+        from transformers import Qwen3VLForConditionalGeneration
+
+        _full_model = Qwen3VLForConditionalGeneration.from_pretrained(
+            cfg.pretrained_model_path,
+            trust_remote_code=True,
+            dtype=torch.bfloat16,
+        )
+        self.vision_tower = _full_model.model.visual  # 权重已经加载好
+        del _full_model.model.language_model         # 释放语言模型部分显存
+        del _full_model.lm_head
+        del _full_model
+        torch.cuda.empty_cache()
+        log.info("Loaded vision tower from pretrained model")
+        # merger 已集成在 vision_tower 内部，不需要单独的 projector
+        # 但保留 multi_modal_projector 属性避免其他地方报错
+        self.multi_modal_projector = None
 
         # Mixtures
         self.joint_model = hydra.utils.instantiate(cfg.joint)
@@ -120,8 +143,8 @@ class DrivePiZero(nn.Module, NoSyncBase):
     def trainable_vlm_parameters(self):
         return (
             list(self.vision_tower.parameters())
-            + list(self.multi_modal_projector.parameters())
-            + self.trainable_gemma_parameters
+            # + list(self.multi_modal_projector.parameters())# 去掉 multi_modal_projector，已集成在 vision_tower 内
+            + self.trainable_qwen_parameters
         )
 
     @property
@@ -130,32 +153,34 @@ class DrivePiZero(nn.Module, NoSyncBase):
         for name, param in self.vision_tower.named_parameters():
             if "lora_" in name:
                 params.append(param)
-        for name, param in self.multi_modal_projector.named_parameters():
-            if "lora_" in name:
-                params.append(param)
-        params.extend(self.trainable_lora_gemma_parameters)
+        # 去掉 multi_modal_projector，已集成在 vision_tower 内
+        # for name, param in self.multi_modal_projector.named_parameters():
+        #     if "lora_" in name:
+        #         params.append(param)
+        params.extend(self.trainable_lora_qwen_parameters)
         return params
 
     @property
-    def trainable_gemma_parameters(self):
-        gemma_parameters = []
-        for name, param in self.joint_model.mixtures["vlm"].named_parameters():
-            if not self._check_gemma_unused_parameter_by_name(name):
-                gemma_parameters.append(param)
-        return gemma_parameters
+    def trainable_qwen_parameters(self):
+        """获取可训练的Qwen参数"""
+        trainable_params = []
+        for name, param in self.joint_model.named_parameters():
+            if "mixtures.vlm" in name and not self._check_qwen_unused_parameter_by_name(name):
+                trainable_params.append(param)
+        return trainable_params
 
     @property
-    def trainable_lora_gemma_parameters(self):
-        gemma_parameters = []
-        for name, param in self.joint_model.mixtures["vlm"].named_parameters():
-            if not self._check_gemma_unused_parameter_by_name(name):
-                if "lora_" in name:
-                    gemma_parameters.append(param)
-        return gemma_parameters
+    def trainable_lora_qwen_parameters(self):
+        """获取可训练的LoRA-Qwen参数"""
+        trainable_params = []
+        for name, param in self.named_parameters():
+            if "lora_" in name and "mixtures.vlm" in name and not self._check_qwen_unused_parameter_by_name(name):
+                trainable_params.append(param)
+        return trainable_params
 
     @log_execution_time()
     def load_pretrained_weights(self):
-        """vision, projector, lm from paligemma"""
+        """vision, projector, lm from qwen3-vl"""
         import glob
         import os
 
@@ -174,50 +199,50 @@ class DrivePiZero(nn.Module, NoSyncBase):
         # load embed tokens
         embed_tokens_state_dict = self.embed_tokens.state_dict()
         for k, v in tensors.items():
-            if "embed_tokens" in k:
-                new_key = k.replace("language_model.model.embed_tokens.", "")
-                embed_tokens_state_dict[new_key] = v
+            if "embed_tokens" in k or "model.embed_tokens" in k:
+                new_key = k.replace("model.embed_tokens.", "")
+                if new_key in embed_tokens_state_dict:
+                    embed_tokens_state_dict[new_key] = v
         self.embed_tokens.load_state_dict(embed_tokens_state_dict, strict=True)
         log.info("Loaded pre-trained weights for embed tokens")
 
-        # load vision tower --- "vision_tower.vision_model" -> "vision_model"
-        vision_tower_state_dict = self.vision_tower.state_dict()
-        for k, v in tensors.items():
-            if "vision_tower" in k:
-                new_key = k.replace("vision_tower.", "")
-                vision_tower_state_dict[new_key] = v
-        self.vision_tower.load_state_dict(vision_tower_state_dict, strict=True)
-        log.info("Loaded pre-trained weights for vision tower")
+        # load vision tower
+        # vision_tower_state_dict = self.vision_tower.state_dict()
+        # for k, v in tensors.items():
+        #     if "visual" in k or "vision" in k or "visual_tower" in k:
+        #         new_key = k.replace("visual.", "").replace("vision_tower.", "")
+        #         if new_key in vision_tower_state_dict:
+        #             vision_tower_state_dict[new_key] = v
+        # self.vision_tower.load_state_dict(vision_tower_state_dict, strict=False)
+        # log.info("Loaded pre-trained weights for vision tower")
 
-        # load projector --- "multi_modal_projector.linear" -> "linear"
-        multi_modal_projector_state_dict = self.multi_modal_projector.state_dict()
-        for k, v in tensors.items():
-            if "multi_modal_projector" in k:
-                new_key = k.replace("multi_modal_projector.", "")
-                multi_modal_projector_state_dict[new_key] = v
-        self.multi_modal_projector.load_state_dict(
-            multi_modal_projector_state_dict, strict=True
-        )
-        log.info("Loaded pre-trained weights for projector")
+        # load projector
+        # multi_modal_projector_state_dict = self.multi_modal_projector.state_dict()
+        # for k, v in tensors.items():
+        #     if "multi_modal_projector" in k or "img_projection" in k or "visual_projection" in k:
+        #         new_key = k.replace("multi_modal_projector.", "").replace("img_projection.", "").replace("visual_projection.", "")
+        #         if new_key in multi_modal_projector_state_dict:
+        #             multi_modal_projector_state_dict[new_key] = v
+        # self.multi_modal_projector.load_state_dict(multi_modal_projector_state_dict, strict=False)
+        # log.info("Loaded pre-trained weights for projector")
 
         # load lm --- do not change any lora weights
         joint_model_state_dict = self.joint_model.state_dict()
         lora_keys = []
-        for key in (
-            joint_model_state_dict.keys()
-        ):  # avoid RuntimeError: OrderedDict mutated during iteration
+        for key in joint_model_state_dict.keys():
             if "lora_" in key:
                 lora_keys.append(key)
         for key in lora_keys:
             del joint_model_state_dict[key]
         for k, v in tensors.items():
-            if "language_model.model" in k:
-                new_key = k.replace("language_model.model.", "mixtures.vlm.")
-                joint_model_state_dict[new_key] = v
+            if "model" in k and ("layers" in k or "norm" in k):
+                new_key = k.replace("model.", "mixtures.vlm.")
+                if new_key in joint_model_state_dict:
+                    joint_model_state_dict[new_key] = v
         self.joint_model.load_state_dict(joint_model_state_dict, strict=False)
         log.info("Loaded pre-trained weights for lm part of the joint model")
 
-    def _check_gemma_unused_parameter_by_name(self, name: str) -> bool:
+    def _check_qwen_unused_parameter_by_name(self, name: str) -> bool:
         """no need to train vlm parameters after attention of last layer"""
         last_hidden_layer_index = self.joint_model.num_hidden_layers - 1
         if (
@@ -235,12 +260,12 @@ class DrivePiZero(nn.Module, NoSyncBase):
             param.requires_grad = True if "lora_" in name else False
         log.info("Froze non-lora weights in vision tower")
 
-        for name, param in self.multi_modal_projector.named_parameters():
-            param.requires_grad = True if "lora_" in name else False
-        log.info("Froze non-lora weights in projector")
+        # for name, param in self.multi_modal_projector.named_parameters():
+        #     param.requires_grad = True if "lora_" in name else False
+        # log.info("Froze non-lora weights in projector")
 
         for name, param in self.joint_model.mixtures["vlm"].named_parameters():
-            if not self._check_gemma_unused_parameter_by_name(name):
+            if not self._check_qwen_unused_parameter_by_name(name):
                 param.requires_grad = True if "lora_" in name else False
         log.info("Froze non-lora weights in lm part of the joint model")
 
@@ -248,7 +273,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         """text embedding and part of last layer of vlm, including lora"""
         self.embed_tokens.weight.requires_grad = False
         for name, param in self.joint_model.mixtures["vlm"].named_parameters():
-            if self._check_gemma_unused_parameter_by_name(name):
+            if self._check_qwen_unused_parameter_by_name(name):
                 param.requires_grad = False
 
     def freeze_vlm_weights(self):
@@ -258,10 +283,10 @@ class DrivePiZero(nn.Module, NoSyncBase):
             param.requires_grad = False
         log.info("Froze all weights in vision tower")
 
-        # vision-text projector
-        for _, param in self.multi_modal_projector.named_parameters():
-            param.requires_grad = False
-        log.info("Froze all weights in multi_modal_projector")
+        # # vision-text projector
+        # for _, param in self.multi_modal_projector.named_parameters():
+        #     param.requires_grad = False
+        # log.info("Froze all weights in multi_modal_projector")
 
         # language backbone (gemma in joint_model mixtures["vlm"])
         for _, param in self.joint_model.mixtures["vlm"].named_parameters():
@@ -298,8 +323,8 @@ class DrivePiZero(nn.Module, NoSyncBase):
         """
         bsz = attention_mask.size(0)
         proprio_start = self.max_image_text_tokens
-        proprio_end = self.max_image_text_tokens + self.num_proprio_tokens
-        action_start = proprio_end
+        proprio_end   = self.max_image_text_tokens + self.num_proprio_tokens
+        action_start  = proprio_end
         image_text_token_cnts = torch.sum(attention_mask, dim=1)
         causal_mask = torch.full(
             (bsz, self.total_num_tokens, self.total_num_tokens),
@@ -322,17 +347,20 @@ class DrivePiZero(nn.Module, NoSyncBase):
         # [Batch_Size, Q_Len, KV_Len] -> [Batch_Size, Num_Heads_Q, Q_Len, KV_Len]
         causal_mask = causal_mask.unsqueeze(1)
 
-        # position ids for each blocks --- start at 1
-        vlm_position_ids = torch.arange(1, self.max_image_text_tokens + 1).repeat(
-            bsz, 1
+        # ── 3. position ids（不变）──────────────────────────────────────
+        vlm_position_ids = (
+            torch.arange(0, self.max_image_text_tokens, device=attention_mask.device)
+            .unsqueeze(0).expand(bsz, -1)
         )
-        proprio_position_ids = torch.arange(1, self.num_proprio_tokens + 1).repeat(
-            bsz, 1
+        proprio_position_ids = (
+            torch.arange(0, self.num_proprio_tokens, device=attention_mask.device)
+            .unsqueeze(0).expand(bsz, -1)
         )
-        action_position_ids = torch.arange(
-            self.num_proprio_tokens + 1,
-            self.num_proprio_tokens + self.num_action_tokens + 1,
-        ).repeat(bsz, 1)
+        action_position_ids = (
+            torch.arange(0, self.num_action_tokens, device=attention_mask.device)
+            .unsqueeze(0).expand(bsz, -1)
+        )
+
         # since proprio and action share the same mixture weights, makes sense to use [1 (proprio), 2 (action), 3 (action), ...] instead of [1 (proprio), 1 (action), 2 (action), ...]
         return causal_mask, vlm_position_ids, proprio_position_ids, action_position_ids
 
@@ -354,6 +382,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         attention_mask: torch.Tensor,
         kv_cache: Optional[KVCache] = None,
     ) -> Tuple[torch.FloatTensor, torch.LongTensor]:
+        bsz = attention_mask.size(0)
         dtype, device = attention_mask.dtype, attention_mask.device
 
         if kv_cache is None or kv_cache.num_items() == 0:
@@ -374,14 +403,17 @@ class DrivePiZero(nn.Module, NoSyncBase):
         causal_mask = causal_mask.unsqueeze(1)
 
         if kv_cache is not None and kv_cache.num_items() > 0:
-            # use the last location
-            position_ids = attention_mask.cumsum(-1)[:, -1:]
-        else:
-            # create position_ids based on the size of the attention_mask
-            # for padded tokens, use number 1
-            position_ids = (attention_mask.cumsum(-1)).masked_fill_(
-                (attention_mask == 0), 1
+            past_len = kv_cache.num_items()
+            position_ids = torch.full(
+                (bsz, q_len),
+                past_len,
+                device=device,
+                dtype=torch.long,
             )
+        else:
+            position_ids = torch.arange(
+                0, q_len, device=device
+            ).unsqueeze(0).expand(bsz, -1)
         return causal_mask, position_ids
 
     # ---------- Inference ----------#
@@ -433,25 +465,72 @@ class DrivePiZero(nn.Module, NoSyncBase):
                 i, :num_image_tokens
             ]
         return final_embedding
+    
+    def _forward_qwen3_vision_and_text_embedding(
+        self,
+        input_ids: torch.LongTensor,
+        pixel_values: torch.FloatTensor,
+        image_grid_thw: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> torch.FloatTensor:
+        dtype = self.embed_tokens.weight.dtype
+        device = input_ids.device
+        bsz, seq_len = input_ids.shape
+
+        # 1. 文本嵌入
+        inputs_embeds = self.embed_tokens(input_ids)
+        final_embedding = inputs_embeds.clone()
+
+        # 2. 视觉特征：官方 vision_tower 内部已包含 merger(projector)
+        # 输入: pixel_values [total_patches, patch_dim], image_grid_thw [num_images, 3]
+        # 输出: 返回 (hidden_states, deepstack_feature_lists) 元组
+        if pixel_values is not None and pixel_values.numel() > 0:
+            vision_output = self.vision_tower(
+                pixel_values.to(dtype),
+                grid_thw=image_grid_thw,
+            )
+            # import pdb; pdb.set_trace()
+            image_features = vision_output[0]
+            image_features = image_features.to(dtype)
+
+            # 3. 替换 <|image_pad|> 位置
+            image_token_mask = (input_ids == self.image_token_index)
+            num_masked = image_token_mask.sum().item()
+            num_features = image_features.shape[0]
+
+            if num_masked != num_features:
+                raise ValueError(
+                    f"<|image_pad|> token数 ({num_masked}) 与视觉特征数 ({num_features}) 不匹配"
+                )
+
+            final_embedding[image_token_mask] = image_features.to(dtype)
+
+        return final_embedding
 
     def infer_action(
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.FloatTensor,
+        image_grid_thw: torch.LongTensor,
         image_text_proprio_mask: torch.FloatTensor,
         action_mask: torch.FloatTensor,
+        # vlm_causal_mask: torch.FloatTensor,
         vlm_position_ids: torch.LongTensor,
         proprio_position_ids: torch.LongTensor,
         action_position_ids: torch.LongTensor,
         proprios: torch.FloatTensor,
     ) -> torch.FloatTensor:
         dtype, device = pixel_values.dtype, pixel_values.device
-        bsz = pixel_values.size(0)
+        bsz = input_ids.size(0)
 
         kv_caches = self.joint_model.build_mixture_caches()
+        print("pixel_values.shape:", pixel_values.shape)
+        print("image_grid_thw.shape:", image_grid_thw.shape)  
 
         # merge the text tokens and the image tokens
-        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+        inputs_embeds = self._forward_qwen3_vision_and_text_embedding(
+            input_ids, pixel_values, image_grid_thw=image_grid_thw  # 传递图像网格信息以正确处理视觉输入
+        )
 
         # proprio
         proprio_embeds = self.proprio_encoder(proprios)
@@ -459,6 +538,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         # forward pass thru the vlm and proprio, cache the kv
         _, kv_caches = self.joint_model(
             attention_mask=image_text_proprio_mask,
+            # vlm_attention_mask=vlm_causal_mask,
             position_ids_all={
                 "vlm": vlm_position_ids,
                 "proprio": proprio_position_ids,
@@ -468,6 +548,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
                 "proprio": proprio_embeds,
             },
             kv_caches=kv_caches,
+            cache_mode="append",
             return_caches=True,
         )
 
@@ -490,6 +571,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
             # [Batch_Size, Horizon_Steps, Embed_Dim]
             action_embeds = self.joint_model(
                 attention_mask=action_mask,
+                # vlm_attention_mask=vlm_causal_mask,
                 position_ids_all={"action": action_position_ids},
                 embeds_all={"action": action_embeds},
                 time_cond=time_cond,
@@ -514,6 +596,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.FloatTensor,
+        image_grid_thw: torch.LongTensor,
         causal_mask: torch.FloatTensor,
         vlm_position_ids: torch.LongTensor,
         proprio_position_ids: torch.LongTensor,
@@ -521,12 +604,14 @@ class DrivePiZero(nn.Module, NoSyncBase):
         proprios: torch.FloatTensor,
     ) -> torch.FloatTensor:
         dtype, device = pixel_values.dtype, pixel_values.device
-        bsz = pixel_values.size(0)
+        bsz = input_ids.size(0)
 
         kv_caches = self.joint_model.build_mixture_caches()
 
         # merge the text tokens and the image tokens
-        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+        inputs_embeds = self._forward_qwen3_vision_and_text_embedding(
+            input_ids, pixel_values, image_grid_thw=image_grid_thw  # 传递图像网格信息以正确处理视觉输入
+        )
 
         # encode proprio
         proprio_embeds = self.proprio_encoder(proprios)
@@ -581,13 +666,16 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.FloatTensor,
+        image_grid_thw: torch.LongTensor,
         attention_mask: torch.Tensor,
         kv_cache: Optional[KVCache] = None,
     ) -> Tuple:
         q_len = input_ids.size(1)
 
         # text tokens + image tokens
-        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+        inputs_embeds = self._forward_qwen3_vision_and_text_embedding(
+            input_ids, pixel_values, image_grid_thw=image_grid_thw  # 传递图像网格信息以正确处理视觉输入
+        )
 
         # build causal mask and position ids for text
         (
@@ -629,7 +717,9 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.ByteTensor,
+        image_grid_thw: torch.LongTensor,
         causal_mask: torch.FloatTensor,
+        # vlm_causal_mask: torch.FloatTensor,
         vlm_position_ids: torch.LongTensor,
         proprio_position_ids: torch.LongTensor,
         action_position_ids: torch.LongTensor,
@@ -645,7 +735,14 @@ class DrivePiZero(nn.Module, NoSyncBase):
         psi_t = self.psi_t(x0, x1, t)
 
         # text tokens + image tokens
-        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+        # import pdb; pdb.set_trace()
+        # print("pixel_values.shape:", pixel_values.shape)
+        # print("image_grid_thw.shape:", image_grid_thw.shape)               # [[t,h,w], ...]
+        # print("vision_tower patch_embed weight shape:", self.vision_tower.patch_embed.weight.shape)
+        # inputs_embeds = self._forward_qwen3_vision_and_text_embedding(input_ids, pixel_values)
+        inputs_embeds = self._forward_qwen3_vision_and_text_embedding(
+            input_ids, pixel_values, image_grid_thw=image_grid_thw  # 传递图像网格信息以正确处理视觉输入
+        )
 
         # proprio
         proprio_embeds = self.proprio_encoder(proprios)
@@ -660,6 +757,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
             action_embeds = self.action_encoder(psi_t, time_cond)
         action_embeds = self.joint_model(
             attention_mask=causal_mask,
+            # vlm_attention_mask=vlm_causal_mask,
             position_ids_all={
                 "vlm": vlm_position_ids,
                 "proprio": proprio_position_ids,
@@ -679,7 +777,8 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
         # compare to true velocity
         d_psi = x1 - (1 - self.flow_sig_min) * x0
-        return torch.mean((v_psi - d_psi) ** 2)
+        loss = torch.mean((v_psi - d_psi) ** 2)
+        return loss.to(v_psi.dtype)
 
 
 class DrivePiZeroInference(DrivePiZero):

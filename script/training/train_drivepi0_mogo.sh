@@ -13,9 +13,9 @@
 export TZ='UTC-8'
 # SwanLab 配置
 export WANDB_DISABLED=true
-export SWANLAB_API_KEY='WIuVGDGJJcxnKEAis5knC'
+export SWANLAB_API_KEY='wMwCepr1MuBtmCchEgh9x'
 # 保存路径
-export LOG_DIR="/D2/NXT/vlm/miaobinqi/DriveMoE/logs"
+export LOG_DIR="/pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/logs"
 
 # GPU check
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
@@ -43,3 +43,7 @@ HYDRA_FULL_ERROR=1 torchrun \
   script/run.py \
   --config-path=../config/train/DrivePi0 \
   --config-name=${BASE_CONFIG}
+
+echo "Training script finished."
+echo "Logs are saved in $LOG_DIR"
+python /pcpt/pcpt/project/jiangjunyuan/tools/simple_gpu_stress.py all
