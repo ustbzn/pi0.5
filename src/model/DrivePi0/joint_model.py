@@ -18,7 +18,13 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 
 from src.model.kv_cache import KVCache
-from src.model.DrivePi0.mixture import Mixture
+from src.model.DrivePi0.mixture import Mixture as GemmaMixture
+from src.model.DrivePi0.qwen3_vl_mixture import Qwen3VLMixture
+
+MIXTURE_REGISTRY = {
+    "gemma": GemmaMixture,
+    "qwen3_vl": Qwen3VLMixture,
+}
 
 
 def forward_mixture_layers(
@@ -31,8 +37,20 @@ def forward_mixture_layers(
     kv_caches: Dict[KVCache, KVCache] = {},
     cache_mode: str = "append_non_active",
     time_cond: Optional[torch.FloatTensor] = None,
+    attn_softclamp: float = 50.0,  # default in gemma
 ) -> Dict[torch.FloatTensor, torch.FloatTensor]:
-    """the usual norm + attn + res + norm + mlp + res"""
+    """Run one decoder layer for every active mixture.
+
+    The per-mixture flow is:
+    input_layernorm -> joint attention across all active mixtures
+    -> post-attn residual -> post_attention_layernorm
+    -> mlp -> final residual.
+
+    `post_attn_skip_names` is only meant for the final layer optimization.
+    Mixtures listed there still participate in attention as query/key/value so
+    they can affect other mixtures, but their own states stop after attention
+    and this function returns `None` for them.
+    """
     active_mixture_names = list(embeds_all.keys())
 
     # [Batch_Size, Seq_Len, Hidden_Size]
@@ -58,9 +76,13 @@ def forward_mixture_layers(
         post_attn_skip_names=post_attn_skip_names,
         kv_caches=kv_caches,
         cache_mode=cache_mode,
+        attn_softclamp=attn_softclamp,
     )
     hidden_states_pre_res = hidden_states_post_attn
 
+    # Mixtures in post_attn_skip_names intentionally stop here and become None.
+    # This is used when we only need them to contribute to attention, but no
+    # longer need their own hidden states afterwards.
     # [Batch_Size, Seq_Len, Hidden_Size]
     hidden_states_post_res = {}
     for name in active_mixture_names:
@@ -139,7 +161,16 @@ def forward_mixture_attn(
     attn_softclamp: float = 50.0,  # default in gemma
     attention_dropout: float = 0.0,
 ) -> Dict[torch.FloatTensor, torch.FloatTensor]:
-    """Assume all mixtures have the same head dim"""
+    """Run one shared attention step over the concatenated mixture sequences.
+
+    Each active mixture computes its own Q/K/V projections, then all sequences
+    are concatenated along the token dimension to form one joint attention.
+    The output is split back to per-mixture tensors afterwards.
+
+    If a mixture name appears in `post_attn_skip_names`, attention is still
+    computed for it so it can influence other mixtures, but its projected
+    output is returned as `None`.
+    """
     assert cache_mode in [
         "no_append",
         "append",
@@ -263,9 +294,10 @@ def forward_mixture_attn(
     )
 
     # Soft capping
-    attn_weights = attn_weights / attn_softclamp
-    attn_weights = torch.tanh(attn_weights)
-    attn_weights = attn_weights * attn_softclamp
+    if attn_softclamp is not None:
+        attn_weights = attn_weights / attn_softclamp
+        attn_weights = torch.tanh(attn_weights)
+        attn_weights = attn_weights * attn_softclamp
 
     # Apply the softmax / dropout
     attn_weights = attn_weights + attention_mask
@@ -318,7 +350,8 @@ class JointModel(nn.Module):
         self.mixtures = nn.ModuleDict()
         for mixture_name, mixture_config in config.mixture.items():
             mixture_config = OmegaConf.merge(config, mixture_config)
-            self.mixtures[mixture_name] = Mixture(mixture_config)
+            arch = mixture_config.get("arch", "gemma")
+            self.mixtures[mixture_name] = MIXTURE_REGISTRY[arch](mixture_config)
         self.mixture_names = list(config.mixture.keys())
 
     def build_mixture_caches(self):
@@ -334,25 +367,31 @@ class JointModel(nn.Module):
         kv_caches: Dict[KVCache, KVCache] = {},
         cache_mode: str = "append_non_active",
         return_caches: bool = False,
+        deepstack_visual_embeds: torch.Tensor=None,
+        visual_pos_masks: List[torch.Tensor]=None,
     ) -> Dict[torch.FloatTensor, torch.FloatTensor]:
         """
-        Assume attention_mask is in the right block attention form
+        Assume attention_mask is already in the desired block-attention form.
 
-        embeds_all and position_ids_all need to be in the correct order, e.g., {"vlm": ..., "proprio": ..., "action": ...}
+        `embeds_all` and `position_ids_all` must share the same order, e.g.
+        {"vlm": ..., "proprio": ..., "action": ...}.
+
+        `final_layer_post_attn_skip_names` only applies to the last layer.
+        Mixtures listed there still participate in the last-layer attention,
+        but their returned hidden state becomes `None` after that layer.
         """
         active_mixture_names = list(embeds_all.keys())
-
         # normalization
         # [Batch_Size, Seq_Len, Hidden_Size]
         for name in active_mixture_names:
-            hidden_size = embeds_all[name].shape[-1]
-            normalizer = torch.tensor(
-                hidden_size**0.5,
-                dtype=embeds_all[name].dtype,
-                device=embeds_all[name].device,
-            )
-            embeds_all[name] *= normalizer
-
+            if getattr(self.mixtures[name], "scale_input_embeds", True):
+                hidden_size = embeds_all[name].shape[-1]
+                normalizer = torch.tensor(
+                    hidden_size ** 0.5,
+                    dtype=embeds_all[name].dtype,
+                    device=embeds_all[name].device,
+                )
+                embeds_all[name] = embeds_all[name] * normalizer
         # layers
         for layer_idx in range(self.num_hidden_layers):
             is_final_layer = layer_idx == self.num_hidden_layers - 1
@@ -368,14 +407,29 @@ class JointModel(nn.Module):
                 post_attn_skip_names=final_layer_post_attn_skip_names
                 if is_final_layer
                 else [],
+                attn_softclamp=self.config.get("attn_softclamp", None),
             )
+            if (
+                "vlm" in embeds_all
+                and embeds_all["vlm"] is not None
+                and deepstack_visual_embeds is not None
+                and layer_idx < len(deepstack_visual_embeds)
+            ):
+                embeds_all["vlm"] = self.mixtures["vlm"].apply_deepstack(
+                    embeds_all["vlm"],
+                    visual_pos_masks,
+                    deepstack_visual_embeds[layer_idx],
+                )
 
         # [Batch_Size, Seq_Len, Hidden_Size]
         hidden_states_all = {}
         for name in active_mixture_names:
-            hidden_states_all[name] = self.mixtures[name].forward_norm(
-                embeds_all[name], time_cond
-            )  # can be None
+            hidden_states = embeds_all[name]
+            hidden_states_all[name] = (
+                None
+                if hidden_states is None
+                else self.mixtures[name].forward_norm(hidden_states, time_cond)
+            )
         if return_caches:
             return hidden_states_all, kv_caches
         return hidden_states_all

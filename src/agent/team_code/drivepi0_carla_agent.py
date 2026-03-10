@@ -21,8 +21,11 @@ from transformers import AutoTokenizer
 
 from leaderboard.autoagents import autonomous_agent
 
+from src.agent.drivepi0.input_utils import (
+    build_processor_from_config,
+    prepare_drivepi_inputs,
+)
 from src.model.DrivePi0.drivepi0 import DrivePiZeroInference
-from src.model.DrivePi0.processing import VLAProcessor
 from src.data.utils.image import read_resize_encode_image_pytorch
 from src.data.utils.normalization import Normalize
 from src.data.utils.augmentations import augment_image
@@ -79,15 +82,7 @@ class DrivePiZeroAgent(autonomous_agent.AutonomousAgent):
         if self.config.get("use_torch_compile", True):
             self.model = torch.compile( self.model, mode="default",)
         self.model.eval()
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.config.pretrained_model_path, padding_side="right"
-        )
-        self.processor = VLAProcessor(
-            self.tokenizer,
-            num_image_tokens=self.config.vision.config.num_image_tokens,
-            max_seq_len=self.config.max_seq_len,
-            tokenizer_padding=self.config.tokenizer_padding,
-        )
+        self.tokenizer, self.processor = build_processor_from_config(self.config)
         self.debug = self.config.debug
         self.save_images = self.config.save_images
 
@@ -326,29 +321,16 @@ class DrivePiZeroAgent(autonomous_agent.AutonomousAgent):
         images_back = images_back.unsqueeze(1)
 
         images = torch.cat((images_front, images_front_history, images_back), dim=1)
-        model_inputs = self.processor(text=texts, images=images)
-
-        # build causal mask and position ids for trajectory
-        causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
-            self.model.build_causal_mask_and_position_ids(
-                model_inputs["attention_mask"], self.dtype
-            )
+        inputs = prepare_drivepi_inputs(
+            model=self.model,
+            processor=self.processor,
+            texts=texts,
+            images=images,
+            proprios=state,
+            dtype=self.dtype,
+            device=self.device,
+            split_mask=True,
         )
-
-        inputs = {
-            "input_ids": model_inputs["input_ids"],
-            "pixel_values": model_inputs["pixel_values"].to(self.dtype),
-            "vlm_position_ids": vlm_position_ids,
-            "proprio_position_ids": state_position_ids,
-            "action_position_ids": action_position_ids,
-            "proprios": state.to(self.dtype),
-        }
-        image_text_proprio_mask, action_mask = (
-                self.model.split_full_mask_into_submasks(causal_mask)
-            )
-        inputs["image_text_proprio_mask"] = image_text_proprio_mask
-        inputs["action_mask"] = action_mask
-        inputs = {k: v.to(self.device) for k, v in inputs.items()}
         pred = self.model.infer_action(**inputs)
         x_pred, y_pred = state_normalize.infer_traj(pred)
         # move to cpu

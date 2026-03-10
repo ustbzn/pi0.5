@@ -12,7 +12,10 @@ from transformers import AutoTokenizer
 
 from src.model.DrivePi0.drivepi0 import DrivePiZeroInference
 from src.agent.dataset import Bench2DriveDataset
-from src.model.DrivePi0.processing import VLAProcessor
+from src.agent.drivepi0.input_utils import (
+    build_processor_from_config,
+    prepare_drivepi_inputs,
+)
 from src.utils.metric import get_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
 from src.data.utils.normalization import Normalize
@@ -109,17 +112,7 @@ class DrivePiZeroEvalAgent:
         # 3) 准备 tokenizer / VLAProcessor，将图像+文本打包成模型输入
         # ------------------------------
         # 文本 tokenizer（与预训练模型保持一致）
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            cfg.pretrained_model_path, padding_side="right"
-        )
-        # VLAProcessor：封装了图像 + 文本 -> token 序列 的预处理逻辑，
-        # 会输出 input_ids / pixel_values / attention_mask 等
-        self.processor = VLAProcessor(
-            self.tokenizer,
-            num_image_tokens=cfg.vision.config.num_image_tokens,
-            max_seq_len=cfg.max_seq_len,
-            tokenizer_padding=cfg.tokenizer_padding,
-        )
+        self.tokenizer, self.processor = build_processor_from_config(cfg)
         print('Agent done')
 
     def run(self):
@@ -198,55 +191,19 @@ class DrivePiZeroEvalAgent:
             #   - input_ids
             #   - pixel_values
             #   - attention_mask
-            model_inputs = self.processor(text=texts, images=images)
-
-            # =======================================
-            # 构造轨迹的 causal_mask 和 position_ids
-            # =======================================
-            # 根据 attention_mask 构造：
-            #   - causal_mask: 完整自回归 mask
-            #   - vlm_position_ids: 图像+文本 token 的 position id
-            #   - state_position_ids: 状态 token 的 position id
-            #   - action_position_ids: 动作 token 的 position id
-            causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
-                self.model.build_causal_mask_and_position_ids(
-                    model_inputs["attention_mask"], self.dtype
-                )
+            t = self.sample_fm_time(len(texts)) if sample_fm_time else None
+            return prepare_drivepi_inputs(
+                model=self.model,
+                processor=self.processor,
+                texts=texts,
+                images=images,
+                proprios=state,
+                actions=trajectory,
+                dtype=self.dtype,
+                device=self.device,
+                split_mask=split_mask,
+                t=t,
             )
-
-            # 把所有需要的输入打包为一个 dict（后续直接 **inputs 传给模型）
-            inputs = {
-                "input_ids": model_inputs["input_ids"],
-                "pixel_values": model_inputs["pixel_values"].to(self.dtype),
-                "vlm_position_ids": vlm_position_ids,
-                "proprio_position_ids": state_position_ids,
-                "action_position_ids": action_position_ids,
-                "proprios": state.to(self.dtype),
-                "actions": trajectory.to(self.dtype),
-            }
-            # 是否拆分 mask
-            if split_mask:
-                # 将 full causal mask 拆成：
-                #   - image_text_proprio_mask：图像+文本+状态部分的 mask
-                #   - action_mask：动作 token 部分的 mask
-                image_text_proprio_mask, action_mask = (
-                    self.model.split_full_mask_into_submasks(causal_mask)
-                )
-                inputs["image_text_proprio_mask"] = image_text_proprio_mask
-                inputs["action_mask"] = action_mask
-            else:
-                # 直接使用完整的 causal_mask
-                inputs["causal_mask"] = causal_mask
-
-            # 采样 flow-matching 时间 t（评估默认不启用）
-            if sample_fm_time:
-                # 注意：DrivePiZeroEvalAgent 本身并没有定义 sample_fm_time，
-                # 这一分支是为了接口对齐 DrivePiZeroTrainAgent ，一般 eval 时不会走到这里。
-                inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
-
-            # 把所有 tensor 移动到 GPU 上
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            return inputs
         
         # 用于统计一共处理了多少个 batch，后面做平均
         cnt = 0

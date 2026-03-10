@@ -15,8 +15,11 @@ from transformers import AutoTokenizer
 import swanlab
 # import wandb
 from src.agent.dataset import Bench2DriveDataset
+from src.agent.drivepi0.input_utils import (
+    build_processor_from_config,
+    prepare_drivepi_inputs,
+)
 from src.model.DrivePi0.drivepi0 import DrivePiZero
-from src.model.DrivePi0.processing import VLAProcessor
 from src.utils.metric import get_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
 from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_billions
@@ -250,16 +253,7 @@ class DrivePiZeroTrainAgent:
             self.flow_t_max = 1 - cfg.get("flow_sig_min", 0.001)
             self.flow_beta_dist = torch.distributions.Beta(flow_alpha, flow_beta)
 
-        # processor --- assume paligemma for now
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            cfg.pretrained_model_path, padding_side="right"
-        )
-        self.processor = VLAProcessor(
-            self.tokenizer,
-            num_image_tokens=cfg.vision.config.num_image_tokens,
-            max_seq_len=cfg.max_seq_len,
-            tokenizer_padding=cfg.tokenizer_padding,
-        )
+        self.tokenizer, self.processor = build_processor_from_config(cfg)
         print('agent done')
 
     def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
@@ -309,39 +303,19 @@ class DrivePiZeroTrainAgent:
             # images_back = images_back.unsqueeze(1)
             
             images = torch.cat((images_front, images_front_history), dim=1) # cat
-            model_inputs = self.processor(text=texts, images=images)
-
-            # build causal mask and position ids for trajectory
-            causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
-                model.build_causal_mask_and_position_ids(
-                    model_inputs["attention_mask"], self.dtype
-                )
+            t = self.sample_fm_time(len(texts)) if sample_fm_time else None
+            return prepare_drivepi_inputs(
+                model=model,
+                processor=self.processor,
+                texts=texts,
+                images=images,
+                proprios=state,
+                actions=trajectory,
+                dtype=self.dtype,
+                device=self.device,
+                split_mask=split_mask,
+                t=t,
             )
-
-            inputs = {
-                "input_ids": model_inputs["input_ids"],
-                "pixel_values": model_inputs["pixel_values"].to(self.dtype),
-                "vlm_position_ids": vlm_position_ids,
-                "proprio_position_ids": state_position_ids,
-                "action_position_ids": action_position_ids,
-                "proprios": state.to(self.dtype),
-                "actions": trajectory.to(self.dtype),
-            }
-            if split_mask:
-                image_text_proprio_mask, action_mask = (
-                    model.split_full_mask_into_submasks(causal_mask)
-                )
-                inputs["image_text_proprio_mask"] = image_text_proprio_mask
-                inputs["action_mask"] = action_mask
-            else:
-                inputs["causal_mask"] = causal_mask
-
-            # sample flow matching timesteps
-            if sample_fm_time:
-                inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
-
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            return inputs
     
         while 1:
             for batch in self.train_dataloader:

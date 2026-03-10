@@ -63,10 +63,14 @@ class DrivePiZero(nn.Module, NoSyncBase):
             self.image_text_hidden_size,
             self.pad_token_id,
         )  # 0.527B parameters
-
+        self.vlm_arch = cfg.mixture.vlm.get("arch", "gemma")
         # Vision
-        self.vision_tower = hydra.utils.instantiate(cfg.vision)
-        self.multi_modal_projector = hydra.utils.instantiate(cfg.vision_projector)
+        if self.vlm_arch == "qwen3_vl":
+            self.vision_tower = hydra.utils.instantiate(cfg.vision)
+            self.multi_modal_projector = nn.Identity()
+        else:
+            self.vision_tower = hydra.utils.instantiate(cfg.vision)
+            self.multi_modal_projector = hydra.utils.instantiate(cfg.vision_projector)
 
         # Mixtures
         self.joint_model = hydra.utils.instantiate(cfg.joint)
@@ -153,9 +157,89 @@ class DrivePiZero(nn.Module, NoSyncBase):
                     gemma_parameters.append(param)
         return gemma_parameters
 
+    @property
+    def trainable_vlm_lm_parameters(self):
+        params = []
+        for name, param in self.joint_model.mixtures["vlm"].named_parameters():
+            if not self._check_vlm_unused_parameter_by_name(name):
+                params.append(param)
+        return params
+
+
+    def _check_vlm_unused_parameter_by_name(self, name: str) -> bool:
+        last = self.joint_model.num_hidden_layers - 1
+        if self.vlm_arch == "qwen3_vl":
+            unused = [
+                f"layers.{last}.post_attention_layernorm",
+                f"layers.{last}.mlp",
+                f"layers.{last}.self_attn.o_proj",
+                f"layers.{last}.self_attn.v_proj",
+            ]
+            return any(x in name for x in unused)
+
+        unused = [
+            f"{last}.post",
+            f"{last}.mlp",
+            f"{last}.self_attn.o_proj",
+            f"{last}.self_attn.v_proj",
+        ]
+        return any(x in name for x in unused)
+        
     @log_execution_time()
     def load_pretrained_weights(self):
         """vision, projector, lm from paligemma"""
+
+        if self.vlm_arch == "qwen3_vl":
+            return self.load_qwen3_pretrained_weights()
+        else:
+            return self.load_paligemma_pretrained_weights()
+    
+    def load_qwen3_pretrained_weights(self):
+        from transformers import Qwen3VLForConditionalGeneration
+
+        hf_model = Qwen3VLForConditionalGeneration.from_pretrained(
+            self.cfg.pretrained_model_path,
+            torch_dtype="auto",
+            device_map="cpu",
+        )
+
+        # 1) embedding
+        self.embed_tokens.load_state_dict(
+            hf_model.model.language_model.embed_tokens.state_dict(),
+            strict=True,
+        )
+
+        # 2) vision
+        self.vision_tower.visual.load_state_dict(
+            hf_model.model.visual.state_dict(),
+            strict=True,
+        )
+
+        # 3) vlm mixture
+        lm_state = hf_model.model.language_model.state_dict()
+        lm_state = {
+            k: v for k, v in lm_state.items()
+            if not k.startswith("embed_tokens.")
+        }
+
+        missing, unexpected = self.joint_model.mixtures["vlm"].load_state_dict(
+            lm_state,
+            strict=False,  # 给 LoRA 留余地
+        )
+
+        unexpected = [k for k in unexpected if "lora_" not in k]
+        missing = [k for k in missing if "lora_" not in k]
+
+        if missing or unexpected:
+            raise RuntimeError(
+                f"Qwen3-VL load mismatch. missing={missing}, unexpected={unexpected}"
+            )
+
+        # 4) lm_head
+        if self.use_lm_head:
+            self.lm_head.weight = self.embed_tokens.weight
+    
+    def load_paligemma_pretrained_weights(self):
         import glob
         import os
 
@@ -279,71 +363,154 @@ class DrivePiZero(nn.Module, NoSyncBase):
     def build_text_cache(self):
         return KVCache()
 
+    def _module_input_dtype(self, module: nn.Module) -> torch.dtype:
+        for param in module.parameters():
+            return param.dtype
+        for buffer in module.buffers():
+            return buffer.dtype
+        return torch.float32
+
+    def _cast_for_module(self, tensor: torch.Tensor, module: nn.Module) -> torch.Tensor:
+        target_dtype = self._module_input_dtype(module)
+        if tensor.dtype == target_dtype:
+            return tensor
+        return tensor.to(dtype=target_dtype)
+
     # ---------- Input preparation ----------#
 
-    def build_causal_mask_and_position_ids(
-        self, attention_mask: torch.Tensor, dtype: torch.dtype
-    ) -> Tuple[torch.FloatTensor]:
-        """
-        block attention --- padding for unused text tokens
+    def _split_contiguous_runs(self, indices: torch.Tensor):
+        if indices.numel() == 0:
+            return []
+        runs = []
+        start = prev = indices[0].item()
+        for idx in indices[1:].tolist():
+            if idx == prev + 1:
+                prev = idx
+            else:
+                runs.append((start, prev))
+                start = prev = idx
+        runs.append((start, prev))
+        return runs
 
-                 img/text img/text img/text (padding) proprio action action
-        img/text    x        x        x
-        img/text    x        x        x
-        img/text    x        x        x
-        (padding)
-        proprio     x        x        x                 x
-        action      x        x        x                 x       x      x
-        action      x        x        x                 x       x      x
-        """
-        bsz = attention_mask.size(0)
-        proprio_start = self.max_image_text_tokens
-        proprio_end = self.max_image_text_tokens + self.num_proprio_tokens
+
+    def build_qwen3_vlm_position_ids(
+        self,
+        input_ids: torch.LongTensor,
+        attention_mask: torch.Tensor,
+        image_grid_thw: Optional[torch.Tensor],
+    ) -> torch.LongTensor:
+        device = input_ids.device
+        bsz, seq_len = input_ids.shape
+
+        text_pos = attention_mask.long().cumsum(-1)
+        text_pos = text_pos.masked_fill(attention_mask == 0, 1)
+
+        # [4, B, L] -> [text, temporal, height, width]
+        position_ids = torch.stack(
+            [text_pos, text_pos.clone(), text_pos.clone(), text_pos.clone()],
+            dim=0,
+        )
+
+        if image_grid_thw is None:
+            return position_ids
+
+        merge_size = self.vision_tower.visual.config.spatial_merge_size
+        image_ptr = 0
+
+        for b in range(bsz):
+            image_token_indices = torch.where(input_ids[b] == self.image_token_index)[0]
+            runs = self._split_contiguous_runs(image_token_indices)
+
+            for start, end in runs:
+                t, h, w = image_grid_thw[image_ptr].tolist()
+                image_ptr += 1
+
+                merged_h = h // merge_size
+                merged_w = w // merge_size
+                expected = t * merged_h * merged_w
+                cur_len = end - start + 1
+                assert cur_len == expected, (
+                    f"image token length mismatch: seq={cur_len}, expected={expected}, "
+                    f"grid={(t, h, w)}, merge_size={merge_size}"
+                )
+
+                t_ids = torch.arange(t, device=device).repeat_interleave(merged_h * merged_w)
+                hw = torch.stack(
+                    torch.meshgrid(
+                        torch.arange(merged_h, device=device),
+                        torch.arange(merged_w, device=device),
+                        indexing="ij",
+                    ),
+                    dim=-1,
+                ).reshape(-1, 2).repeat(t, 1)
+
+                offset = text_pos[b, start]
+                sl = slice(start, end + 1)
+                position_ids[1, b, sl] = offset + t_ids
+                position_ids[2, b, sl] = offset + hw[:, 0]
+                position_ids[3, b, sl] = offset + hw[:, 1]
+
+        return position_ids
+
+    def build_causal_mask_and_position_ids(
+        self,
+        input_ids: torch.LongTensor,
+        attention_mask: torch.Tensor,
+        dtype: torch.dtype,
+        image_grid_thw: Optional[torch.Tensor] = None,
+    ):
+        bsz, image_text_len = attention_mask.shape
+        proprio_start = image_text_len
+        proprio_end = image_text_len + self.num_proprio_tokens
         action_start = proprio_end
+        total_num_tokens = image_text_len + self.num_proprio_tokens + self.num_action_tokens
+
         image_text_token_cnts = torch.sum(attention_mask, dim=1)
         causal_mask = torch.full(
-            (bsz, self.total_num_tokens, self.total_num_tokens),
+            (bsz, total_num_tokens, total_num_tokens),
             torch.finfo(dtype).min,
             dtype=dtype,
-        )  # smallest value, avoid using inf for softmax nan issues with padding
-        for idx, cnt in enumerate(image_text_token_cnts):
-            causal_mask[idx, :cnt, :cnt] = 0  # image/text attend to itself
-            causal_mask[idx, proprio_start:, :cnt] = (
-                0  # proprio/action attend to image/text
-            )
-        causal_mask[:, proprio_start:proprio_end, proprio_start:proprio_end] = (
-            0  # proprio attend to itself
-        )
-        causal_mask[:, action_start:, proprio_start:] = (
-            0  # action attend to itself and proprio
+            device=attention_mask.device,
         )
 
-        # add the head dimension
-        # [Batch_Size, Q_Len, KV_Len] -> [Batch_Size, Num_Heads_Q, Q_Len, KV_Len]
+        for idx, cnt in enumerate(image_text_token_cnts):
+            causal_mask[idx, :cnt, :cnt] = 0
+            causal_mask[idx, proprio_start:, :cnt] = 0
+
+        causal_mask[:, proprio_start:proprio_end, proprio_start:proprio_end] = 0
+        causal_mask[:, action_start:, proprio_start:] = 0
         causal_mask = causal_mask.unsqueeze(1)
 
-        # position ids for each blocks --- start at 1
-        vlm_position_ids = torch.arange(1, self.max_image_text_tokens + 1).repeat(
-            bsz, 1
-        )
-        proprio_position_ids = torch.arange(1, self.num_proprio_tokens + 1).repeat(
-            bsz, 1
-        )
+        if self.vlm_arch == "qwen3_vl":
+            vlm_position_ids = self.build_qwen3_vlm_position_ids(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                image_grid_thw=image_grid_thw,
+            )
+        else:
+            vlm_position_ids = torch.arange(
+                1, image_text_len + 1, device=attention_mask.device
+            ).repeat(bsz, 1)
+
+        proprio_position_ids = torch.arange(
+            1, self.num_proprio_tokens + 1, device=attention_mask.device
+        ).repeat(bsz, 1)
+
         action_position_ids = torch.arange(
             self.num_proprio_tokens + 1,
             self.num_proprio_tokens + self.num_action_tokens + 1,
+            device=attention_mask.device,
         ).repeat(bsz, 1)
-        # since proprio and action share the same mixture weights, makes sense to use [1 (proprio), 2 (action), 3 (action), ...] instead of [1 (proprio), 1 (action), 2 (action), ...]
+
         return causal_mask, vlm_position_ids, proprio_position_ids, action_position_ids
 
     def split_full_mask_into_submasks(
         self, causal_mask: torch.FloatTensor
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
         """split into ones for paligemma and action"""
+        image_text_len = causal_mask.size(-1) - self.num_proprio_tokens - self.num_action_tokens
         image_text_proprio_mask = causal_mask[
-            ...,
-            : self.max_image_text_tokens + self.num_proprio_tokens,
-            : self.max_image_text_tokens + self.num_proprio_tokens,
+            ..., : image_text_len + self.num_proprio_tokens, : image_text_len + self.num_proprio_tokens
         ]
         action_mask = causal_mask[..., -self.num_action_tokens :, :]
         return image_text_proprio_mask, action_mask
@@ -434,10 +601,54 @@ class DrivePiZero(nn.Module, NoSyncBase):
             ]
         return final_embedding
 
+    def _forward_qwen3_and_text_embedding(
+        self,
+        input_ids: torch.LongTensor,
+        pixel_values: torch.Tensor,
+        image_grid_thw: torch.Tensor,
+    ):
+        # 1. 文本 embedding
+        inputs_embeds = self.embed_tokens(input_ids)
+        # 2. 视觉输出
+        vision_outputs = self.vision_tower(pixel_values, image_grid_thw)
+        image_embeds = vision_outputs.vision_features.to(
+            inputs_embeds.device, inputs_embeds.dtype
+        )
+        deepstack_visual_embeds = [
+            x.to(inputs_embeds.device, inputs_embeds.dtype)
+            for x in vision_outputs.deepstack_features
+        ]
+        # 3. 用 image_token_id 位置替换成视觉 embedding
+        visual_pos_masks = (input_ids == self.image_token_index)
+        n_visual_tokens = int(visual_pos_masks.sum().item())
+        assert n_visual_tokens == image_embeds.shape[0], (
+            f"visual token count mismatch: mask={n_visual_tokens}, vision={image_embeds.shape[0]}"
+        )
+        inputs_embeds = inputs_embeds.clone()
+        inputs_embeds[visual_pos_masks] = image_embeds
+
+        return inputs_embeds, deepstack_visual_embeds, visual_pos_masks
+
+    def _forward_vlm_embedding(
+        self,
+        input_ids: torch.LongTensor,
+        pixel_values: torch.Tensor,
+        image_grid_thw: Optional[torch.Tensor] = None,
+    ):
+        if self.vlm_arch == "qwen3_vl":
+            return self._forward_qwen3_and_text_embedding(
+                input_ids=input_ids,
+                pixel_values=pixel_values,
+                image_grid_thw=image_grid_thw,
+            )
+        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+        return inputs_embeds, None, None
+    
     def infer_action(
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.FloatTensor,
+        image_grid_thw: Optional[torch.Tensor],
         image_text_proprio_mask: torch.FloatTensor,
         action_mask: torch.FloatTensor,
         vlm_position_ids: torch.LongTensor,
@@ -446,15 +657,21 @@ class DrivePiZero(nn.Module, NoSyncBase):
         proprios: torch.FloatTensor,
     ) -> torch.FloatTensor:
         dtype, device = pixel_values.dtype, pixel_values.device
-        bsz = pixel_values.size(0)
+        bsz = input_ids.size(0)
 
         kv_caches = self.joint_model.build_mixture_caches()
 
         # merge the text tokens and the image tokens
-        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+        inputs_embeds, deepstack_visual_embeds, visual_pos_masks = self._forward_vlm_embedding(
+            input_ids=input_ids,
+            pixel_values=pixel_values,
+            image_grid_thw=image_grid_thw,
+        )
 
         # proprio
-        proprio_embeds = self.proprio_encoder(proprios)
+        proprio_embeds = self.proprio_encoder(
+            self._cast_for_module(proprios, self.proprio_encoder)
+        )
 
         # forward pass thru the vlm and proprio, cache the kv
         _, kv_caches = self.joint_model(
@@ -469,6 +686,8 @@ class DrivePiZero(nn.Module, NoSyncBase):
             },
             kv_caches=kv_caches,
             return_caches=True,
+            deepstack_visual_embeds=deepstack_visual_embeds,
+            visual_pos_masks=visual_pos_masks,
         )
 
         # sample pure action noise
@@ -482,6 +701,8 @@ class DrivePiZero(nn.Module, NoSyncBase):
         for _ in range(self.num_inference_steps):
             # encode action and time into embedding
             time_cond = self.time_embedding(t)
+            action = self._cast_for_module(action, self.action_encoder)
+            time_cond = self._cast_for_module(time_cond, self.action_encoder)
             # [Batch_Size, Horizon_Steps, Embed_Dim]
             if self.action_expert_adaptive_mode:
                 action_embeds = self.action_encoder(action)
@@ -495,9 +716,14 @@ class DrivePiZero(nn.Module, NoSyncBase):
                 time_cond=time_cond,
                 kv_caches=kv_caches,
                 cache_mode="append_non_active",  # use caches from other mixtures, i.e., vlm and proprio
+                deepstack_visual_embeds=deepstack_visual_embeds,
+                visual_pos_masks=visual_pos_masks,
             )["action"]
             # decode action: [Batch_Size, Horizon_Steps, Action_Dim]
-            action_vel = self.action_decoder(action_embeds)
+            action_vel = self.action_decoder(
+                self._cast_for_module(action_embeds, self.action_decoder)
+            )
+            action_vel = action_vel.to(dtype=action.dtype)
             action += delta_t * action_vel
             t += delta_t
 
@@ -514,6 +740,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.FloatTensor,
+        image_grid_thw: Optional[torch.Tensor],
         causal_mask: torch.FloatTensor,
         vlm_position_ids: torch.LongTensor,
         proprio_position_ids: torch.LongTensor,
@@ -521,15 +748,21 @@ class DrivePiZero(nn.Module, NoSyncBase):
         proprios: torch.FloatTensor,
     ) -> torch.FloatTensor:
         dtype, device = pixel_values.dtype, pixel_values.device
-        bsz = pixel_values.size(0)
+        bsz = input_ids.size(0)
 
         kv_caches = self.joint_model.build_mixture_caches()
 
         # merge the text tokens and the image tokens
-        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+        inputs_embeds, deepstack_visual_embeds, visual_pos_masks = self._forward_vlm_embedding(
+            input_ids=input_ids,
+            pixel_values=pixel_values,
+            image_grid_thw=image_grid_thw,
+        )
 
         # encode proprio
-        proprio_embeds = self.proprio_encoder(proprios)
+        proprio_embeds = self.proprio_encoder(
+            self._cast_for_module(proprios, self.proprio_encoder)
+        )
 
         # sample pure action noise
         action = torch.randn(
@@ -542,6 +775,8 @@ class DrivePiZero(nn.Module, NoSyncBase):
         for _ in range(self.num_inference_steps):
             # encode action and time into embedding
             time_cond = self.time_embedding(t)
+            action = self._cast_for_module(action, self.action_encoder)
+            time_cond = self._cast_for_module(time_cond, self.action_encoder)
             # [Batch_Size, Horizon_Steps, Embed_Dim]
             if self.action_expert_adaptive_mode:
                 action_embeds = self.action_encoder(action)
@@ -562,9 +797,14 @@ class DrivePiZero(nn.Module, NoSyncBase):
                 time_cond=time_cond,
                 kv_caches=kv_caches,
                 cache_mode="no_append",  # no new tokens
+                deepstack_visual_embeds=deepstack_visual_embeds,
+                visual_pos_masks=visual_pos_masks,
             )["action"]
             # decode action: [Batch_Size, Horizon_Steps, Action_Dim]
-            action_vel = self.action_decoder(action_embeds)
+            action_vel = self.action_decoder(
+                self._cast_for_module(action_embeds, self.action_decoder)
+            )
+            action_vel = action_vel.to(dtype=action.dtype)
             action += delta_t * action_vel
             t += delta_t
 
@@ -581,13 +821,18 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.FloatTensor,
+        image_grid_thw: Optional[torch.Tensor],
         attention_mask: torch.Tensor,
         kv_cache: Optional[KVCache] = None,
     ) -> Tuple:
         q_len = input_ids.size(1)
 
         # text tokens + image tokens
-        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+        inputs_embeds, deepstack_visual_embeds, visual_pos_masks = self._forward_vlm_embedding(
+            input_ids=input_ids,
+            pixel_values=pixel_values,
+            image_grid_thw=image_grid_thw,
+        )
 
         # build causal mask and position ids for text
         (
@@ -603,7 +848,9 @@ class DrivePiZero(nn.Module, NoSyncBase):
             embeds_all={"vlm": inputs_embeds},
             kv_caches={"vlm": kv_cache},
             cache_mode="append",  # new tokens for the active mixture
-            final_layer_post_attn_skip_names=[],  # do not skip vlm last layer
+            final_layer_post_attn_skip_names=[],
+            deepstack_visual_embeds=deepstack_visual_embeds,
+            visual_pos_masks=visual_pos_masks,
         )["vlm"]
         logits = self.lm_head(hidden_states)
         output = {
@@ -629,6 +876,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.ByteTensor,
+        image_grid_thw: Optional[torch.Tensor],
         causal_mask: torch.FloatTensor,
         vlm_position_ids: torch.LongTensor,
         proprio_position_ids: torch.LongTensor,
@@ -645,14 +893,22 @@ class DrivePiZero(nn.Module, NoSyncBase):
         psi_t = self.psi_t(x0, x1, t)
 
         # text tokens + image tokens
-        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+        inputs_embeds, deepstack_visual_embeds, visual_pos_masks = self._forward_vlm_embedding(
+            input_ids=input_ids,
+            pixel_values=pixel_values,
+            image_grid_thw=image_grid_thw,
+        )
 
         # proprio
-        proprio_embeds = self.proprio_encoder(proprios)
+        proprio_embeds = self.proprio_encoder(
+            self._cast_for_module(proprios, self.proprio_encoder)
+        )
 
         # inference with noisy action
         # [Batch_Size, Embed_Dim]
         time_cond = self.time_embedding(t)
+        psi_t = self._cast_for_module(psi_t, self.action_encoder)
+        time_cond = self._cast_for_module(time_cond, self.action_encoder)
         # [Batch_Size, Horizon_Steps, Embed_Dim]
         if self.action_expert_adaptive_mode:
             action_embeds = self.action_encoder(psi_t)
@@ -671,11 +927,16 @@ class DrivePiZero(nn.Module, NoSyncBase):
                 "action": action_embeds,
             },
             time_cond=time_cond,
-            kv_caches={},  # no caching during training
+            kv_caches={},
+            deepstack_visual_embeds=deepstack_visual_embeds,
+            visual_pos_masks=visual_pos_masks,
         )["action"]
 
         # [Batch_Size, Horizon_Steps, Action_Dim]
-        v_psi = self.action_decoder(action_embeds)
+        v_psi = self.action_decoder(
+            self._cast_for_module(action_embeds, self.action_decoder)
+        )
+        v_psi = v_psi.to(dtype=x1.dtype)
 
         # compare to true velocity
         d_psi = x1 - (1 - self.flow_sig_min) * x0
@@ -687,6 +948,7 @@ class DrivePiZeroInference(DrivePiZero):
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.FloatTensor,
+        image_grid_thw: Optional[torch.Tensor],
         image_text_proprio_mask: torch.FloatTensor,
         action_mask: torch.FloatTensor,
         vlm_position_ids: torch.LongTensor,
@@ -697,6 +959,7 @@ class DrivePiZeroInference(DrivePiZero):
         return super().infer_action(
             input_ids,
             pixel_values,
+            image_grid_thw,
             image_text_proprio_mask,
             action_mask,
             vlm_position_ids,
@@ -773,7 +1036,12 @@ if __name__ == "__main__":
     if args.loss_only:
         dummy_actions = torch.randn(bsz, config.horizon_steps, config.action_dim)
         causal_mask, vlm_position_ids, proprio_position_ids, action_position_ids = (
-            model.build_causal_mask_and_position_ids(attention_mask, dtype=dtype)
+            model.build_causal_mask_and_position_ids(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                dtype=dtype,
+                image_grid_thw=model_inputs.get("image_grid_thw"),
+            )
         )
         image_text_proprio_mask, action_mask = model.split_full_mask_into_submasks(
             causal_mask
@@ -783,6 +1051,11 @@ if __name__ == "__main__":
             loss = model(
                 input_ids=input_ids.to(device),
                 pixel_values=pixel_values.to(dtype).to(device),
+                image_grid_thw=(
+                    model_inputs["image_grid_thw"].to(device)
+                    if "image_grid_thw" in model_inputs
+                    else None
+                ),
                 causal_mask=causal_mask.to(device),
                 vlm_position_ids=vlm_position_ids.to(device),
                 proprio_position_ids=proprio_position_ids.to(device),
@@ -795,7 +1068,12 @@ if __name__ == "__main__":
         print("Loss:", loss)
     else:  # dummy action generation
         causal_mask, vlm_position_ids, proprio_position_ids, action_position_ids = (
-            model.build_causal_mask_and_position_ids(attention_mask, dtype=dtype)
+            model.build_causal_mask_and_position_ids(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                dtype=dtype,
+                image_grid_thw=model_inputs.get("image_grid_thw"),
+            )
         )
         image_text_proprio_mask, action_mask = model.split_full_mask_into_submasks(
             causal_mask
@@ -804,6 +1082,11 @@ if __name__ == "__main__":
             actions = model.infer_action(
                 input_ids=input_ids.to(device),
                 pixel_values=pixel_values.to(dtype).to(device),
+                image_grid_thw=(
+                    model_inputs["image_grid_thw"].to(device)
+                    if "image_grid_thw" in model_inputs
+                    else None
+                ),
                 image_text_proprio_mask=image_text_proprio_mask.to(device),
                 action_mask=action_mask.to(device),
                 vlm_position_ids=vlm_position_ids.to(device),

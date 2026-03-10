@@ -1,7 +1,7 @@
 import logging
 import os
 import random
-from collections import deque
+from collections import Counter, deque
 
 import bitsandbytes as bnb
 import einops
@@ -15,8 +15,11 @@ from transformers import AutoTokenizer
 import swanlab
 # import wandb
 from src.agent.dataset import Bench2DriveDataset
+from src.agent.drivepi0.input_utils import (
+    build_processor_from_config,
+    prepare_drivepi_inputs,
+)
 from src.model.DrivePi0.drivepi0 import DrivePiZero
-from src.model.DrivePi0.processing import VLAProcessor
 from src.utils.metric import get_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
 from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_billions
@@ -109,6 +112,13 @@ class DrivePiZeroTrainAgent:
             self.dtype = torch.float16
         else:
             self.dtype = torch.float32
+        # Keep parameters in fp32 for training stability; autocast controls compute dtype.
+        self.param_dtype = torch.float32
+        self.amp_dtype = self.dtype if self.use_amp else torch.float32
+        self.use_grad_scaler = self.use_amp and self.amp_dtype == torch.float16
+        self.grad_scaler = torch.amp.GradScaler(
+            "cuda", enabled=self.use_grad_scaler
+        )
         self.model = DrivePiZero(cfg, use_ddp=self.multi_gpu)
         if cfg.resume_checkpoint_path:
             self.load_checkpoint(cfg.resume_checkpoint_path)
@@ -121,7 +131,7 @@ class DrivePiZeroTrainAgent:
         # 如果不训练 VLM，则彻底冻结 VLM 相关权重（vision tower / projector / gemma）
         if not cfg.train_vlm:
             self.model.freeze_vlm_weights()
-        self.model.to(self.dtype)
+        self.model.to(self.param_dtype)
         self.model.to(self.device)
         if cfg.get(
             "use_torch_compile", True
@@ -133,7 +143,10 @@ class DrivePiZeroTrainAgent:
             )
         # modes: https://pytorch.org/docs/main/generated/torch.compile.html
         # backends: https://pytorch.org/docs/stable/torch.compiler.html
-        log.info(f"Using cuda device: {self.device}, dtype: {self.dtype}")
+        log.info(
+            f"Using cuda device: {self.device}, param dtype: {self.param_dtype}, "
+            f"amp dtype: {self.amp_dtype}, grad scaler enabled: {self.use_grad_scaler}"
+        )
         if self.multi_gpu:
             log.info(
                 f"Using {local_world_size} GPUs in each of the {cfg.n_nodes} nodes"
@@ -252,17 +265,62 @@ class DrivePiZeroTrainAgent:
             self.flow_t_max = 1 - cfg.get("flow_sig_min", 0.001)
             self.flow_beta_dist = torch.distributions.Beta(flow_alpha, flow_beta)
 
-        # processor --- assume paligemma for now
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            cfg.pretrained_model_path, padding_side="right"
-        )
-        self.processor = VLAProcessor(
-            self.tokenizer,
-            num_image_tokens=cfg.vision.config.num_image_tokens,
-            max_seq_len=cfg.max_seq_len,
-            tokenizer_padding=cfg.tokenizer_padding,
-        )
+        self.tokenizer, self.processor = build_processor_from_config(cfg)
         print('agent done')
+
+    def _summarize_named_tensor_dtypes(self, tensors):
+        counter = Counter()
+        for _, tensor in tensors:
+            if torch.is_tensor(tensor):
+                counter[str(tensor.dtype)] += 1
+        return dict(counter)
+
+    def _log_dtype_diagnostics(self, model, inputs, loss=None, stage="unknown"):
+        input_summary = self._summarize_named_tensor_dtypes(inputs.items())
+        param_summary = self._summarize_named_tensor_dtypes(model.named_parameters())
+        grad_summary = self._summarize_named_tensor_dtypes(
+            (name, param.grad)
+            for name, param in model.named_parameters()
+            if param.grad is not None
+        )
+
+        log.error(
+            "DType diagnostics at %s | loss dtype=%s | input dtypes=%s | "
+            "param dtypes=%s | grad dtypes=%s",
+            stage,
+            None if loss is None or not torch.is_tensor(loss) else loss.dtype,
+            input_summary,
+            param_summary,
+            grad_summary,
+        )
+
+        suspicious = []
+        for name, param in model.named_parameters():
+            if param.requires_grad and param.dtype != self.param_dtype:
+                suspicious.append(f"{name}: {param.dtype}")
+            if len(suspicious) >= 12:
+                break
+        if suspicious:
+            log.error(
+                "Trainable parameters not in expected param dtype (%s): %s",
+                self.param_dtype,
+                ", ".join(suspicious),
+            )
+
+    def _backward(self, normalized_loss, model, inputs):
+        try:
+            if self.use_grad_scaler:
+                self.grad_scaler.scale(normalized_loss).backward()
+            else:
+                normalized_loss.backward()
+        except RuntimeError:
+            self._log_dtype_diagnostics(
+                model=model,
+                inputs=inputs,
+                loss=normalized_loss,
+                stage="backward",
+            )
+            raise
 
     def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
         if self.flow_sampling == "uniform":  # uniform between 0 and 1
@@ -311,39 +369,19 @@ class DrivePiZeroTrainAgent:
             # images_back = images_back.unsqueeze(1)
             
             images = torch.cat((images_front, images_front_history), dim=1) # cat
-            model_inputs = self.processor(text=texts, images=images)
-
-            # build causal mask and position ids for trajectory
-            causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
-                model.build_causal_mask_and_position_ids(
-                    model_inputs["attention_mask"], self.dtype
-                )
+            t = self.sample_fm_time(len(texts)) if sample_fm_time else None
+            return prepare_drivepi_inputs(
+                model=model,
+                processor=self.processor,
+                texts=texts,
+                images=images,
+                proprios=state,
+                actions=trajectory,
+                dtype=self.dtype,
+                device=self.device,
+                split_mask=split_mask,
+                t=t,
             )
-
-            inputs = {
-                "input_ids": model_inputs["input_ids"],
-                "pixel_values": model_inputs["pixel_values"].to(self.dtype),
-                "vlm_position_ids": vlm_position_ids,
-                "proprio_position_ids": state_position_ids,
-                "action_position_ids": action_position_ids,
-                "proprios": state.to(self.dtype),
-                "actions": trajectory.to(self.dtype),
-            }
-            if split_mask:
-                image_text_proprio_mask, action_mask = (
-                    model.split_full_mask_into_submasks(causal_mask)
-                )
-                inputs["image_text_proprio_mask"] = image_text_proprio_mask
-                inputs["action_mask"] = action_mask
-            else:
-                inputs["causal_mask"] = causal_mask
-
-            # sample flow matching timesteps
-            if sample_fm_time:
-                inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
-
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            return inputs
     
         while 1:
             for batch in self.train_dataloader:
@@ -361,30 +399,62 @@ class DrivePiZeroTrainAgent:
                 # make sure only syncing when taking gradient steps
                 if (cnt_batch + 1) % self.grad_accumulation_steps != 0:
                     with self.model.no_sync():
+                        try:
+                            with torch.autocast(
+                                device_type="cuda",
+                                dtype=self.amp_dtype,
+                                enabled=self.use_amp,
+                            ):
+                                loss_train = self.model(**inputs)
+                        except RuntimeError:
+                            self._log_dtype_diagnostics(
+                                model=model,
+                                inputs=inputs,
+                                stage="forward_no_sync",
+                            )
+                            raise
+                        normalized_loss = loss_train / self.grad_accumulation_steps
+                        self._backward(normalized_loss, model, inputs)
+                else:
+                    try:
                         with torch.autocast(
-                            device_type="cuda", dtype=self.dtype, enabled=self.use_amp
+                            device_type="cuda",
+                            dtype=self.amp_dtype,
+                            enabled=self.use_amp,
                         ):
                             loss_train = self.model(**inputs)
-                        normalized_loss = loss_train / self.grad_accumulation_steps
-                        normalized_loss.backward()
-                else:
-                    with torch.autocast(
-                        device_type="cuda", dtype=self.dtype, enabled=self.use_amp
-                    ):
-                        loss_train = self.model(**inputs)
+                    except RuntimeError:
+                        self._log_dtype_diagnostics(
+                            model=model,
+                            inputs=inputs,
+                            stage="forward_sync",
+                        )
+                        raise
                     normalized_loss = loss_train / self.grad_accumulation_steps
-                    normalized_loss.backward()  # gradients synced
+                    self._backward(normalized_loss, model, inputs)
 
                     # step
+                    if self.use_grad_scaler:
+                        self.grad_scaler.unscale_(self.action_optimizer)
+                        if self.train_vlm:
+                            self.grad_scaler.unscale_(self.vlm_optimizer)
                     torch.nn.utils.clip_grad_norm_(
                         self.trained_parameters,
                         max_norm=self.max_grad_norm,
                     )
-                    self.action_optimizer.step()
+                    if self.use_grad_scaler:
+                        self.grad_scaler.step(self.action_optimizer)
+                    else:
+                        self.action_optimizer.step()
                     self.action_lr_scheduler.step()
                     if self.train_vlm:
-                        self.vlm_optimizer.step()
+                        if self.use_grad_scaler:
+                            self.grad_scaler.step(self.vlm_optimizer)
+                        else:
+                            self.vlm_optimizer.step()
                         self.vlm_lr_scheduler.step()
+                    if self.use_grad_scaler:
+                        self.grad_scaler.update()
                     self.action_optimizer.zero_grad(set_to_none=True)
                     if self.train_vlm:
                         self.vlm_optimizer.zero_grad(set_to_none=True)

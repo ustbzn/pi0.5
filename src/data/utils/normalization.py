@@ -43,8 +43,7 @@ class Normalize:
 
         # load statistics
         with open(self.percentile_path, "r") as f:
-            loaded_data = json.load(f)
-
+            loaded_data = json.load(f)[self.norm_mode]
         # 分位数参数（原始实现）
         self.speed_01 = loaded_data["speed"][0]
         self.speed_99 = loaded_data["speed"][1]

@@ -13,9 +13,10 @@
 export TZ='UTC-8'
 # SwanLab 配置
 export WANDB_DISABLED=true
-export SWANLAB_API_KEY='WIuVGDGJJcxnKEAis5knC'
+export SWANLAB_API_KEY='5YLUJOR3L43LgMRceLZDh'
 # 保存路径
-export LOG_DIR="/D2/NXT/vlm/miaobinqi/DriveMoE/logs"
+export LOG_DIR="/D2/NXT/vlm/liqinbu/VLA/Drive_pi/log"
+export PYTHONPATH="/D2/NXT/vlm/liqinbu/VLA/Drive_pi:$PYTHONPATH"
 
 # GPU check
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
@@ -23,7 +24,7 @@ NUM_GPU="$(nvidia-smi --list-gpus | wc -l)"
 # NUM_GPU=1
 echo "NUM_GPU=$NUM_GPU"
 # 配置文件
-BASE_CONFIG="base_nuscene.yaml"
+BASE_CONFIG="base_qwen3.yaml"
 
 export MASTER_ADDR=$(scontrol show hostname ${SLURM_NODELIST} | head -n 1)
 find_free_port() {
