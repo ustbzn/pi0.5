@@ -18,7 +18,7 @@ import codecs
 from proto.common.localization_pb2 import Localization
 from proto.common.trajectory_pb2 import Trajectory, TrajectoryPoint
 from proto.common.sensor_meta_pb2 import RegisteredSensor
-from proto.common.routing_pb2 import  RoutingRequest, RoutingResult, RoutePath, RouteRoad, RouteLink, RouteSection, RouteLane, RouteRoadLink
+from proto.common.routing_pb2 import  RoutingRequest, RoutingResult, RoutePath, RouteRoad, RouteLink, RouteSection, RouteLane, RouteRoadLink, Waypoint
 from proto.common.hadmap_pb2 import LaneLink, LaneType
 from proto.common.geometry_pb2 import Point
 from google.protobuf import text_format
@@ -444,9 +444,6 @@ class BagDataHandler:
             len(self.valid_timestamps), len(self.sampled_2hz_timestamps)))
         
 
-
-
-
     def parse_routing(self):
         """
         核心流程：解析路由→提取稀疏点→统计路口→匹配自车到路口的路径距离
@@ -628,8 +625,33 @@ class BagDataHandler:
                         junc_data["lane_start"] = min(junc_data["lane_start"], lane_id) if not math.isnan(junc_data["lane_start"]) else lane_id
                         junc_data["lane_end"] = max(junc_data["lane_end"], lane_id) if not math.isnan(junc_data["lane_end"]) else lane_id
 
-        # ========== 第三步：封装路口信息（按正序索引排序） ==========
+        # ========== 第三步：封装路口以及终点信息（按正序索引排序） ==========
+        closest_roadlink_idx = None
+        min_straight_dist = float('inf')
+        end_point = self.route_result.end.pose
+        dir_x = sparse_points[-1]["x"] - end_point.x
+        dir_y = sparse_points[-1]["y"] - end_point.y
+        for p in sparse_points:
+            dx = p["x"] - end_point.x
+            dy = p["y"] - end_point.y
+            dot_product = dir_x * dx + dir_y * dy   
+            if dot_product <= 1e-6:
+                continue
+                
+            straight_dist = math.hypot(dx, dy)
+            if straight_dist < min_straight_dist:
+                min_straight_dist = straight_dist
+                closest_roadlink_idx = p["roadlink_idx"]
+        
         junction_list = []
+        junction_list.append({
+            "action": "park",
+            "x": end_point.x,
+            "y": end_point.y,
+            "lane_start": 1,
+            "lane_end": 1,
+            "roadlink_idx": closest_roadlink_idx 
+        })
         for junc_data in lane_junction_map.values():
             junction_list.append({
                 "action": junc_data["action"],
@@ -677,8 +699,6 @@ class BagDataHandler:
                 matched_junctions.append(["None", math.nan, math.nan, math.nan])
 
             self.high_order_intent.append(matched_junctions)
-
-
 
 
 
