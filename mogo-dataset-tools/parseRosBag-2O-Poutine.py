@@ -146,10 +146,12 @@ class BagDataHandler:
         # bag 文件路径
         self.bags_file_master = None
         self.bags_file_105 = None
+        self.bags_file_routing = None
 
         # 已打开的 bag
         self.master_bag = None
         self.slave_105_bag = None
+        self.routing_bag = None
 
         # 相机相关
         self.camera_topic_dict = {}
@@ -222,6 +224,9 @@ class BagDataHandler:
                     self.bags_file_master = fp
                 elif "-rosslave-" in filename:
                     self.bags_file_105 = fp
+                elif "routing_result" in filename:
+                    print("[INFO] Find Routing Bag!!!")
+                    self.bags_file_routing = fp
 
         if not self.bags_file_master or not self.bags_file_105:
             raise IOError("未找到指定Bag文件")
@@ -242,6 +247,12 @@ class BagDataHandler:
             if self.master_bag is not None:
                 self.master_bag.close()
             raise RuntimeError("打开Slave105 Bag失败：{}".format(e))
+        
+        try:
+            self.routing_bag = rosbag.Bag(self.bags_file_routing, "r")
+        except Exception as e:
+            raise RuntimeError("打开Routing Bag失败：{}".format(e))
+
 
     def _check_and_find_sequence_files(self):
         """检查目录并查找 action_sequence.txt 和 scenario_sequence.txt 文件"""
@@ -509,7 +520,7 @@ class BagDataHandler:
         - 目标roadlink_idx > 当前roadlink_idx → 目标在自车前方（有效）
         """
         # 基础配置
-        assert self.master_bag is not None, "master_bag未初始化！"
+        assert self.routing_bag is not None, "master_bag未初始化！"
         MAX_PATH_DISTANCE = 400.0  # 路径距离阈值（米）
         MAX_MATCH_JUNCTION = 2     # 最多匹配2个路口
 
