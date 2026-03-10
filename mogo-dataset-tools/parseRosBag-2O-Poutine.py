@@ -17,10 +17,10 @@ import base64
 import codecs
 from proto.common.localization_pb2 import Localization
 from proto.common.trajectory_pb2 import Trajectory, TrajectoryPoint
-from proto.common.sensor_meta_pb2 import RegisteredSensor
+# from proto.common.sensor_meta_pb2 import RegisteredSensor
+from proto.common.geometry_pb2 import Point
 from proto.common.routing_pb2 import  RoutingRequest, RoutingResult, RoutePath, RouteRoad, RouteLink, RouteSection, RouteLane, RouteRoadLink, Waypoint
 from proto.common.hadmap_pb2 import LaneLink, LaneType
-from proto.common.geometry_pb2 import Point
 from google.protobuf import text_format
 
 # 计算header时间戳（秒）

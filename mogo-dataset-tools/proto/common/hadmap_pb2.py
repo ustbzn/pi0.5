@@ -13,8 +13,8 @@ from google.protobuf import symbol_database as _symbol_database
 _sym_db = _symbol_database.Default()
 
 
-import header_pb2 as header__pb2
-import geometry_pb2 as geometry__pb2
+import proto.common.header_pb2 as header__pb2
+import proto.common.geometry_pb2 as geometry__pb2
 
 
 DESCRIPTOR = _descriptor.FileDescriptor(
