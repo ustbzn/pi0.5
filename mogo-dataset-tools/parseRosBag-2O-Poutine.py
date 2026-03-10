@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-python3 /D2/NXT/vlm/miaobinqi/Senna/mogo_test/mogo-dataset-tools/parseRosBag-2O_py27.py /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags
+python3 /D2/NXT/vlm/miaobinqi/Senna/mogo_test/mogo-dataset-tools/parseRosBag-2O_Poutine.py /D2/NXT/vlm/dataset/MOGO/test_data/2O-bags
 """
 import sys
 import os
@@ -14,6 +14,10 @@ import numpy as np
 import rosbag
 import base64
 import codecs
+import cv2
+from typing import Any, Dict, List, Tuple, Optional
+from cv_bridge import CvBridge
+from proto.common.header_pb2 import Header
 from proto.common.localization_pb2 import Localization
 from proto.common.trajectory_pb2 import Trajectory, TrajectoryPoint
 # from proto.common.sensor_meta_pb2 import RegisteredSensor
@@ -148,6 +152,7 @@ class BagDataHandler:
         self.slave_105_bag = None
 
         # 相机相关
+        self.camera_topic_dict = {}
         self.camera_cache = {}
 
         # 定位相关
@@ -189,6 +194,14 @@ class BagDataHandler:
             except OSError:
                 if not os.path.isdir(self.json_samples_dir):
                     raise
+        else:
+            for filename in os.listdir(self.json_samples_dir):
+                file_path = os.path.join(self.json_samples_dir, filename)
+                if os.path.isfile(file_path):
+                    try:
+                        os.remove(file_path)  # 删除文件
+                    except Exception as e:
+                        print("[WARN] 删除文件失败 {}: {}".format(file_path, str(e)))
 
         self._check_and_find_bags()
         self._open_bags()
@@ -297,6 +310,52 @@ class BagDataHandler:
             print("[WARN] scenario_sequence.txt 文件路径为空，跳过打开")
 
     # ---------------- public APIs ----------------
+    def parse_cameras(self):
+        """
+        解析相机 topic，并将图片写入工作目录下的各相机子目录.
+        """
+        assert self.slave_105_bag is not None
+
+        slave_105_topics = self.slave_105_bag.get_type_and_topic_info()[1].keys()
+        print("[INFO] Slave105 Bag的topic：{}".format(slave_105_topics))
+        for topic in slave_105_topics:
+            if "/sensor/camera" in topic and "resize" in topic:
+                print("[INFO] camera topic is: {}".format(topic))
+                if "image_raw_120" in topic or "front" in topic:
+                    self.camera_topic_dict["front"] = topic
+                elif "front_left" in topic:
+                    self.camera_topic_dict["front_left"] = topic
+                elif "front_right" in topic:
+                    self.camera_topic_dict["front_right"] = topic
+                elif "image_raw_left_back" in topic:
+                    self.camera_topic_dict["left_back"] = topic
+                elif "image_raw_right_back" in topic:
+                    self.camera_topic_dict["right_back"] = topic
+                elif "image_raw_back" in topic or "back" in topic:
+                    self.camera_topic_dict["back"] = topic
+                elif "left" in topic:
+                    self.camera_topic_dict["left"] = topic
+                elif "right" in topic:
+                    self.camera_topic_dict["right"] = topic
+                
+        bridge = CvBridge()
+        for key in self.camera_topic_dict.keys():
+            for topic, msg, t in self.slave_105_bag.read_messages(self.camera_topic_dict[key]):
+                if topic.endswith("nvjpeg"):
+                    cv_image = bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
+                else:
+                    cv_image = bridge.imgmsg_to_cv2(msg, "bgr8")
+                camera_dir = os.path.join(self.bag_dir, key)
+                if not os.path.exists(camera_dir):
+                    os.makedirs(camera_dir, exist_ok=True)
+                ts = msg.header.stamp.to_sec()
+                timestr = "%.9f" % ts                
+                camera_path = os.path.join(camera_dir, timestr + ".jpg")
+                cv2.imwrite(camera_path, cv_image)
+
+        print("[INFO] 相机解析完成：共{len(self.camera_topic_dict)}路相机")
+
+
     def load_existing_cameras(self):
         """
         从已存在的相机图像目录加载图像路径和时间戳。
@@ -1480,7 +1539,7 @@ class BagDataHandler:
 
     def run(self):
         # 主逻辑
-        # 加载已存在的相机图像（不再从bag解析）
+        self.parse_cameras()
         self.load_existing_cameras()
         # 图片按时间戳拼帧
         self.align_camera_cache_by_front()
@@ -1542,7 +1601,7 @@ if __name__ == '__main__':
     
     print("[INFO] 找到 {} 个bag文件夹".format(len(bag_dirs)))
     
-    # 依次处理每个bag文件夹（暂时只处理第一个）
+    # 依次处理每个bag文件夹
     for idx, bag_dir in enumerate(sorted(bag_dirs), 1):
         print("\n" + "="*80)
         print("[INFO] 处理第 {}/{} 个bag文件夹: {}".format(idx, len(bag_dirs), bag_dir))
@@ -1559,10 +1618,6 @@ if __name__ == '__main__':
             traceback.print_exc()
             print("[WARN] 继续处理下一个bag文件夹...")
             continue
-        
-        # 暂时只处理第一个bag文件夹
-        # print("[INFO] 暂时只处理第一个bag文件夹，退出")
-        # break
     
     print("\n" + "="*80)
     print("[INFO] 处理完成！")
