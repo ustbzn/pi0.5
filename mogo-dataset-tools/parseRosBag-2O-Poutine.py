@@ -549,29 +549,48 @@ class BagDataHandler:
             from_junc = lane_link.from_junction if lane_link.HasField("from_junction") else False
             to_junc = lane_link.to_junction if lane_link.HasField("to_junction") else False
             return f"{from_road}_{to_road}_{from_junc}_{to_junc}"
+        
+        def is_point_behind_ego(ego_x: float, ego_y: float, ego_yaw: float, 
+                        target_x: float, target_y: float) -> bool:
+            """
+            判断目标点是否在自车后方（适配：yaw=0正东，逆时针为正的ENU坐标系）
+            :param ego_x: 自车定位点x坐标（东向）
+            :param ego_y: 自车定位点y坐标（北向）
+            :param ego_yaw: 自车朝向角（弧度，yaw=0正东，逆时针增大）
+            :param target_x: 目标点x坐标（东向）
+            :param target_y: 目标点y坐标（北向）
+            :return: True=在后方，False=在前方/侧前方/重合
+            """
+            dx = target_x - ego_x
+            dy = target_y - ego_y
+
+            if math.hypot(dx, dy) < 1e-6:
+                return False
+            target_azimuth = math.atan2(dy, dx)
+
+            delta_angle = target_azimuth - ego_yaw
+            delta_angle = math.atan2(math.sin(delta_angle), math.cos(delta_angle))  # 归一化
+
+            if abs(delta_angle) > math.pi / 2:
+                return True  # 后方（左后方/右后方）
+            else:
+                return False  # 前方（正前方/左前方/右前方）
  
-        def calculate_path_distance(index, current_loc, tar_junction):
+        def calculate_path_distance(index, current_location, tar_junction):
             """
             计算自车到目标roadlink的路径距离（正序索引逻辑）
             :param current_loc: 自车当前位置（x/y）
             :param tar_junction: 目标路口信息字典（含roadlink_idx/action等）
             :return: 路径距离（米），无效返回nan
             """
+            current_loc = current_location.position
             target_roadlink_idx = tar_junction["roadlink_idx"]
             if not sparse_points or target_roadlink_idx not in roadlink_length_map:
                 return math.nan
             
             has_direction = False
-            dir_x, dir_y = 0.0, 0.0
-            if len(self.sampled_2hz_locations) >= 2 and index >= 1:
-                prev_loc = self.sampled_2hz_locations[index-1].position
-                dir_x = current_loc.x - prev_loc.x
-                dir_y = current_loc.y - prev_loc.y
-                dir_norm = math.hypot(dir_x, dir_y)
-                if dir_norm > 1e-6 and tar_junction["action"] != "u turn":
-                    dir_x /= dir_norm
-                    dir_y /= dir_norm
-                    has_direction = True
+            if tar_junction["action"] != "u turn":
+                has_direction = True
             
             closest_roadlink_idx = None
             min_straight_dist = float('inf')
@@ -580,8 +599,8 @@ class BagDataHandler:
                 dx = p["x"] - current_loc.x
                 dy = p["y"] - current_loc.y
                 if has_direction:
-                    dot_product = dir_x * dx + dir_y * dy   
-                    if dot_product <= 1e-6:  # 后方/侧后方点 → 跳过
+                    is_point_behind = is_point_behind_ego(current_loc.x, current_loc.y, current_location.yaw, p["x"], p["y"])
+                    if is_point_behind:  # 后方/侧后方点 → 跳过
                         continue
                 
                 straight_dist = math.hypot(dx, dy)
@@ -593,22 +612,31 @@ class BagDataHandler:
             if closest_roadlink_idx is None:
                 return math.nan
             
-            if target_roadlink_idx < closest_roadlink_idx and closest_roadlink_type == "route_road":
+            if target_roadlink_idx < closest_roadlink_idx:
                 return math.nan
             
-            if closest_roadlink_type == "route_link" and closest_roadlink_idx == target_roadlink_idx:
-                return 0.1
             
             current_road_end_point = next(
-                (p for p in sparse_points if p["type"] == "route_road" and p["roadlink_idx"] == closest_roadlink_idx),
+                (p for p in sparse_points if p["type"] == closest_roadlink_type and p["roadlink_idx"] == closest_roadlink_idx),
                 None
             )
+
+            if closest_roadlink_idx == target_roadlink_idx and closest_roadlink_type == "route_link":
+                current_road_end_point = next(
+                (p for p in sparse_points if p["type"] == "route_road" and p["roadlink_idx"] == closest_roadlink_idx - 1),
+                None) 
+            elif closest_roadlink_type == "route_link":
+                current_road_end_point = next(
+                (p for p in sparse_points if p["type"] == "route_road" and p["roadlink_idx"] == closest_roadlink_idx + 1),
+                None) 
+
+
 
             current_offset = 0.0
             if current_road_end_point:
                 dx = current_road_end_point["x"] - current_loc.x
                 dy = current_road_end_point["y"] - current_loc.y
-                current_offset = math.hypot(dx, dy)  # 自车到当前road终点的距离
+                current_offset = math.hypot(dx, dy)
             
             path_dist_sum = 0.0
             for idx in range(closest_roadlink_idx + 1, target_roadlink_idx + 1):
@@ -619,12 +647,15 @@ class BagDataHandler:
             final_dist = max(0.0, final_dist)
             if closest_roadlink_idx == target_roadlink_idx:
                 final_dist = current_offset
+            
+            if closest_roadlink_type == "route_link" and closest_roadlink_idx == target_roadlink_idx:
+                return -1 * final_dist
 
             return final_dist
 
         # ========== 第一步：解析路由数据 ==========
         self.route_result = None
-        for topic, msg, time_stamp in self.master_bag.read_messages(topics=["/hadmap_engine/route_result_msg"]):
+        for topic, msg, time_stamp in self.routing_bag.read_messages(topics=["/hadmap_engine/route_result_msg"]):
             try:
                 route_roads = RoutingResult()  
                 route_roads.ParseFromString(msg.data)
@@ -650,51 +681,51 @@ class BagDataHandler:
             self.high_order_intent = [empty_junction for _ in self.sampled_2hz_locations]
             return
 
-        first_path = self.route_result.paths[0]
-        for roadlink_idx, roadlink in enumerate(first_path.route_roadlinks):
-            if roadlink.route_links and len(roadlink.route_links) > 0:
-                first_link = roadlink.route_links[0]
-                if first_link.geom and len(first_link.geom) > 0:
-                    link_last_point = first_link.geom[-1]
+        for path in self.route_result.paths:
+            for roadlink_idx, roadlink in enumerate(path.route_roadlinks):
+                if roadlink.route_links and len(roadlink.route_links) > 0:
+                    first_link = roadlink.route_links[0]
+                    if first_link.geom and len(first_link.geom) > 0:
+                        link_last_point = first_link.geom[-1]
+                        sparse_points.append({
+                            "type": "route_link",
+                            "roadlink_idx": roadlink_idx,  
+                            "x": link_last_point.x,
+                            "y": link_last_point.y
+                        })
+
+                if roadlink.HasField("route_road") and roadlink.route_road.geom and len(roadlink.route_road.geom) > 0:
+                    road_last_point = roadlink.route_road.geom[-1]
                     sparse_points.append({
-                        "type": "route_link",
-                        "roadlink_idx": roadlink_idx,  
-                        "x": link_last_point.x,
-                        "y": link_last_point.y
+                        "type": "route_road",
+                        "roadlink_idx": roadlink_idx,
+                        "x": road_last_point.x,
+                        "y": road_last_point.y
                     })
+                    roadlink_length_map[roadlink_idx] = roadlink.route_road.length if roadlink.route_road.HasField("length") else 0.0
 
-            if roadlink.HasField("route_road") and roadlink.route_road.geom and len(roadlink.route_road.geom) > 0:
-                road_last_point = roadlink.route_road.geom[-1]
-                sparse_points.append({
-                    "type": "route_road",
-                    "roadlink_idx": roadlink_idx,
-                    "x": road_last_point.x,
-                    "y": road_last_point.y
-                })
-                roadlink_length_map[roadlink_idx] = roadlink.route_road.length if roadlink.route_road.HasField("length") else 0.0
+                for lane_link in roadlink.route_links:
+                    if lane_link.type not in target_lane_types:
+                        continue
 
-            for lane_link in roadlink.route_links:
-                if lane_link.type not in target_lane_types:
-                    continue
+                    lane_id = lane_link.from_lane_id if lane_link.HasField("from_lane_id") else math.nan
+                    junc_id = get_junction_unique_id(lane_link)
 
-                lane_id = lane_link.from_lane_id if lane_link.HasField("from_lane_id") else math.nan
-                junc_id = get_junction_unique_id(lane_link)
-
-                if junc_id not in lane_junction_map:
-                    first_geom = lane_link.geom[0] if lane_link.geom else Point()
-                    lane_junction_map[junc_id] = {
-                        "action": ACTION_MAP.get(lane_link.type, "unknown"),
-                        "x": first_geom.x,
-                        "y": first_geom.y,
-                        "lane_start": lane_id,
-                        "lane_end": lane_id,
-                        "roadlink_idx": roadlink_idx
-                    }
-                else:
-                    if not math.isnan(lane_id):
-                        junc_data = lane_junction_map[junc_id]
-                        junc_data["lane_start"] = min(junc_data["lane_start"], lane_id) if not math.isnan(junc_data["lane_start"]) else lane_id
-                        junc_data["lane_end"] = max(junc_data["lane_end"], lane_id) if not math.isnan(junc_data["lane_end"]) else lane_id
+                    if junc_id not in lane_junction_map:
+                        first_geom = lane_link.geom[0] if lane_link.geom else Point()
+                        lane_junction_map[junc_id] = {
+                            "action": ACTION_MAP.get(lane_link.type, "unknown"),
+                            "x": first_geom.x,
+                            "y": first_geom.y,
+                            "lane_start": lane_id,
+                            "lane_end": lane_id,
+                            "roadlink_idx": roadlink_idx
+                        }
+                    else:
+                        if not math.isnan(lane_id):
+                            junc_data = lane_junction_map[junc_id]
+                            junc_data["lane_start"] =  max(junc_data["lane_start"], lane_id) if not math.isnan(junc_data["lane_start"]) else lane_id
+                            junc_data["lane_end"] = min(junc_data["lane_end"], lane_id) if not math.isnan(junc_data["lane_end"]) else lane_id
 
         # ========== 第三步：封装路口以及终点信息（按正序索引排序） ==========
         closest_roadlink_idx = None
@@ -719,8 +750,8 @@ class BagDataHandler:
             "action": "park",
             "x": end_point.x,
             "y": end_point.y,
-            "lane_start": 1,
-            "lane_end": 1,
+            "lane_start": -1,
+            "lane_end": -1,
             "roadlink_idx": closest_roadlink_idx 
         })
         for junc_data in lane_junction_map.values():
@@ -728,8 +759,8 @@ class BagDataHandler:
                 "action": junc_data["action"],
                 "x": junc_data["x"],
                 "y": junc_data["y"],
-                "lane_start": junc_data["lane_start"],
-                "lane_end": junc_data["lane_end"],
+                "lane_start": -1 * junc_data["lane_start"],
+                "lane_end": -1 * junc_data["lane_end"],
                 "roadlink_idx": junc_data["roadlink_idx"] 
             })
 
@@ -738,12 +769,11 @@ class BagDataHandler:
         # ========== 第四步：匹配自车到路口的路径距离（正序逻辑） ==========
         self.high_order_intent = []
         for index, current_loc in enumerate(self.sampled_2hz_locations):
-            curr_position = current_loc.position
             matched_junctions = []
             candidate_junctions = []
 
             for junc in junction_list:
-                path_dist = calculate_path_distance(index, curr_position, junc)
+                path_dist = calculate_path_distance(index, current_loc, junc)
                 
                 if math.isnan(path_dist) or path_dist > MAX_PATH_DISTANCE:
                     continue
