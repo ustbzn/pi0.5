@@ -1368,6 +1368,48 @@ class BagDataHandler:
                     print("[ERROR] 保存样本失败：{}".format(e))
 
         print("[INFO] JSON样本生成完成：共 {} 个样本".format(sample_idx))
+    
+
+
+    def generate_navigation_strings(self, nav_intent):
+        """
+        生成适合自然语言模型输入的核心字符串列表（车道格式：1st lane to 2nd (left to right) are passable）
+        :param nav_intent: 原始导航意图列表
+        :return: [str1, str2]
+        """
+        def get_ordinal(num):
+            """将数字转为序数词（1→1st，2→2nd，3→3rd，4+→4th）"""
+            num = int(num)
+            if 10 <= num % 100 <= 20:
+                suffix = 'th'
+            else:
+                suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(num % 10, 'th')
+            return f"{num}{suffix}"
+        core_str_list = []
+        for idx, nav_item in enumerate(nav_intent):
+            action = nav_item[0] if len(nav_item) > 0 else "None"
+            distance = nav_item[1] if len(nav_item) > 1 else math.nan
+            lane_start = nav_item[2] if len(nav_item) > 2 else math.nan
+            lane_end = nav_item[3] if len(nav_item) > 3 else math.nan
+
+            action_str = f"Navigation action is {action}" if action != "None" else "Action is None"
+            
+            if isinstance(distance, float) and math.isnan(distance):
+                distance_str = "Distance to junction (meters) is unavailable"
+            else:
+                distance_str = f"Distance to junction (meters) is {distance}"
+            
+            if isinstance(lane_start, float) and math.isnan(lane_start) or isinstance(lane_end, float) and math.isnan(lane_end):
+                lane_str = "Lane information is unavailable"
+            else:
+                ord_start = get_ordinal(lane_start)
+                ord_end = get_ordinal(lane_end)
+                lane_str = f"{ord_start} lane to {ord_end} (left to right) are passable"
+            
+            intent_str = f"Intent {idx}: {action_str}, {distance_str}, {lane_str}"
+            core_str_list.append(intent_str)
+        
+        return core_str_list
 
     def _create_sample_data(self, current_ts, action_dict, scenario_dict, front_ts_for_image=None):
         """
@@ -1392,6 +1434,10 @@ class BagDataHandler:
             # 回退到原始数据
             current_loc = self.valid_locations[loc_idx]
             current_ts_loc = self.valid_timestamps[loc_idx]
+
+        if self.high_order_intent:
+            current_navigation_str = self.generate_navigation_strings(self.high_order_intent[loc_idx])
+
 
         if hasattr(current_loc, 'position') and current_loc.position:
             ego_utm_x = current_loc.position.x
@@ -1562,6 +1608,11 @@ class BagDataHandler:
 
         sample_data['meta_action'] = meta_action
         sample_data['scenario_type'] = scenario_type
+
+        # 导航信息
+        sample_data['navigation_command'] = self.high_order_intent[loc_idx]
+        sample_data['navigation_command_descreption'] = current_navigation_str
+
 
         return sample_data
 
