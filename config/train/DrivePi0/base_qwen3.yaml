@@ -12,10 +12,35 @@ name: drive-pi0
 device: cuda
 n_nodes: 1
 seed: 42
-pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/Qwen3-VL-2B-Instruct   # You need to set path
+
+# ===== Model loading rules =====
+# 1) New training from the Qwen3-VL base model:
+#    - pretrained_model_path: directory of the original HF / local Qwen3-VL model
+#    - load_pretrained_weights: True
+#    - resume_checkpoint_path: leave empty
+#
+# 2) Resume training from your own DrivePi checkpoint (*.pt):
+#    - pretrained_model_path: keep pointing to the original Qwen3-VL model directory
+#      (processor/tokenizer/base architecture still depend on this path)
+#    - load_pretrained_weights: usually keep True; train.py will prefer
+#      resume_checkpoint_path when it is not empty
+#    - resume_checkpoint_path: set to your saved checkpoint, e.g.
+#      /path/to/logs/train/drive-pi0/<run_name>/checkpoint/stepXXXX.pt
+#
+# 3) Evaluation / inference:
+#    - do NOT put your *.pt file into pretrained_model_path
+#    - use the matching inference config, e.g.
+#      config/inference/DrivePi0/base_qwen3.yaml
+#    - set checkpoint_path there to your saved *.pt file
+#
+# In short:
+#   pretrained_model_path = original pretrained model directory
+#   resume_checkpoint_path = your own training checkpoint for continuing training
+#   checkpoint_path (in inference config) = your own training checkpoint for eval/inference
+pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/Qwen3-VL-2B-Instruct   # Base Qwen3-VL model directory, NOT your fine-tuned .pt file
 load_pretrained_weights: True
-resume_checkpoint_path: 
-# resume_checkpoint_path: ${current_dir}/checkpoint
+resume_checkpoint_path:
+# resume_checkpoint_path: ${current_dir}/logs/train/drive-pi0/<run_name>/checkpoint/stepXXXX.pt
 train_vlm: True
 action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
 use_torch_compile: True

@@ -5,11 +5,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
-# You can either edit the defaults below or override them at runtime, e.g.
-# CHECKPOINT_PATH=/path/to/step.pt OUTPUT_DIR=/tmp/nuscene_infer bash script/evaluation/run_nuscene_inference_and_visualization.sh
+# You can either edit the defaults below or override them at runtime.
+# If your checkpoint was trained with Qwen3-VL, set:
+#   CONFIG_PATH=config/inference/DrivePi0/base_qwen3.yaml
+# Example:
+#   CONFIG_PATH=config/inference/DrivePi0/base_qwen3.yaml \
+#   OUTPUT_DIR=/tmp/nuscene_infer \
+#   bash script/evaluation/run_nuscene_inference_and_visualization.sh
 
 GPU_ID="${GPU_ID:-0}"
-CONFIG_PATH="${CONFIG_PATH:-config/inference/DrivePi0/base_nuscene.yaml}"
+CONFIG_PATH="${CONFIG_PATH:-config/inference/DrivePi0/base_qwen3.yaml}"
 VAL_DATA_DIR="${VAL_DATA_DIR:-datasets/nuscene-0111/val}"
 STATISTIC_PATH="${STATISTIC_PATH:-datasets/nuscene-0111/statistics.json}"
 OUTPUT_DIR="${OUTPUT_DIR:-datasets/nuscene-0111/inference/run1}"

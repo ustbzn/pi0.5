@@ -1,0 +1,153 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivepi0.eval.DrivePiZeroEvalAgent
+
+current_dir: /D2/NXT/vlm/liqinbu/VLA/Drive_pi  # You need to set path
+log_dir: ${oc.env:LOG_DIR}/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
+name: drive-pi0
+device: cuda
+gpu_id: 0
+n_nodes: 1
+seed: 42
+action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
+quantize: False
+lora: False
+lora_r: 32
+lora_dropout: 0.0
+
+# ===== Model loading rules for evaluation / inference =====
+# pretrained_model_path:
+#   directory of the original Qwen3-VL model. This is still needed at eval time
+#   because tokenizer / processor / base model architecture are created from it.
+#
+# checkpoint_path:
+#   your own fine-tuned DrivePi checkpoint (*.pt), usually produced under
+#   logs/train/drive-pi0/<run_name>/checkpoint/stepXXXX.pt
+#
+# Do NOT put your fine-tuned *.pt file into pretrained_model_path.
+pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/Qwen3-VL-2B-Instruct  # Base Qwen3-VL model directory, NOT your fine-tuned .pt file
+checkpoint_path: /D2/NXT/vlm/liqinbu/VLA/Drive_pi/log/train/drive-pi0/2026-03-21_02-09_nuscene_0111/checkpoint/step920.pt  # Your fine-tuned DrivePi checkpoint (.pt)
+
+# 归一化方法: percentile_clip, percentile, minmax
+norm_mode: percentile
+
+data:
+  statistics_path: ${current_dir}/${data.dynamic_dir}/statistics.json
+  use_fixed_images: False
+  dynamic_dir: datasets/nuscene-0111
+  work_dir: ${current_dir}
+  split: val
+  num_of_action_experts: 13
+  shuffle_buffer_size: 200000
+  norm_mode: ${norm_mode}
+
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+device_batch_size: 32
+
+num_workers: 6
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0
+debug: False
+save_trajectories: True
+
+cond_steps: 5
+horizon_steps: 7
+action_dim: 2
+proprio_dim: 10
+state_dim: ${proprio_dim}
+max_seq_len: 2048
+tokenizer_padding: longest
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:
+    arch: qwen3_vl
+    hidden_size: 2048
+    intermediate_size: 6144
+    hidden_act: silu
+    use_final_norm: True
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:
+    scale_input_embeds: False
+    rope_scaling:
+      rope_type: default
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+  proprio:
+    arch: qwen3_vl
+    hidden_size: 2048
+    intermediate_size: 6144
+    hidden_act: silu
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+    scale_input_embeds: True
+  action:
+    arch: qwen3_vl
+    hidden_size: 2048
+    intermediate_size: 6144
+    hidden_act: silu
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+    scale_input_embeds: True
+
+time_hidden_size: 256
+
+image_token_index: 151655
+vocab_size: 151936
+pad_token_id: 151643
+
+vision:
+  _target_: src.model.DrivePi0.qwen3_vl_vision.Qwen3VLVisionTower
+  config:
+    deepstack_visual_indexes: [5, 11, 17]
+    depth: 24
+    hidden_act: gelu_pytorch_tanh
+    hidden_size: 1024
+    in_channels: 3
+    initializer_range: 0.02
+    intermediate_size: 4096
+    model_type: qwen3_vl
+    num_heads: 16
+    num_position_embeddings: 2304
+    out_hidden_size: 2048
+    patch_size: 16
+    spatial_merge_size: 2
+    temporal_patch_size: 2
+    return_dict: True
+    num_image_tokens: 512
+
+vision_projector:
+  _target_: torch.nn.Identity
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    attn_softclamp: null
+    pad_token_id: ${pad_token_id}
