@@ -48,6 +48,8 @@ class DrivePiZeroInferenceAgent:
         log_allocated_gpu_memory(log, "loading model")
         
         self.tokenizer, self.processor = build_processor_from_config(cfg)
+        # 保存 norm_mode（优先从顶层读取，其次从 data 中读取）
+        self.norm_mode = cfg.get("norm_mode") or cfg.data.get("norm_mode", "percentile")
         print('Agent done')
     
     
@@ -110,26 +112,33 @@ class DrivePiZeroInferenceAgent:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
-        normalize = Normalize.get_instance(statistic_path)
+        norm_mode = getattr(self, "norm_mode", "percentile")
+        normalize = Normalize.get_instance(statistic_path, norm_mode=norm_mode)
 
         # 打印 statistics.json 关键归一化参数，便于对照
         import json
         with open(statistic_path, 'r') as f:
             stats_data = json.load(f)
+        stats_by_mode = stats_data.get(norm_mode, stats_data)
+        if not isinstance(stats_by_mode, dict):
+            raise ValueError(
+                f"Invalid statistics format for norm_mode={norm_mode}: {type(stats_by_mode)}"
+            )
         print(f"\n{'='*60}")
         print(f"归一化参数 (statistics.json):")
         print(f"{'='*60}")
+        print(f"norm_mode: {norm_mode}")
         print(f"轨迹归一化参数:")
-        print(f"  fur_x: [{stats_data['fur_x'][0]:.6f}, {stats_data['fur_x'][1]:.6f}] (1%, 99%)")
-        print(f"  fur_y: [{stats_data['fur_y'][0]:.6f}, {stats_data['fur_y'][1]:.6f}] (1%, 99%)")
+        print(f"  fur_x: [{stats_by_mode['fur_x'][0]:.6f}, {stats_by_mode['fur_x'][1]:.6f}] (1%, 99%)")
+        print(f"  fur_y: [{stats_by_mode['fur_y'][0]:.6f}, {stats_by_mode['fur_y'][1]:.6f}] (1%, 99%)")
         print(f"目标点归一化参数:")
-        print(f"  command_far_x: [{stats_data['command_far_x'][0]:.6f}, {stats_data['command_far_x'][1]:.6f}] (1%, 99%)")
-        print(f"  command_far_y: [{stats_data['command_far_y'][0]:.6f}, {stats_data['command_far_y'][1]:.6f}] (1%, 99%)")
+        print(f"  command_far_x: [{stats_by_mode['command_far_x'][0]:.6f}, {stats_by_mode['command_far_x'][1]:.6f}] (1%, 99%)")
+        print(f"  command_far_y: [{stats_by_mode['command_far_y'][0]:.6f}, {stats_by_mode['command_far_y'][1]:.6f}] (1%, 99%)")
         print(f"状态归一化参数:")
-        print(f"  speed: [{stats_data['speed'][0]:.6f}, {stats_data['speed'][1]:.6f}] (1%, 99%)")
-        print(f"  acceleration: [{stats_data['acceleration'][0]:.6f}, {stats_data['acceleration'][1]:.6f}] (1%, 99%)")
-        print(f"  angular_velocity: [{stats_data['angular_velocity'][0]:.6f}, {stats_data['angular_velocity'][1]:.6f}] (1%, 99%)")
-        print(f"  theta: [{stats_data['theta'][0]:.6f}, {stats_data['theta'][1]:.6f}] (1%, 99%)")
+        print(f"  speed: [{stats_by_mode['speed'][0]:.6f}, {stats_by_mode['speed'][1]:.6f}] (1%, 99%)")
+        print(f"  acceleration: [{stats_by_mode['acceleration'][0]:.6f}, {stats_by_mode['acceleration'][1]:.6f}] (1%, 99%)")
+        print(f"  angular_velocity: [{stats_by_mode['angular_velocity'][0]:.6f}, {stats_by_mode['angular_velocity'][1]:.6f}] (1%, 99%)")
+        print(f"  theta: [{stats_by_mode['theta'][0]:.6f}, {stats_by_mode['theta'][1]:.6f}] (1%, 99%)")
         print(f"{'='*60}\n")
         
         # ------------------------------------------------------------------
@@ -400,7 +409,9 @@ if __name__ == '__main__':
         with open(pkl_data_path, 'rb') as f:
             all_data = pickle.load(f)
             # prepare state
-            normalize = Normalize.get_instance(statistic_path)
+            normalize = Normalize.get_instance(
+                statistic_path, norm_mode=inference_agent.norm_mode
+            )
             state = normalize.prepare_state(all_data)
             # prepare 
             data_dict = {}

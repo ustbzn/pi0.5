@@ -1,9 +1,11 @@
 #!/bin/bash
-set -euo pipefail
+set -eu
+(set -o pipefail) 2>/dev/null && set -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 # You can either edit the defaults below or override them at runtime.
 # If your checkpoint was trained with Qwen3-VL, set:
@@ -23,6 +25,7 @@ VIDEO_DIR="${VIDEO_DIR:-datasets/mogo-test/video}"
 FPS="${FPS:-6}"
 
 echo "Repository root : ${REPO_ROOT}"
+echo "PYTHONPATH      : ${PYTHONPATH}"
 echo "GPU_ID          : ${GPU_ID}"
 echo "CONFIG_PATH     : ${CONFIG_PATH}"
 echo "VAL_DATA_DIR    : ${VAL_DATA_DIR}"
