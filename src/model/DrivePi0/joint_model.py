@@ -408,12 +408,17 @@ def forward_mixture_attn(
 
 
 class JointModel(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, pretrained_language_model=None):
+        """
+        Args:
+            pretrained_language_model: 由 DrivePiZero._build_qwen3_modules 构建的
+                Qwen3 language model 实例。必须传入，不再内部加载。
+        """
         super().__init__()
         self.config = config
         self.num_hidden_layers = config.num_hidden_layers  # 28
 
-        # 修改：action expert 层数为 14（从 VLM 每 2 层获取一次）
+        # action expert 层数为 14（从 VLM 每 2 层获取一次）
         self.num_action_layers = config.num_hidden_layers // 2  # 14
 
         self.num_mixture = len(config.mixture)
@@ -421,27 +426,22 @@ class JointModel(nn.Module):
             name for name in config.mixture if config.mixture[name].cache
         ]
 
-        # Mixtures
+        # Action / Proprio Mixtures（从 config 构建）
         self.mixtures = nn.ModuleDict()
+        config_dict = OmegaConf.to_container(config, resolve=True)
         for mixture_name, mixture_config in config.mixture.items():
-            mixture_config = OmegaConf.merge(config, mixture_config)
-
-            # 修改：action 和 proprio 的层数为 14
+            mixture_dict = OmegaConf.to_container(mixture_config, resolve=True)
+            merged = {**config_dict, **mixture_dict}
+            mixture_config = OmegaConf.create(merged)
             if mixture_name in ["action", "proprio"]:
                 mixture_config.num_hidden_layers = self.num_action_layers
-
             self.mixtures[mixture_name] = Mixture(mixture_config)
-        from transformers import Qwen3VLForConditionalGeneration
 
-        _full_model = Qwen3VLForConditionalGeneration.from_pretrained(
-            config.pretrained_model_path,
-            trust_remote_code=True,
-            dtype=torch.bfloat16,
+        # VLM Mixture（接收外部构建好的 language_model）
+        assert pretrained_language_model is not None, (
+            "pretrained_language_model must be provided by DrivePiZero._build_qwen3_modules"
         )
-        self.mixtures["vlm"] = VLMMixtureAdapter(_full_model.model.language_model) 
-        del _full_model.model.visual         
-        del _full_model.lm_head
-        del _full_model
+        self.mixtures["vlm"] = VLMMixtureAdapter(pretrained_language_model)
         self.mixture_names = list(config.mixture.keys())
 
     def build_mixture_caches(self):

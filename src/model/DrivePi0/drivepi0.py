@@ -30,7 +30,12 @@ log = logging.getLogger(__name__)
 
 class DrivePiZero(nn.Module, NoSyncBase):
     @log_execution_time()
-    def __init__(self, cfg, use_ddp: bool = False):
+    def __init__(self, cfg, use_ddp: bool = False, load_pretrained: bool = True):
+        """
+        Args:
+            load_pretrained: True  = 首次训练，从预训练模型加载权重
+                             False = 恢复训练/推理，仅创建架构，权重由 checkpoint 提供
+        """
         super().__init__()
         self.cfg = cfg
         self.use_ddp = use_ddp  # used in NoSyncBase
@@ -67,33 +72,19 @@ class DrivePiZero(nn.Module, NoSyncBase):
             self.pad_token_id,
         )  # 0.527B parameters
 
-        # Vision
-        # self.vision_tower = hydra.utils.instantiate(cfg.vision)
-        # self.multi_modal_projector = hydra.utils.instantiate(cfg.vision_projector)
-        
-        # self.vision_tower = Qwen3VLVisionModel.from_pretrained(
-        #     cfg.pretrained_model_path,
-        #     trust_remote_code=True,
-        # )
-        from transformers import Qwen3VLForConditionalGeneration
-
-        _full_model = Qwen3VLForConditionalGeneration.from_pretrained(
-            cfg.pretrained_model_path,
-            trust_remote_code=True,
-            dtype=torch.bfloat16,
+        # Vision + Language：从 Qwen3-VL 构建子模块
+        vision_tower, language_model = self._build_qwen3_modules(
+            cfg.pretrained_model_path, load_pretrained
         )
-        self.vision_tower = _full_model.model.visual  # 权重已经加载好
-        del _full_model.model.language_model         # 释放语言模型部分显存
-        del _full_model.lm_head
-        del _full_model
-        torch.cuda.empty_cache()
-        log.info("Loaded vision tower from pretrained model")
-        # merger 已集成在 vision_tower 内部，不需要单独的 projector
-        # 但保留 multi_modal_projector 属性避免其他地方报错
+        self.vision_tower = vision_tower
         self.multi_modal_projector = None
 
-        # Mixtures
-        self.joint_model = hydra.utils.instantiate(cfg.joint)
+        # JointModel 直接接收 language_model
+        from src.model.DrivePi0.joint_model import JointModel
+        self.joint_model = JointModel(
+            cfg.joint.config,
+            pretrained_language_model=language_model,
+        )
 
         # Action, proprio, time encoders
         self.action_expert_adaptive_mode = cfg.action_expert_adaptive_mode
@@ -130,6 +121,33 @@ class DrivePiZero(nn.Module, NoSyncBase):
                 bias=False,
             )
             self.lm_head.weight = self.embed_tokens.weight  # tie weights
+
+    @staticmethod
+    def _build_qwen3_modules(model_path: str, load_pretrained: bool):
+        """
+        从 Qwen3-VL 构建 vision_tower 和 language_model。
+
+        load_pretrained=True  → from_pretrained()  加载架构+预训练权重（首次训练）
+        load_pretrained=False → AutoConfig + 空模型，仅创建架构（权重由 checkpoint 提供）
+        """
+        from transformers import Qwen3VLForConditionalGeneration, AutoConfig
+
+        if load_pretrained:
+            full_model = Qwen3VLForConditionalGeneration.from_pretrained(
+                model_path, trust_remote_code=True, dtype=torch.bfloat16,
+            )
+            log.info("Loaded Qwen3-VL pretrained weights")
+        else:
+            config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+            full_model = Qwen3VLForConditionalGeneration(config)
+            log.info("Created Qwen3-VL architecture (weights will come from checkpoint)")
+
+        vision_tower = full_model.model.visual
+        language_model = full_model.model.language_model
+        # full_model 的其他部分（lm_head 等）不再需要，释放引用
+        del full_model
+        torch.cuda.empty_cache()
+        return vision_tower, language_model
 
     @property
     def action_expert_parameters(self):

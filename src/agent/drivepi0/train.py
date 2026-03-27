@@ -109,9 +109,19 @@ class DrivePiZeroTrainAgent:
             self.dtype = torch.float16
         else:
             self.dtype = torch.float32
-        self.model = DrivePiZero(cfg, use_ddp=self.multi_gpu)
-        if cfg.resume_checkpoint_path:
+        # 判断加载模式：
+        #   resume_checkpoint_path → 断点续训（恢复权重+优化器+进度）
+        #   finetune_checkpoint_path → 微调（只加载模型权重，优化器和进度从头开始）
+        #   都没设置 → 首次训练（加载预训练权重）
+        has_resume = bool(cfg.get("resume_checkpoint_path"))
+        has_finetune = bool(cfg.get("finetune_checkpoint_path"))
+        load_pretrained = not has_resume and not has_finetune
+
+        self.model = DrivePiZero(cfg, use_ddp=self.multi_gpu, load_pretrained=load_pretrained)
+        if has_resume:
             self.load_checkpoint(cfg.resume_checkpoint_path)
+        elif has_finetune:
+            self._load_model_weights_only(cfg.finetune_checkpoint_path)
         elif cfg.load_pretrained_weights:
             self.model.load_pretrained_weights()
         self.model.tie_action_proprio_weights()
@@ -258,6 +268,7 @@ class DrivePiZeroTrainAgent:
             )
         if cfg.resume_checkpoint_path:
             self.load_optimizer(cfg.resume_checkpoint_path)
+        # finetune 时不恢复优化器，使用全新的学习率调度
 
         ########### Input processing ###########
 
@@ -629,4 +640,35 @@ class DrivePiZeroTrainAgent:
             optimizer_to(self.vlm_optimizer, self.device)
             self.vlm_lr_scheduler.load_state_dict(data["vlm_lr_scheduler"])
         log.info(f"Loaded optimizer and scheduler states from {path}")
+
+    @log_execution_time()
+    def _load_model_weights_only(self, path):
+        """Finetune 模式：只加载模型权重，不恢复优化器/调度器/训练计数器"""
+        data = torch.load(path, weights_only=True, map_location="cpu")
+        ckpt = {
+            k.replace("_orig_mod.", ""): v for k, v in data["model"].items()
+        }
+        model_state = self.model.state_dict()
+        filtered = {}
+        skipped = []
+        for k, v in ckpt.items():
+            if k not in model_state:
+                skipped.append(k)
+                continue
+            if model_state[k].shape != v.shape:
+                skipped.append(f"[shape mismatch] {k}")
+                continue
+            filtered[k] = v
+
+        # proprio 因 tie_weights 合并到 action，跳过是正常的
+        real_skipped = [s for s in skipped if "mixtures.proprio" not in s]
+        if real_skipped:
+            log.warning(f"Finetune: skipped {len(real_skipped)} keys: {real_skipped[:5]}")
+
+        missing, _ = self.model.load_state_dict(filtered, strict=False)
+        if missing:
+            log.warning(f"Finetune: {len(missing)} keys missing from checkpoint (using random init)")
+
+        log.info(f"Finetune: loaded {len(filtered)} / {len(model_state)} model weights from {path}")
+        log.info("Optimizer and LR scheduler are freshly initialized (not restored)")
         

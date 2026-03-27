@@ -1,0 +1,228 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+current_dir: /D2/NXT/vlm/liqinbu/VLA/Drive_pi  # You need to set path
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_nuscene_0111
+log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+
+# ===== Model loading rules =====
+# 1) New training from the Qwen3-VL base model:
+#    - pretrained_model_path: directory of the original HF / local Qwen3-VL model
+#    - load_pretrained_weights: True
+#    - resume_checkpoint_path: leave empty
+#
+# 2) Resume training from your own DrivePi checkpoint (*.pt):
+#    - pretrained_model_path: keep pointing to the original Qwen3-VL model directory
+#      (processor/tokenizer/base architecture still depend on this path)
+#    - load_pretrained_weights: usually keep True; train.py will prefer
+#      resume_checkpoint_path when it is not empty
+#    - resume_checkpoint_path: set to your saved checkpoint, e.g.
+#      /path/to/logs/train/drive-pi0/<run_name>/checkpoint/stepXXXX.pt
+#
+# 3) Evaluation / inference:
+#    - do NOT put your *.pt file into pretrained_model_path
+#    - use the matching inference config, e.g.
+#      config/inference/DrivePi0/base_qwen3.yaml
+#    - set checkpoint_path there to your saved *.pt file
+#
+# In short:
+#   pretrained_model_path = original pretrained model directory
+#   resume_checkpoint_path = your own training checkpoint for continuing training
+#   checkpoint_path (in inference config) = your own training checkpoint for eval/inference
+pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/Qwen3-VL-2B-Instruct   # Base Qwen3-VL model directory, NOT your fine-tuned .pt file
+load_pretrained_weights: True
+resume_checkpoint_path: 
+checkpoint_path:  # /D2/NXT/vlm/liqinbu/VLA/Drive_pi/log/train/drive-pi0/2026-03-21_02-09_nuscene_0111/checkpoint/step920.pt 
+# resume_checkpoint_path: ${current_dir}/logs/train/drive-pi0/<run_name>/checkpoint/stepXXXX.pt
+train_vlm: False
+action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
+use_torch_compile: True
+use_bf16: True
+# use_fp16: False
+# 混合精度
+use_amp: True
+quantize: False
+lora: False
+lora_r: 32
+lora_dropout: 0.05
+
+data:
+  train:
+    statistics_path: ${current_dir}/${data.train.dynamic_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: datasets/nuscene-0111 # 训练集不变
+    dynamic_dir_test: datasets/nuscene # 归一化数据替换的测试
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13 # useless in drive-pi0
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}  # 引用顶层的 norm_mode
+  val:
+    statistics_path: ${current_dir}/${data.val.dynamic_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: datasets/nuscene-0111 # 测试集不变
+    dynamic_dir_test: datasets/nuscene # 归一化数据替换的测试
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13 # useless in drive-pi0
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}  # 引用顶层的 norm_mode
+
+swanlab:
+  enable: True
+  project: drive-pi0
+  experiment_name: ${run_name}
+  mode: cloud
+  description: null
+  entity: null
+
+# wandb:
+#   entity: null
+#   project: drive-pi0
+#   run: ${now:%H-%M-%S}_${name}
+
+log_freq: 16
+n_epochs: 40
+# 归一化方法: percentile_clip, percentile, minmax
+norm_mode: percentile
+# 需要修改的参数
+n_train: 23930  # total training samples; update when dataset size changes
+n_updates: ${eval:'${n_train} // ${global_batch_size} * ${n_epochs}'}
+# 一个global_batch_size保存一次模型
+save_model_freq: ${eval:'${n_train} // ${global_batch_size} * 1'}
+eval_freq: 1000
+# eval_freq: ${eval:'${n_train} // ${global_batch_size} * 4'}
+eval_size: 1024
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+
+# 需要修改的参数
+global_batch_size: 1024
+per_device_batch_size: 64
+num_workers: 8
+# 学习率
+action_lr: 5e-5
+vlm_lr: 1e-6
+action_lr_scheduler:
+  first_cycle_steps: 23930 # basically no decaying
+  min_lr: 1e-8
+  warmup_steps: 200 # a bit of warmup
+vlm_lr_scheduler:
+  first_cycle_steps: 23930
+  min_lr: 1e-8
+  warmup_steps: 200
+action_weight_decay: 0
+vlm_weight_decay: 0
+# 梯度裁剪
+max_grad_norm: 1.0
+
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0  # data normalized in [-1,1]
+
+cond_steps: 5  # 必须与 window.sh 中的 --window_size 参数一致
+horizon_steps: 7  # 必须与 window.sh 中的 --horizon 参数一致
+action_dim: 2 # EEF_POS
+proprio_dim: 10  # POS_EULER
+state_dim: ${proprio_dim}
+max_seq_len: 2048  # fixed 512 for image + max 20 for text
+tokenizer_padding: longest # instead of truncating to longest
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:
+    arch: qwen3_vl
+    hidden_size: 2048
+    intermediate_size: 6144
+    hidden_act: silu
+    use_final_norm: True
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:  
+    scale_input_embeds: False
+    rope_scaling:
+      rope_type: default
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+  proprio:
+    arch: qwen3_vl # gemma or qwen3_vl
+    hidden_size: 2048
+    intermediate_size: 6144
+    hidden_act: silu
+    use_final_norm: True  # technically no, but sharing weights with action anyway
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+    scale_input_embeds: True
+  action:
+    arch: qwen3_vl # gemma or qwen3_vl
+    hidden_size: 2048
+    intermediate_size: 6144
+    hidden_act: silu
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+    scale_input_embeds: True
+time_hidden_size: 256 # only applicable if using adaptive
+
+# Fixed
+image_token_index: 151655
+vocab_size: 151936
+pad_token_id: 151643
+
+vision:
+  _target_: src.model.DrivePi0.qwen3_vl_vision.Qwen3VLVisionTower
+  config:
+    deepstack_visual_indexes: [5, 11, 17] 
+    depth: 24
+    hidden_act: gelu_pytorch_tanh
+    hidden_size: 1024
+    in_channels: 3
+    initializer_range: 0.02
+    intermediate_size: 4096
+    model_type: qwen3_vl
+    num_heads: 16
+    num_position_embeddings: 2304
+    out_hidden_size: 2048
+    patch_size: 16
+    spatial_merge_size: 2
+    temporal_patch_size: 2
+    return_dict: True
+    num_image_tokens: 512 # Qwen 不用，这里为了解决报错问题
+
+vision_projector:
+  _target_: torch.nn.Identity
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    attn_softclamp: null
+    pad_token_id: ${pad_token_id}

@@ -21,6 +21,10 @@ import numpy as np
 import torch
 from transformers import AutoTokenizer
 
+from PIL import Image
+import numpy as np
+from transformers import Qwen3VLProcessor
+
 from src.model.DrivePi0.drivepi0 import DrivePiZeroInference
 from src.agent.dataset import Bench2DriveDataset
 from src.model.DrivePi0.processing import VLAProcessor
@@ -34,7 +38,8 @@ class DrivePiZeroInferenceAgent:
         # model
         self.device = torch.device(f"cuda:{cfg.gpu_id}")
         self.dtype = torch.bfloat16 if cfg.get("use_bf16", False) else torch.float32
-        self.model = DrivePiZeroInference(cfg, use_ddp=False)
+        self.model = DrivePiZeroInference(cfg, use_ddp=False, load_pretrained=False)
+        self.model.tie_action_proprio_weights()
         self.load_checkpoint(cfg.checkpoint_path)
         self.model.freeze_all_weights()
         self.model.to(self.dtype)
@@ -56,12 +61,13 @@ class DrivePiZeroInferenceAgent:
         self.tokenizer = AutoTokenizer.from_pretrained(
             cfg.pretrained_model_path, padding_side="right"
         )
-        self.processor = VLAProcessor(
-            self.tokenizer,
-            num_image_tokens=cfg.vision.config.num_image_tokens,
-            max_seq_len=cfg.max_seq_len,
-            tokenizer_padding=cfg.tokenizer_padding,
+        self.processor = Qwen3VLProcessor.from_pretrained(
+            cfg.pretrained_model_path,
+            trust_remote_code=True,
         )
+        # 保存 padding 参数，确保推理时 input_ids 长度与 mask 一致
+        self.max_seq_len = cfg.max_seq_len
+        self.tokenizer_padding = cfg.get("tokenizer_padding", "max_length")
         # 保存归一化模式（优先从 data 中读取）
         self.norm_mode = cfg.get("norm_mode") or cfg.data.get("norm_mode", "percentile")
         print('Agent done')
@@ -72,22 +78,48 @@ class DrivePiZeroInferenceAgent:
         images_front = images_front.unsqueeze(0)
         images_front_history = data_dict["image_front_history"]
         images_front_history = images_front_history.unsqueeze(0)
-        # images_back = data_dict["image_back"]
-        # images_back = images_back.unsqueeze(0)
-            
+
         state = data_dict["state"].unsqueeze(0)
         texts = [data_dict["language_instruction"]]
-            
-        images_front = einops.rearrange(images_front, "B H W C -> B C H W")  # remove cond_steps dimension
+
+        images_front = einops.rearrange(images_front, "B H W C -> B C H W")
         images_front = images_front.unsqueeze(1)
-        images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")  # remove cond_steps dimension
+        images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")
         images_front_history = images_front_history.unsqueeze(1)
-        # images_back = einops.rearrange(images_back, "B H W C -> B C H W")  # remove cond_steps dimension
-        # images_back = images_back.unsqueeze(1)
-            
-        # images = torch.cat((images_front, images_front_history, images_back), dim=1)
+
         images = torch.cat((images_front, images_front_history), dim=1)
-        model_inputs = self.processor(text=texts, images=images)
+
+        # 转换为 PIL Image 列表（Qwen3VLProcessor 需要）
+        pil_images = []
+        for i in range(images.shape[0]):
+            for j in range(images.shape[1]):
+                img = Image.fromarray(
+                    images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
+                )
+                pil_images.append(img)
+
+        # 构建 Qwen3VL 聊天格式
+        num_images_per_sample = images.shape[1]
+        chat_texts = []
+        for i, text in enumerate(texts):
+            content = []
+            for _ in range(num_images_per_sample):
+                content.append({"type": "image"})
+            content.append({"type": "text", "text": text})
+            messages = [{"role": "user", "content": content}]
+            chat_text = self.processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True,
+            )
+            chat_texts.append(chat_text)
+
+        model_inputs = self.processor(
+            text=chat_texts,
+            images=pil_images,
+            return_tensors="pt",
+            padding=self.tokenizer_padding,
+            max_length=self.max_seq_len,
+            truncation=True,
+        )
 
         # build causal mask and position ids for trajectory
         causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
@@ -99,6 +131,7 @@ class DrivePiZeroInferenceAgent:
         inputs = {
             "input_ids": model_inputs["input_ids"],
             "pixel_values": model_inputs["pixel_values"].to(self.dtype),
+            "image_grid_thw": model_inputs["image_grid_thw"],
             "vlm_position_ids": vlm_position_ids,
             "proprio_position_ids": state_position_ids,
             "action_position_ids": action_position_ids,
@@ -117,13 +150,37 @@ class DrivePiZeroInferenceAgent:
     
     @log_execution_time(log)
     def load_checkpoint(self, path):
-        """load to cpu first, then move to gpu"""
+        """从训练 checkpoint 加载完整模型权重"""
         data = torch.load(path, weights_only=True, map_location="cpu")
-        data["model"] = {
+        ckpt = {
             k.replace("_orig_mod.", ""): v for k, v in data["model"].items()
-        }  # remove "_orig_mod." prefix if saved model was compiled
-        self.model.load_state_dict(data["model"], strict=True)
-        print(f"Loaded model from {path}")
+        }
+
+        model_state = self.model.state_dict()
+        filtered_ckpt = {}
+        skipped = []
+        for k, v in ckpt.items():
+            if k not in model_state:
+                skipped.append(k)
+                continue
+            if model_state[k].shape != v.shape:
+                skipped.append(f"[shape mismatch] {k}")
+                continue
+            filtered_ckpt[k] = v
+
+        if skipped:
+            # proprio 的 key 因 tie_weights 被合并到 action，属于正常跳过
+            real_skipped = [s for s in skipped if "mixtures.proprio" not in s]
+            if real_skipped:
+                print(f"[WARNING] Skipped {len(real_skipped)} unexpected keys: {real_skipped[:5]}")
+
+        missing, _ = self.model.load_state_dict(filtered_ckpt, strict=False)
+        if missing:
+            print(f"[WARNING] Missing {len(missing)} keys in checkpoint")
+            for k in missing[:10]:
+                print(f"  {k}")
+
+        print(f"Loaded {len(filtered_ckpt)} / {len(model_state)} keys from {path}")
     
     def run_batch_inference(self, val_data_dir: str, output_dir: str, statistic_path: str = "statistics.json", max_samples: Optional[int] = None):
         """

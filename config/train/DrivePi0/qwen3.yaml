@@ -15,9 +15,24 @@ n_nodes: 1
 seed: 42
 pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct   # You need to set path
 load_pretrained_weights: True
-resume_checkpoint_path: 
+
+# 模式 1: 首次训练（从预训练 Qwen3-VL 开始）
+# resume_checkpoint_path:
+# finetune_checkpoint_path:
+
+# 模式 2: 断点续训（恢复一切，接着跑）
+# resume_checkpoint_path: /pcpt/.../checkpoint/step960.pt
+# finetune_checkpoint_path:
+
+# 模式 3: 微调（用 step960 的模型权重，但全新的优化器和学习率）
+# resume_checkpoint_path:
+# finetune_checkpoint_path: /pcpt/.../checkpoint/step960.pt
+
+resume_checkpoint_path:
+finetune_checkpoint_path:   # 填入 checkpoint 路径则从该模型 finetune（全新优化器+学习率）
 # resume_checkpoint_path: ${current_dir}/checkpoint
-train_vlm: False
+
+train_vlm: False  # 是否训练 VLM 模块；如果 False，VLM 模块权重冻结不更新
 action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
 use_torch_compile: True
 use_bf16: True
@@ -31,20 +46,20 @@ lora_dropout: 0.05
 
 data:
   train:
-    statistics_path: ${current_dir}/${data.train.dynamic_dir}/statistics.json
+    statistics_path: ${data.train.dynamic_dir}/statistics.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: datasets/nuscene-0111 # 训练集不变
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset # 训练集不变
     fixed_dir: b2d_fixed_camera
     split: train
     num_of_action_experts: 13 # useless in drive-pi0
     shuffle_buffer_size: 200000
     norm_mode: ${norm_mode}  # 引用顶层的 norm_mode
   val:
-    statistics_path: ${current_dir}/${data.val.dynamic_dir}/statistics.json
+    statistics_path: ${data.val.dynamic_dir}/statistics.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: datasets/nuscene-0111 # 测试集不变
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset # 测试集不变
     fixed_dir: b2d_fixed_camera
     split: val
     num_of_action_experts: 13 # useless in drive-pi0
@@ -67,7 +82,7 @@ swanlab:
 log_freq: 16
 n_epochs: 40
 # 归一化方法: percentile_clip, percentile, minmax
-norm_mode: percentile
+norm_mode: minmax
 # 需要修改的参数
 n_train: 23930  # total training samples; update when dataset size changes
 # n_updates: 总更新次数 = ceil(训练样本数 / 实际全局batch大小) * epoch数
@@ -89,7 +104,7 @@ eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
 # 如果有4个GPU，每个设备16，建议设置为 64 的倍数 (4 * 16 = 64)
 # 例如: 64, 128, 192, 256, 320, 384, 448, 512 等
 global_batch_size: 1024  # 1 GPU * 16 per_device * 7 accumulation = 64
-per_device_batch_size: 32 # 不训vlm时可以设置更大64，但训vlm时建议保持较小以适应显存如8
+per_device_batch_size: 64 # 不训vlm时可以设置更大64，但训vlm时建议保持较小以适应显存如32或16
 num_workers: 8
 # 学习率
 action_lr: 1e-5

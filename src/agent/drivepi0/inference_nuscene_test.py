@@ -27,7 +27,8 @@ class DrivePiZeroInferenceAgent:
         # model
         self.device = torch.device(f"cuda:{cfg.gpu_id}")
         self.dtype = torch.bfloat16 if cfg.get("use_bf16", False) else torch.float32
-        self.model = DrivePiZeroInference(cfg, use_ddp=False)
+        self.model = DrivePiZeroInference(cfg, use_ddp=False, load_pretrained=False)
+        self.model.tie_action_proprio_weights()
         self.load_checkpoint(cfg.checkpoint_path)
         self.model.freeze_all_weights()
         self.model.to(self.dtype)
@@ -147,7 +148,7 @@ class DrivePiZeroInferenceAgent:
     
     @log_execution_time(log)
     def load_checkpoint(self, path):
-        """从 checkpoint 加载完整模型权重，处理已知的 size 不匹配"""
+        """从训练 checkpoint 加载完整模型权重（包括 VLM 和 vision_tower）"""
         data = torch.load(path, weights_only=True, map_location="cpu")
         ckpt = {
             k.replace("_orig_mod.", ""): v
@@ -155,7 +156,6 @@ class DrivePiZeroInferenceAgent:
         }
 
         model_state = self.model.state_dict()
-        # pdb.set_trace()
         filtered_ckpt = {}
         skipped = []
 
@@ -163,34 +163,24 @@ class DrivePiZeroInferenceAgent:
             if k not in model_state:
                 skipped.append(f"[not in model] {k}")
                 continue
-
+            if model_state[k].shape != v.shape:
+                skipped.append(f"[shape mismatch] {k}: ckpt {v.shape} vs model {model_state[k].shape}")
+                continue
             filtered_ckpt[k] = v
 
         if skipped:
-            log.warning(f"Skipped {len(skipped)} keys:")
+            log.warning(f"Skipped {len(skipped)} keys from checkpoint:")
             for s in skipped:
                 log.warning(f"  {s}")
 
         missing, unexpected = self.model.load_state_dict(filtered_ckpt, strict=False)
 
-        # 过滤掉 pretrained 部分（__init__ 里已加载，missing 是正常的）
-        PRETRAINED_PREFIXES = (
-            "vision_tower.", "joint_model.mixtures.vlm.",
-            "multi_modal_projector.",
-        )
-        real_missing = [
-            k for k in missing
-            if not any(k.startswith(p) for p in PRETRAINED_PREFIXES)
-        ]
+        if missing:
+            log.warning(f"Missing {len(missing)} keys (not in checkpoint, using __init__ weights):")
+            for k in missing:
+                log.warning(f"  {k}")
 
-        if real_missing:
-            log.error(f"真正缺失的训练权重 ({len(real_missing)}):")
-            for k in real_missing:
-                log.error(f"  {k}")
-        else:
-            log.info("✅ 所有训练权重加载成功")
-
-        log.info(f"Loaded {len(filtered_ckpt)} keys from {path}")
+        log.info(f"Loaded {len(filtered_ckpt)} / {len(model_state)} keys from {path}")
     
     def run_batch_inference(self, val_data_dir: str, output_dir: str, statistic_path: str = "statistics.json", scene_name_filter: str = None, max_samples: int = None):
         """
