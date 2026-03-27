@@ -6,7 +6,7 @@ hydra:
 _target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
 
 current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi  # You need to set path
-run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_0225
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_nuscene_0325
 log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
 
 name: drive-pi0
@@ -17,7 +17,7 @@ pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Inst
 load_pretrained_weights: True
 resume_checkpoint_path: 
 # resume_checkpoint_path: ${current_dir}/checkpoint
-train_vlm: True
+train_vlm: False
 action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
 use_torch_compile: True
 use_bf16: True
@@ -34,7 +34,7 @@ data:
     statistics_path: ${current_dir}/${data.train.dynamic_dir}/statistics.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: datasets/mogo-test # 训练集不变
+    dynamic_dir: datasets/nuscene-0111 # 训练集不变
     fixed_dir: b2d_fixed_camera
     split: train
     num_of_action_experts: 13 # useless in drive-pi0
@@ -44,7 +44,7 @@ data:
     statistics_path: ${current_dir}/${data.val.dynamic_dir}/statistics.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: datasets/mogo-test # 测试集不变
+    dynamic_dir: datasets/nuscene-0111 # 测试集不变
     fixed_dir: b2d_fixed_camera
     split: val
     num_of_action_experts: 13 # useless in drive-pi0
@@ -52,8 +52,8 @@ data:
     norm_mode: ${norm_mode}  # 引用顶层的 norm_mode
 
 swanlab:
-  enable: False
-  project: drive-pi0
+  enable: True
+  project: DriveMoE_Qwen3
   experiment_name: ${run_name}
   mode: cloud
   description: null
@@ -65,11 +65,11 @@ swanlab:
 #   run: ${now:%H-%M-%S}_${name}
 
 log_freq: 16
-n_epochs: 15
+n_epochs: 40
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: percentile
 # 需要修改的参数
-n_train: 480  # total training samples; update when dataset size changes
+n_train: 23930  # total training samples; update when dataset size changes
 # n_updates: 总更新次数 = ceil(训练样本数 / 实际全局batch大小) * epoch数
 # 注意: 实际 global_batch_size 会在训练代码中自动计算 (448 = 4 GPUs * 16 per_device * 7 accumulation)
 # 使用向上取整确保每个epoch至少有一次更新: ceil(480 / 448) * n_epochs = 2 * 15 = 30
@@ -79,27 +79,27 @@ n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_si
 # 设置为每个epoch保存一次: ceil(n_train / global_batch_size)
 # 如果希望更频繁保存，可以减小这个值
 save_model_freq: ${eval:'(${n_train} + ${global_batch_size} - 1) // ${global_batch_size}'}  # 向上取整，每个epoch保存一次
-eval_freq: 100
+eval_freq: 1000
 # eval_freq: ${eval:'${n_train} // ${global_batch_size} * 4'}
-eval_size: 20
+eval_size: 1024
 eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
 
 # 需要修改的参数
 # 注意: 实际 global_batch_size = per_device_batch_size * grad_accumulation_steps * num_gpus
 # 如果有4个GPU，每个设备16，建议设置为 64 的倍数 (4 * 16 = 64)
 # 例如: 64, 128, 192, 256, 320, 384, 448, 512 等
-global_batch_size: 64  # 1 GPU * 16 per_device * 7 accumulation = 64
-per_device_batch_size: 16
-num_workers: 0
+global_batch_size: 1024  # 1 GPU * 16 per_device * 7 accumulation = 64
+per_device_batch_size: 32 # 不训vlm时可以设置更大64，但训vlm时建议保持较小以适应显存如8
+num_workers: 8
 # 学习率
 action_lr: 1e-5
 vlm_lr: 1e-5
 action_lr_scheduler:
-  first_cycle_steps: 10000000 # basically no decaying
+  first_cycle_steps: 23930 # basically no decaying
   min_lr: 1e-8
   warmup_steps: 200 # a bit of warmup
 vlm_lr_scheduler:
-  first_cycle_steps: 10000000
+  first_cycle_steps: 23930
   min_lr: 1e-8
   warmup_steps: 200
 action_weight_decay: 0
@@ -203,12 +203,12 @@ joint:
       dropout: ${lora_dropout}
     num_hidden_layers: 28  # 修改为 28（Qwen3-VL-2B 的层数）
     num_attention_heads: 16  # Qwen3-VL-2B 的 attention heads（官方值）
-    num_key_value_heads: 2  # Qwen3-VL-2B 的 KV heads（官方值）
+    num_key_value_heads: 8  # Qwen3-VL-2B 的 KV heads（官方值）
     head_dim: 128  # Qwen3-VL-2B 的 head_dim（官方值）
     hidden_act: "gelu_pytorch_tanh"  # 官方值
     max_position_embeddings: 262144  # Qwen3-VL-2B 的 max position embeddings（官方值）
     rms_norm_eps: 1e-6
-    rope_theta: 1000000  # Qwen3-VL-2B 的 rope_theta（官方值）
+    rope_theta: 5000000  # Qwen3-VL-2B 的 rope_theta（官方值）
     attention_bias: False  # Qwen3-VL-2B 不使用 bias（官方值）
     attention_dropout: 0.0
     pad_token_id: ${pad_token_id}

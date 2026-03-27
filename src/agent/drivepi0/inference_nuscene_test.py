@@ -7,10 +7,12 @@ from datetime import datetime
 import hydra
 import einops
 import imageio
+import pdb
 from tqdm import *
 import numpy as np
 import torch
-from transformers import AutoTokenizer
+from PIL import Image
+from transformers import AutoTokenizer, Qwen3VLProcessor
 
 from src.model.DrivePi0.drivepi0 import DrivePiZeroInference
 from src.agent.dataset import Bench2DriveDataset
@@ -47,16 +49,18 @@ class DrivePiZeroInferenceAgent:
         self.tokenizer = AutoTokenizer.from_pretrained(
             cfg.pretrained_model_path, padding_side="right"
         )
-        self.processor = VLAProcessor(
-            self.tokenizer,
-            num_image_tokens=cfg.vision.config.num_image_tokens,
-            max_seq_len=cfg.max_seq_len,
-            tokenizer_padding=cfg.tokenizer_padding,
+        self.processor = Qwen3VLProcessor.from_pretrained(
+            cfg.pretrained_model_path,
+            trust_remote_code=True,
         )
+        # 保存 padding 参数，确保推理时 input_ids 长度与 mask 一致
+        self.max_seq_len = cfg.max_seq_len
+        self.tokenizer_padding = cfg.get("tokenizer_padding", "max_length")
         print('Agent done')
     
     
     def run(self, data_dict):
+        # pdb.set_trace()
         images_front = data_dict["image_front"]
         images_front = images_front.unsqueeze(0)
         images_front_history = data_dict["image_front_history"]
@@ -76,7 +80,43 @@ class DrivePiZeroInferenceAgent:
             
         # images = torch.cat((images_front, images_front_history, images_back), dim=1)
         images = torch.cat((images_front, images_front_history), dim=1)
-        model_inputs = self.processor(text=texts, images=images)
+        
+        pil_images = []
+        for i in range(images.shape[0]):
+            for j in range(images.shape[1]):
+                # 转换为PIL Image (HWC -> RGB)
+                # img = Image.fromarray(images[i, j].cpu().numpy().astype(np.uint8))
+                img = Image.fromarray(images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0))  # 如果图像是CHW格式，先转置为HWC
+                pil_images.append(img)
+        
+        num_images_per_sample = images.shape[1]  # 2
+        chat_texts = []
+        for i, text in enumerate(texts):
+            # 构建包含图像的消息列表
+            content = []
+            # 插入所有图像
+            for _ in range(num_images_per_sample):
+                content.append({"type": "image"})
+            # 插入文本
+            content.append({"type": "text", "text": text})
+            
+            messages = [{"role": "user", "content": content}]
+            # 应用聊天模板
+            chat_text = self.processor.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            chat_texts.append(chat_text)
+        
+        model_inputs = self.processor(
+            text=chat_texts,
+            images=pil_images,
+            return_tensors="pt",
+            padding=self.tokenizer_padding,
+            max_length=self.max_seq_len,
+            truncation=True,
+        )
 
         # build causal mask and position ids for trajectory
         causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
@@ -88,6 +128,7 @@ class DrivePiZeroInferenceAgent:
         inputs = {
             "input_ids": model_inputs["input_ids"],
             "pixel_values": model_inputs["pixel_values"].to(self.dtype),
+            "image_grid_thw": model_inputs["image_grid_thw"],
             "vlm_position_ids": vlm_position_ids,
             "proprio_position_ids": state_position_ids,
             "action_position_ids": action_position_ids,
@@ -106,13 +147,50 @@ class DrivePiZeroInferenceAgent:
     
     @log_execution_time(log)
     def load_checkpoint(self, path):
-        """load to cpu first, then move to gpu"""
+        """从 checkpoint 加载完整模型权重，处理已知的 size 不匹配"""
         data = torch.load(path, weights_only=True, map_location="cpu")
-        data["model"] = {
-            k.replace("_orig_mod.", ""): v for k, v in data["model"].items()
-        }  # remove "_orig_mod." prefix if saved model was compiled
-        self.model.load_state_dict(data["model"], strict=True)
-        log.info(f"Loaded model from {path}")
+        ckpt = {
+            k.replace("_orig_mod.", ""): v
+            for k, v in data["model"].items()
+        }
+
+        model_state = self.model.state_dict()
+        # pdb.set_trace()
+        filtered_ckpt = {}
+        skipped = []
+
+        for k, v in ckpt.items():
+            if k not in model_state:
+                skipped.append(f"[not in model] {k}")
+                continue
+
+            filtered_ckpt[k] = v
+
+        if skipped:
+            log.warning(f"Skipped {len(skipped)} keys:")
+            for s in skipped:
+                log.warning(f"  {s}")
+
+        missing, unexpected = self.model.load_state_dict(filtered_ckpt, strict=False)
+
+        # 过滤掉 pretrained 部分（__init__ 里已加载，missing 是正常的）
+        PRETRAINED_PREFIXES = (
+            "vision_tower.", "joint_model.mixtures.vlm.",
+            "multi_modal_projector.",
+        )
+        real_missing = [
+            k for k in missing
+            if not any(k.startswith(p) for p in PRETRAINED_PREFIXES)
+        ]
+
+        if real_missing:
+            log.error(f"真正缺失的训练权重 ({len(real_missing)}):")
+            for k in real_missing:
+                log.error(f"  {k}")
+        else:
+            log.info("✅ 所有训练权重加载成功")
+
+        log.info(f"Loaded {len(filtered_ckpt)} keys from {path}")
     
     def run_batch_inference(self, val_data_dir: str, output_dir: str, statistic_path: str = "statistics.json", scene_name_filter: str = None, max_samples: int = None):
         """
@@ -244,6 +322,7 @@ class DrivePiZeroInferenceAgent:
                     
                     # 推理
                     print(f"[run] 开始推理: {pkl_file.name}")
+                    # pdb.set_trace()
                     pred_trajectory = self.run(data_dict=data_dict)  # 应该是 [horizon, 2]
                     
                     # 确保 pred_trajectory 形状正确

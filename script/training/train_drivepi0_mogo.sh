@@ -14,6 +14,7 @@ export TZ='UTC-8'
 # SwanLab 配置
 export WANDB_DISABLED=true
 export SWANLAB_API_KEY='wMwCepr1MuBtmCchEgh9x'
+export PYTHONPATH="/pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi:$PYTHONPATH"
 # 保存路径
 export LOG_DIR="/pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/logs"
 
@@ -23,7 +24,7 @@ NUM_GPU="$(nvidia-smi --list-gpus | wc -l)"
 # NUM_GPU=1
 echo "NUM_GPU=$NUM_GPU"
 # 配置文件
-BASE_CONFIG="base_mogo.yaml"
+BASE_CONFIG="qwen3.yaml"
 
 export MASTER_ADDR=$(scontrol show hostname ${SLURM_NODELIST} | head -n 1)
 find_free_port() {

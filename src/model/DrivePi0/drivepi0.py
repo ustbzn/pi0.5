@@ -23,6 +23,7 @@ from src.utils.decorator import NoSyncBase
 from src.utils.monitor import log_execution_time
 
 from transformers import Qwen3VLVisionModel
+import pdb
 
 log = logging.getLogger(__name__)
 
@@ -786,6 +787,7 @@ class DrivePiZeroInference(DrivePiZero):
         self,
         input_ids: torch.LongTensor,
         pixel_values: torch.FloatTensor,
+        image_grid_thw: torch.LongTensor,
         image_text_proprio_mask: torch.FloatTensor,
         action_mask: torch.FloatTensor,
         vlm_position_ids: torch.LongTensor,
@@ -796,6 +798,7 @@ class DrivePiZeroInference(DrivePiZero):
         return super().infer_action(
             input_ids,
             pixel_values,
+            image_grid_thw,
             image_text_proprio_mask,
             action_mask,
             vlm_position_ids,

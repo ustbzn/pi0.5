@@ -199,3 +199,6 @@ camera_labels
 Bench2Drive-Base/
 DriveMoE.egg-info
 visualizations
+
+inference_out/
+visual_out/

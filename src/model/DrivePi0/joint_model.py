@@ -341,10 +341,10 @@ def forward_mixture_attn(
     attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)
                                 ) / math.sqrt(head_dim)
 
-    # Soft capping
-    attn_weights = attn_weights / attn_softclamp
-    attn_weights = torch.tanh(attn_weights)
-    attn_weights = attn_weights * attn_softclamp
+    # Soft capping Qwen3可以不用
+    # attn_weights = attn_weights / attn_softclamp
+    # attn_weights = torch.tanh(attn_weights)
+    # attn_weights = attn_weights * attn_softclamp
     
     # ── 动态裁剪 mask 到实际 Q/KV 序列长度 ──────────────────────────
     # 原因：Q 可能因 skip_action 变短，KV 可能因非 active 缓存变长，
@@ -467,15 +467,15 @@ class JointModel(nn.Module):
         active_mixture_names = list(embeds_all.keys())
 
         # normalization
-        # [Batch_Size, Seq_Len, Hidden_Size]
-        for name in active_mixture_names:
-            hidden_size = embeds_all[name].shape[-1]
-            normalizer = torch.tensor(
-                hidden_size**0.5,
-                dtype=embeds_all[name].dtype,
-                device=embeds_all[name].device,
-            )
-            embeds_all[name] *= normalizer
+        # [Batch_Size, Seq_Len, Hidden_Size] Qwen3VLM 的输入已经在 VLMMixtureAdapter 内部做了 LayerNorm，这里不需要重复归一化，直接放行
+        # for name in active_mixture_names:
+        #     hidden_size = embeds_all[name].shape[-1]
+        #     normalizer = torch.tensor(
+        #         hidden_size**0.5,
+        #         dtype=embeds_all[name].dtype,
+        #         device=embeds_all[name].device,
+        #     )
+        #     embeds_all[name] *= normalizer
 
         # layers
         for vlm_layer_idx in range(self.num_hidden_layers):   # 0-27
