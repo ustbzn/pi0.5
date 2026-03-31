@@ -251,7 +251,8 @@ class BagDataHandler:
         try:
             self.routing_bag = rosbag.Bag(self.bags_file_routing, "r")
         except Exception as e:
-            raise RuntimeError("打开Routing Bag失败：{}".format(e))
+            print(f"[WARN] 打开Routing Bag失败：{e}")
+            self.routing_bag = None   # 标记为不可用
 
 
     def _check_and_find_sequence_files(self):
@@ -520,7 +521,12 @@ class BagDataHandler:
         - 目标roadlink_idx > 当前roadlink_idx → 目标在自车前方（有效）
         """
         # 基础配置
-        assert self.routing_bag is not None, "master_bag未初始化！"
+        # assert self.routing_bag is not None, "master_bag未初始化！"
+        if not self.routing_bag:
+            print("[WARN] 未解析到有效路由数据")
+            empty_junction = [["None", math.nan, math.nan, math.nan], ["None", math.nan, math.nan, math.nan]]
+            self.high_order_intent = [empty_junction for _ in self.sampled_2hz_locations]
+            return
         MAX_PATH_DISTANCE = 400.0  # 路径距离阈值（米）
         MAX_MATCH_JUNCTION = 2     # 最多匹配2个路口
 
@@ -966,7 +972,7 @@ class BagDataHandler:
                 end = max(interval[0], interval[1])
                 
                 # 检查时间戳是否在当前时间段内
-                if start <= relative_ts <= end:
+                if start <= relative_ts <= end + 1e-5:
                     # print("[INFO] 时间戳{}匹配到动作: {} (时间段: [{}, {}])".format(
                     #     relative_ts, action_name, start, end))
                     return action_name
@@ -1089,7 +1095,7 @@ class BagDataHandler:
                 end = max(interval[0], interval[1])
                 
                 # 检查时间戳是否在当前时间段内
-                if start <= relative_ts <= end:
+                if start <= relative_ts <= end + 1e-5:
                     # print("[INFO] 时间戳{}匹配到场景: {} (时间段: [{}, {}])".format(
                     #     relative_ts, scenario_name, start, end))
                     return scenario_name
@@ -1565,7 +1571,7 @@ class BagDataHandler:
                 cam_paths_prev_2[key] = path_prev_2
 
         # 获取 meta action 和 scenario type
-        relative_ts = current_ts - current_ts_loc
+        relative_ts = current_ts - self.valid_timestamps[0]
         meta_action = self.match_action_by_timestamp(relative_ts, action_dict)
         scenario_type = self.match_scenario_by_timestamp(relative_ts, scenario_dict)
 
