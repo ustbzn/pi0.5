@@ -606,9 +606,17 @@ class BagDataHandler:
         print(f"[INFO] 开始生成JSON样本，基于2Hz采样数据，时间范围: {start_time:.3f} - {end_time:.3f}，"
               f"共 {len(sampled_times)} 个采样点")
 
+        # 历史窗口和未来窗口与 _create_sample_data 中保持一致
+        history_window = 5   # 需要 5 帧真实历史
+        future_horizon = 7   # 需要 7 个真实未来轨迹点（含当前帧=0）
+        min_his_idx = history_window - 1        # idx 至少为 4，使 idx-4..idx 均有效
+        min_future_frames = future_horizon - 1  # 需要 idx+1..idx+6 均有效
+
         sample_idx = 0
         for idx, sampled_ts in enumerate(sampled_times):
-            if idx == 0:
+            if idx < min_his_idx:
+                continue
+            if idx + min_future_frames >= len(sampled_times):
                 continue
 
             sorted_front_times = sorted(self.camera_group_by_front.keys())
@@ -681,12 +689,7 @@ class BagDataHandler:
                     his_timestamps.append(self.valid_timestamps[hist_idx])
                     his_locations.append(self.valid_locations[hist_idx])
             else:
-                his_timestamps.append(current_ts_loc)
-                his_locations.append(current_loc)
-
-        while len(his_locations) < history_window:
-            his_locations.append(current_loc)
-            his_timestamps.append(current_ts_loc)
+                return None  # 历史帧数据缺失，跳过该样本
 
         # 收集位置信息
         frame_data = []
@@ -900,9 +903,6 @@ class BagDataHandler:
         ego_rot = build_rotation_matrix_from_yaw(current_yaw)
         global_pose = [ego_utm_x, ego_utm_y, ego_utm_z]
 
-        last_found_local_x = None
-        last_found_local_y = None
-
         for i in range(1, future_horizon):
             target_time = current_ts_loc + i * future_interval
             target_loc_idx, _ = self._find_nearest_loc_idx(target_time, max_delta=0.25, use_2hz_sampled=True)
@@ -924,15 +924,10 @@ class BagDataHandler:
                 future_x_ego = local_pts[0][0]
                 future_y_ego = local_pts[0][1]
 
-                last_found_local_x = future_x_ego
-                last_found_local_y = future_y_ego
-
                 fur_x[0, i] = future_y_ego
                 fur_y[0, i] = future_x_ego
             else:
-                if last_found_local_x is not None:
-                    fur_x[0, i] = last_found_local_y
-                    fur_y[0, i] = last_found_local_x
+                return None  # 未来帧数据缺失，跳过该样本
 
         sample_data['fur_x'] = fur_x
         sample_data['fur_y'] = fur_y

@@ -6,7 +6,7 @@ hydra:
 _target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
 
 current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi  # You need to set path
-run_name: ${now:%Y-%m-%d}_${now:%H-%M}_nuscene_0325
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_0330
 log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
 
 name: drive-pi0
@@ -84,7 +84,7 @@ n_epochs: 40
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: minmax
 # 需要修改的参数
-n_train: 23930  # total training samples; update when dataset size changes
+n_train: 60974  # total training samples; update when dataset size changes
 # n_updates: 总更新次数 = ceil(训练样本数 / 实际全局batch大小) * epoch数
 # 注意: 实际 global_batch_size 会在训练代码中自动计算 (448 = 4 GPUs * 16 per_device * 7 accumulation)
 # 使用向上取整确保每个epoch至少有一次更新: ceil(480 / 448) * n_epochs = 2 * 15 = 30
@@ -104,17 +104,17 @@ eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
 # 如果有4个GPU，每个设备16，建议设置为 64 的倍数 (4 * 16 = 64)
 # 例如: 64, 128, 192, 256, 320, 384, 448, 512 等
 global_batch_size: 1024  # 1 GPU * 16 per_device * 7 accumulation = 64
-per_device_batch_size: 64 # 不训vlm时可以设置更大64，但训vlm时建议保持较小以适应显存如32或16
+per_device_batch_size: 96 # 不训vlm时可以设置更大64，但训vlm时建议保持较小以适应显存如32或16
 num_workers: 8
 # 学习率
 action_lr: 1e-5
 vlm_lr: 1e-5
 action_lr_scheduler:
-  first_cycle_steps: 23930 # basically no decaying
+  first_cycle_steps: ${n_updates} # n_updates
   min_lr: 1e-8
   warmup_steps: 200 # a bit of warmup
 vlm_lr_scheduler:
-  first_cycle_steps: 23930
+  first_cycle_steps: ${n_updates} # n_updates
   min_lr: 1e-8
   warmup_steps: 200
 action_weight_decay: 0

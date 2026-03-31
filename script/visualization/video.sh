@@ -1,4 +1,4 @@
 python src/utils/merge_images.py \
-	--dual-dir visual_out/nuscene-0111/dual_0323 \
-	--out-dir visual_out/nuscene-0111/video_0323 \
+	--dual-dir visual_out/mogo-2503/dual_0330 \
+	--out-dir visual_out/mogo-2503/video_0330 \
 	--fps 5

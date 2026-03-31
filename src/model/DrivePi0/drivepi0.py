@@ -543,8 +543,8 @@ class DrivePiZero(nn.Module, NoSyncBase):
         bsz = input_ids.size(0)
 
         kv_caches = self.joint_model.build_mixture_caches()
-        print("pixel_values.shape:", pixel_values.shape)
-        print("image_grid_thw.shape:", image_grid_thw.shape)  
+        # print("pixel_values.shape:", pixel_values.shape)
+        # print("image_grid_thw.shape:", image_grid_thw.shape)  
 
         # merge the text tokens and the image tokens
         inputs_embeds = self._forward_qwen3_vision_and_text_embedding(

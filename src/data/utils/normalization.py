@@ -45,41 +45,59 @@ class Normalize:
         with open(self.percentile_path, "r") as f:
             loaded_data = json.load(f)
 
-        # 分位数参数（原始实现）
-        self.speed_01 = loaded_data["speed"][0]
-        self.speed_99 = loaded_data["speed"][1]
-        self.acceleration_01 = loaded_data["acceleration"][0]
-        self.acceleration_99 = loaded_data["acceleration"][1]
-        self.angular_velocity_01 = loaded_data["angular_velocity"][0]
-        self.angular_velocity_99 = loaded_data["angular_velocity"][1]
-        self.theta_01 = loaded_data["theta"][0]
-        self.theta_99 = loaded_data["theta"][1]
-        self.fur_x_01 = loaded_data["fur_x"][0]
-        self.fur_x_99 = loaded_data["fur_x"][1]
-        self.fur_y_01 = loaded_data["fur_y"][0]
-        self.fur_y_99 = loaded_data["fur_y"][1]
-        self.target_far_x_01 = loaded_data["command_far_x"][0]
-        self.target_far_x_99 = loaded_data["command_far_x"][1]
-        self.target_far_y_01 = loaded_data["command_far_y"][0]
-        self.target_far_y_99 = loaded_data["command_far_y"][1]
+        # 兼容两种 statistics.json 格式：
+        #   嵌套格式: {"percentile": {"speed": [...]}, "minmax": {"speed": [...]}}
+        #   扁平格式: {"speed": [...], "speed_min": ..., "speed_max": ...}
+        if "percentile" in loaded_data:
+            pct = loaded_data["percentile"]
+            mm = loaded_data.get("minmax", {})
+        else:
+            pct = loaded_data
+            mm = {}
 
-        # min-max 参数（可选）：若不存在则回退到分位数
-        self.speed_min = loaded_data.get("speed_min", self.speed_01)
-        self.speed_max = loaded_data.get("speed_max", self.speed_99)
-        self.acceleration_min = loaded_data.get("acceleration_min", self.acceleration_01)
-        self.acceleration_max = loaded_data.get("acceleration_max", self.acceleration_99)
-        self.angular_velocity_min = loaded_data.get("angular_velocity_min", self.angular_velocity_01)
-        self.angular_velocity_max = loaded_data.get("angular_velocity_max", self.angular_velocity_99)
-        self.theta_min = loaded_data.get("theta_min", self.theta_01)
-        self.theta_max = loaded_data.get("theta_max", self.theta_99)
-        self.fur_x_min = loaded_data.get("fur_x_min", self.fur_x_01)
-        self.fur_x_max = loaded_data.get("fur_x_max", self.fur_x_99)
-        self.fur_y_min = loaded_data.get("fur_y_min", self.fur_y_01)
-        self.fur_y_max = loaded_data.get("fur_y_max", self.fur_y_99)
-        self.target_far_x_min = loaded_data.get("command_far_x_min", self.target_far_x_01)
-        self.target_far_x_max = loaded_data.get("command_far_x_max", self.target_far_x_99)
-        self.target_far_y_min = loaded_data.get("command_far_y_min", self.target_far_y_01)
-        self.target_far_y_max = loaded_data.get("command_far_y_max", self.target_far_y_99)
+        # 分位数参数
+        self.speed_01 = pct["speed"][0]
+        self.speed_99 = pct["speed"][1]
+        self.acceleration_01 = pct["acceleration"][0]
+        self.acceleration_99 = pct["acceleration"][1]
+        self.angular_velocity_01 = pct["angular_velocity"][0]
+        self.angular_velocity_99 = pct["angular_velocity"][1]
+        self.theta_01 = pct["theta"][0]
+        self.theta_99 = pct["theta"][1]
+        self.fur_x_01 = pct["fur_x"][0]
+        self.fur_x_99 = pct["fur_x"][1]
+        self.fur_y_01 = pct["fur_y"][0]
+        self.fur_y_99 = pct["fur_y"][1]
+        self.target_far_x_01 = pct["command_far_x"][0]
+        self.target_far_x_99 = pct["command_far_x"][1]
+        self.target_far_y_01 = pct["command_far_y"][0]
+        self.target_far_y_99 = pct["command_far_y"][1]
+
+        # min-max 参数：优先从嵌套 minmax 字段读取，再从扁平 *_min/*_max 读取，最后回退到分位数
+        def _get_mm(field, idx, fallback_key, fallback_val):
+            """从 mm[field][idx] 或 loaded_data[fallback_key] 取值，都没有则用 fallback_val"""
+            v = mm.get(field)
+            if v is not None and len(v) > idx:
+                return v[idx]
+            v2 = loaded_data.get(fallback_key)
+            return v2 if v2 is not None else fallback_val
+
+        self.speed_min = _get_mm("speed", 0, "speed_min", self.speed_01)
+        self.speed_max = _get_mm("speed", 1, "speed_max", self.speed_99)
+        self.acceleration_min = _get_mm("acceleration", 0, "acceleration_min", self.acceleration_01)
+        self.acceleration_max = _get_mm("acceleration", 1, "acceleration_max", self.acceleration_99)
+        self.angular_velocity_min = _get_mm("angular_velocity", 0, "angular_velocity_min", self.angular_velocity_01)
+        self.angular_velocity_max = _get_mm("angular_velocity", 1, "angular_velocity_max", self.angular_velocity_99)
+        self.theta_min = _get_mm("theta", 0, "theta_min", self.theta_01)
+        self.theta_max = _get_mm("theta", 1, "theta_max", self.theta_99)
+        self.fur_x_min = _get_mm("fur_x", 0, "fur_x_min", self.fur_x_01)
+        self.fur_x_max = _get_mm("fur_x", 1, "fur_x_max", self.fur_x_99)
+        self.fur_y_min = _get_mm("fur_y", 0, "fur_y_min", self.fur_y_01)
+        self.fur_y_max = _get_mm("fur_y", 1, "fur_y_max", self.fur_y_99)
+        self.target_far_x_min = _get_mm("command_far_x", 0, "command_far_x_min", self.target_far_x_01)
+        self.target_far_x_max = _get_mm("command_far_x", 1, "command_far_x_max", self.target_far_x_99)
+        self.target_far_y_min = _get_mm("command_far_y", 0, "command_far_y_min", self.target_far_y_01)
+        self.target_far_y_max = _get_mm("command_far_y", 1, "command_far_y_max", self.target_far_y_99)
 
         self._initialized = True
 

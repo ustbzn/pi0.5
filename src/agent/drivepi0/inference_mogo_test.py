@@ -212,7 +212,19 @@ class DrivePiZeroInferenceAgent:
         # 读取并打印 statistics.json 相关字段
         import json
         with open(statistic_path, 'r') as f:
-            stats_data = json.load(f)
+            load_data = json.load(f)
+        if "percentile" in load_data:
+            pct = load_data["percentile"]
+            mm = load_data.get("minmax", {})
+        else:
+            pct = load_data
+            mm = {}
+        
+        if norm_mode == "minmax":
+            stats_data = mm
+        else:
+            stats_data = pct
+            
         print(f"\n{'='*60}")
         print(f"归一化参数 (statistics.json):")
         print(f"{'='*60}")

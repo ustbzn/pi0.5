@@ -1,8 +1,8 @@
-python src/utils/analyzing_traj.py \
-    --trajectory_dir inference_out/nuscene-0111/inference/no_VLM \
-    --pkl_dir datasets/nuscene-0111/val \
+python src/utils/analyzing_traj_mogo.py \
+    --trajectory_dir inference_out/mogo-2503/inference/no_VLM_0330 \
+    --pkl_root_dir /pcpt/pcpt/data/VLA/MOGO/mogo_dataset/val \
     --mode dual \
     --bev_xlim -1 50 \
-    --bev_ylim -20 20 \
-    --output_dir visual_out/nuscene-0111/dual_0323 \
+    --bev_ylim -10 10 \
+    --output_dir visual_out/mogo-2503/dual_0330 \
     # --scene_names 20251210141637
