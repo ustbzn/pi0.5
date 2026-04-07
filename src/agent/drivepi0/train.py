@@ -291,27 +291,38 @@ class DrivePiZeroTrainAgent:
         self.model.train()
 
         def preprocess_batch(batch, split_mask: bool, sample_fm_time: bool):
-            # Drive-Pi0 only uses fixed images
-            # use images as you want
-            # the current code fetchs 2 images, if you want to change the number of images, you need to change the config file
-            images_front = batch["image_front"]
-            images_front_history = batch["image_front_time"]
-            # images_back = batch["image_back"]
-            
-            batch_size = images_front.shape[0]
-            
-            state = batch["state"]
-            trajectory = batch["trajectory"].squeeze(1)  # remove the time dimension
+            # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
+            cam_names = ['front', 'right', 'left', 'back']
+            # 图像语义标签：与 image_list 顺序严格对应
+            cam_labels = [
+                'current front view', 'current right view',
+                'current left view', 'current rear view',
+                'previous front view', 'previous right view',
+                'previous left view', 'previous rear view',
+            ]
+            image_list = []
+            for cam in cam_names:
+                img = batch[f"image_{cam}"]  # [B, H, W, C]
+                img = einops.rearrange(img, "B H W C -> B C H W")
+                image_list.append(img.unsqueeze(1))  # [B, 1, C, H, W]
+            for cam in cam_names:
+                img = batch[f"image_{cam}_time"]  # [B, H, W, C]
+                img = einops.rearrange(img, "B H W C -> B C H W")
+                image_list.append(img.unsqueeze(1))  # [B, 1, C, H, W]
+
+            images = torch.cat(image_list, dim=1)  # [B, 8, C, H, W]
+            batch_size = images.shape[0]
+            num_images_per_sample = images.shape[1]  # 8
+
+            state = batch["state"]  # [B, 5, 10]
+            trajectory = batch["trajectory"].squeeze(1)  # [B, 7, 2]
             texts = batch["language_instruction"]
-            images_front = einops.rearrange(images_front, "B H W C -> B C H W")  # remove cond_steps dimension
-            images_front = images_front.unsqueeze(1)
-            images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")  # remove cond_steps dimension
-            images_front_history = images_front_history.unsqueeze(1)
-            # images_back = einops.rearrange(images_back, "B H W C -> B C H W")  # remove cond_steps dimension
-            # images_back = images_back.unsqueeze(1)
             
-            images = torch.cat((images_front, images_front_history), dim=1) # cat
             model_inputs = self.processor(text=texts, images=images)
+            
+            # 验证图像token数量（对应正确调用代码中的验证逻辑）
+            num_image_tokens = (model_inputs["input_ids"] == self.processor.image_token_id).sum().item()
+            # print(f"input_ids 中图像token数量: {num_image_tokens}, pixel_values shape: {model_inputs['pixel_values'].shape}")
 
             # build causal mask and position ids for trajectory
             causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
@@ -348,10 +359,9 @@ class DrivePiZeroTrainAgent:
         while 1:
             for batch in self.train_dataloader:
                 '''
-                batch: dict with keys 'state', 'image_front', 'image_back', 'trajectory', 'language_instruction'
-                image_front: (torch.Size([bsz, 1, H, W, 3], uint8)
-                image_front_history: (torch.Size([bsz, 1, H, W, 3], uint8)
-                image_back: (torch.Size([bsz, 1, H, W, 3], uint8)
+                batch: dict with keys 'state', 'image_{front,right,left,back}', 'image_{front,right,left,back}_time', 'trajectory', 'language_instruction'
+                image_{cam}: (torch.Size([bsz, H, W, 3], uint8)  -- 4 cameras
+                image_{cam}_time: (torch.Size([bsz, H, W, 3], uint8)  -- 4 cameras history
                 state: (torch.Size([bsz, window, state_dim])
                 trajectory:  (torch.Size([bsz, horizon, trajectory_dim], float32)
                 language_instruction: btz, str

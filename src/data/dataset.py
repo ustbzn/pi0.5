@@ -94,10 +94,17 @@ class TorchDataset(Dataset):
             data_dict['state'] = state
             # drive-pi0
             if 'cam_id' not in all_data.keys():
-                image_front_path = decode_path_value(all_data['his_cam_front'])
-                image_front_time_path = decode_path_value(all_data['his_cam_front_time'])
-                data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
-                data_dict['image_front_time'] = image_normalization(image_front_time_path, (224, 224))
+                # 4 cameras x 2 time steps = 8 images
+                for cam_name in ['front', 'right', 'left', 'back']:
+                    cam_key = f'his_cam_{cam_name}'
+                    cam_time_key = f'his_cam_{cam_name}_time'
+                    path = decode_path_value(all_data[cam_key])
+                    path_time = decode_path_value(all_data[cam_time_key])
+                    if not path or not path.strip() or not path_time or not path_time.strip():
+                        # 跳过坏样本，随机取下一个
+                        return self.__getitem__((i + 1) % len(self))
+                    data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224))
+                    data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224))
 
             elif not self.use_fixed_images:
                 print("走第二个分支！！！")
