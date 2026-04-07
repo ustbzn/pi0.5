@@ -333,58 +333,58 @@ class DrivePiZeroTrainAgent:
         self.model.train()
 
         def preprocess_batch(batch, split_mask: bool, sample_fm_time: bool):
-            # Drive-Pi0 only uses fixed images
-            # use images as you want
-            # the current code fetchs 2 images, if you want to change the number of images, you need to change the config file
-            images_front = batch["image_front"] # torch.Size([16, 224, 224, 3])
-            images_front_history = batch["image_front_time"] # torch.Size([16, 224, 224, 3])
-            # images_back = batch["image_back"]
-            
-            batch_size = images_front.shape[0]
-            
-            state = batch["state"] # torch.Size([16, 5, 10])
-            trajectory = batch["trajectory"].squeeze(1)  # remove the time dimension torch.Size([16, 7, 2])
+            # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
+            cam_names = ['front', 'right', 'left', 'back']
+            # 图像语义标签：与 image_list 顺序严格对应
+            cam_labels = [
+                'current front view', 'current right view',
+                'current left view', 'current rear view',
+                'previous front view', 'previous right view',
+                'previous left view', 'previous rear view',
+            ]
+            image_list = []
+            for cam in cam_names:
+                img = batch[f"image_{cam}"]  # [B, H, W, C]
+                img = einops.rearrange(img, "B H W C -> B C H W")
+                image_list.append(img.unsqueeze(1))  # [B, 1, C, H, W]
+            for cam in cam_names:
+                img = batch[f"image_{cam}_time"]  # [B, H, W, C]
+                img = einops.rearrange(img, "B H W C -> B C H W")
+                image_list.append(img.unsqueeze(1))  # [B, 1, C, H, W]
+
+            images = torch.cat(image_list, dim=1)  # [B, 8, C, H, W]
+            batch_size = images.shape[0]
+            num_images_per_sample = images.shape[1]  # 8
+
+            state = batch["state"]  # [B, 5, 10]
+            trajectory = batch["trajectory"].squeeze(1)  # [B, 7, 2]
             texts = batch["language_instruction"]
-            images_front = einops.rearrange(images_front, "B H W C -> B C H W")  # remove cond_steps dimension torch.Size([16, 3, 224, 224])
-            images_front = images_front.unsqueeze(1) # torch.Size([16, 1, 3, 224, 224])
-            images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")  # remove cond_steps dimension torch.Size([16, 3, 224, 224])
-            images_front_history = images_front_history.unsqueeze(1) # torch.Size([16, 1, 3, 224, 224])
-            # images_back = einops.rearrange(images_back, "B H W C -> B C H W")  # remove cond_steps dimension
-            # images_back = images_back.unsqueeze(1)
-            
-            images = torch.cat((images_front, images_front_history), dim=1) # cat torch.Size([16, 2, 3, 224, 224])
-            # 注意：Qwen3VLProcessor要求images是PIL.Image列表
-            # 假设images是[B, N, H, W, C]的numpy数组（uint8），需转换为PIL
+
+            # convert to PIL images for Qwen3VLProcessor
             pil_images = []
-            for i in range(images.shape[0]):
-                for j in range(images.shape[1]):
-                    # 转换为PIL Image (HWC -> RGB)
-                    # img = Image.fromarray(images[i, j].cpu().numpy().astype(np.uint8))
-                    img = Image.fromarray(images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0))  # 如果图像是CHW格式，先转置为HWC
+            for i in range(batch_size):
+                for j in range(num_images_per_sample):
+                    img = Image.fromarray(
+                        images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
+                    )
                     pil_images.append(img)
-            
-            # ===== 关键修改：构建 Qwen3VL 聊天格式 =====
-            # 每个样本有2张图，需要在文本中插入对应数量的图像占位
-            num_images_per_sample = images.shape[1]  # 2
+
+            # build Qwen3VL chat format: each image with semantic label
             chat_texts = []
             for i, text in enumerate(texts):
-                # 构建包含图像的消息列表
                 content = []
-                # 插入所有图像
-                for _ in range(num_images_per_sample):
+                for label in cam_labels:
+                    content.append({"type": "text", "text": f"{label}:"})
                     content.append({"type": "image"})
-                # 插入文本
                 content.append({"type": "text", "text": text})
-                
+
                 messages = [{"role": "user", "content": content}]
-                # 应用聊天模板
                 chat_text = self.processor.apply_chat_template(
                     messages,
                     tokenize=False,
                     add_generation_prompt=True,
                 )
                 chat_texts.append(chat_text)
-            # ===== 修改结束 =====
             
             model_inputs = self.processor(
                 text=chat_texts,  # ✅ 传入修改后的聊天文本列表
@@ -436,10 +436,9 @@ class DrivePiZeroTrainAgent:
         while 1:
             for batch in self.train_dataloader:
                 '''
-                batch: dict with keys 'state', 'image_front', 'image_back', 'trajectory', 'language_instruction'
-                image_front: (torch.Size([bsz, 1, H, W, 3], uint8)
-                image_front_history: (torch.Size([bsz, 1, H, W, 3], uint8)
-                image_back: (torch.Size([bsz, 1, H, W, 3], uint8)
+                batch: dict with keys 'state', 'image_{front,right,left,back}', 'image_{front,right,left,back}_time', 'trajectory', 'language_instruction'
+                image_{cam}: (torch.Size([bsz, H, W, 3], uint8)  -- 4 cameras
+                image_{cam}_time: (torch.Size([bsz, H, W, 3], uint8)  -- 4 cameras history
                 state: (torch.Size([bsz, window, state_dim])
                 trajectory:  (torch.Size([bsz, horizon, trajectory_dim], float32)
                 language_instruction: btz, str

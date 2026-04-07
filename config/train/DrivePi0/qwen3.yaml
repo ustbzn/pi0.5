@@ -6,7 +6,7 @@ hydra:
 _target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
 
 current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi  # You need to set path
-run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_0330
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_0331_4img
 log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
 
 name: drive-pi0
@@ -104,7 +104,7 @@ eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
 # 如果有4个GPU，每个设备16，建议设置为 64 的倍数 (4 * 16 = 64)
 # 例如: 64, 128, 192, 256, 320, 384, 448, 512 等
 global_batch_size: 1024  # 1 GPU * 16 per_device * 7 accumulation = 64
-per_device_batch_size: 96 # 不训vlm时可以设置更大64，但训vlm时建议保持较小以适应显存如32或16
+per_device_batch_size: 80 # 8 images, A100-80GB 实测峰值 ~68GB, 留 ~12GB 余量
 num_workers: 8
 # 学习率
 action_lr: 1e-5
@@ -131,7 +131,7 @@ horizon_steps: 7  # 必须与 window.sh 中的 --horizon 参数一致
 action_dim: 2 # EEF_POS
 proprio_dim: 10  # 实际维度: his_speed(1) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + x_command_far(1) + y_command_far(1) = 10
 state_dim: ${proprio_dim}
-max_seq_len: 532  # fixed 512 for image + max 20 for text
+max_seq_len: 600  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600
 tokenizer_padding: max_length # instead of truncating to longest
 max_image_text_tokens: ${max_seq_len}
 

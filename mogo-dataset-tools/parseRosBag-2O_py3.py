@@ -867,7 +867,7 @@ class BagDataHandler:
 
         navi_x_ego = 0.0
         navi_y_ego = 0.0
-        navi_frame_offset = 6
+        navi_frame_offset = 12  # 12帧 * 0.5s = 6秒后的导航目标点
         navi_target_time = current_ts_loc + navi_frame_offset * 0.5
 
         navi_loc_idx, _ = self._find_nearest_loc_idx(navi_target_time, max_delta=0.25, use_2hz_sampled=True)
