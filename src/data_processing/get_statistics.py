@@ -32,6 +32,7 @@ def generate_data(data_path, output_path='statistics.json'):
     # command_near_y = []
     command_far_x = []
     command_far_y = []
+    navigation_id = []
     print('calcuating percentile_01 and percentile_99 ... ')
     for i in tqdm(range(len(list_data_dict))):
         pkl_data_path = os.path.join(data_path, list_data_dict[i])
@@ -45,6 +46,8 @@ def generate_data(data_path, output_path='statistics.json'):
             fur_y.append(all_data['fur_y'])
             command_far_x.append(all_data['x_command_far'])
             command_far_y.append(all_data['y_command_far'])
+            if 'navigation_id' in all_data:
+                navigation_id.append(all_data['navigation_id'])
             # command_near_x.append(all_data['x_command_near'])
             # command_near_y.append(all_data['y_command_near'])
     # 打印 flatten 之前的维度信息（数据保证非空）
@@ -65,6 +68,8 @@ def generate_data(data_path, output_path='statistics.json'):
     fur_y = flatten(fur_y)
     command_far_x = flatten(command_far_x)
     command_far_y = flatten(command_far_y)
+    if navigation_id:
+        navigation_id = flatten(navigation_id)
     # command_near_x = flatten(command_near_x)
     # command_near_y = flatten(command_near_y)
     # 打印 flatten 之后的维度信息（只关注四个字段）
@@ -85,6 +90,9 @@ def generate_data(data_path, output_path='statistics.json'):
     fur_y_01, fur_y_99 = calculate(fur_y)
     command_far_x_01, command_far_x_99 = calculate(command_far_x)
     command_far_y_01, command_far_y_99 = calculate(command_far_y)
+    has_nav = isinstance(navigation_id, np.ndarray) and len(navigation_id) > 0
+    if has_nav:
+        navigation_id_01, navigation_id_99 = calculate(navigation_id)
     # command_near_x_01, command_near_x_99 = calculate(command_near_x)
     # command_near_y_01, command_near_y_99 = calculate(command_near_y)
 
@@ -97,6 +105,8 @@ def generate_data(data_path, output_path='statistics.json'):
     fur_y_min, fur_y_max = calc_minmax(fur_y)
     command_far_x_min, command_far_x_max = calc_minmax(command_far_x)
     command_far_y_min, command_far_y_max = calc_minmax(command_far_y)
+    if has_nav:
+        navigation_id_min, navigation_id_max = calc_minmax(navigation_id)
     # command_near_x_min, command_near_x_max = calc_minmax(command_near_x)
     # command_near_y_min, command_near_y_max = calc_minmax(command_near_y)
 
@@ -109,6 +119,8 @@ def generate_data(data_path, output_path='statistics.json'):
     print("fur_y:", fur_y_01, fur_y_99)
     print("command_far_x:", command_far_x_01, command_far_x_99)
     print("command_far_y:", command_far_y_01, command_far_y_99)
+    if has_nav:
+        print("navigation_id:", navigation_id_01, navigation_id_99)
     # print("command_near_x:", command_near_x_01, command_near_x_99)
     # print("command_near_y:", command_near_y_01, command_near_y_99)
 
@@ -121,6 +133,8 @@ def generate_data(data_path, output_path='statistics.json'):
     print("fur_y:", fur_y_min, fur_y_max)
     print("command_far_x:", command_far_x_min, command_far_x_max)
     print("command_far_y:", command_far_y_min, command_far_y_max)
+    if has_nav:
+        print("navigation_id:", navigation_id_min, navigation_id_max)
     # print("command_near_x:", command_near_x_min, command_near_x_max)
     # print("command_near_y:", command_near_y_min, command_near_y_max)
     
@@ -136,6 +150,7 @@ def generate_data(data_path, output_path='statistics.json'):
             # "command_near_y": [fmt(command_near_y_01), fmt(command_near_y_99)],
             "command_far_x": [fmt(command_far_x_01), fmt(command_far_x_99)],
             "command_far_y": [fmt(command_far_y_01), fmt(command_far_y_99)],
+            **({"navigation_id": [fmt(navigation_id_01), fmt(navigation_id_99)]} if has_nav else {}),
         },
         "minmax": {
             "speed": [fmt(speed_min), fmt(speed_max)],
@@ -148,6 +163,7 @@ def generate_data(data_path, output_path='statistics.json'):
             # "command_near_y": [fmt(command_near_y_min), fmt(command_near_y_max)],
             "command_far_x": [fmt(command_far_x_min), fmt(command_far_x_max)],
             "command_far_y": [fmt(command_far_y_min), fmt(command_far_y_max)],
+            **({"navigation_id": [fmt(navigation_id_min), fmt(navigation_id_max)]} if has_nav else {}),
         },
     }
 

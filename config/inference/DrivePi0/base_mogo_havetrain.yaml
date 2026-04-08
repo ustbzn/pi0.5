@@ -24,7 +24,7 @@ norm_mode: minmax
 
 data:
   # statistics_path: ${current_dir}/datasets/mogo-test/statistics.json
-  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset/statistics.json
+  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi/statistics.json
   use_fixed_images: False
   work_dir: ${current_dir}
   split: val
@@ -48,10 +48,10 @@ cond_steps: 5
 horizon_steps: 7
 
 action_dim: 2 # EEF_POS
-proprio_dim: 10  # POS_EULER
+proprio_dim: 9  # his_speed(1) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + navigation_id(1) = 9
 state_dim: ${proprio_dim}
 # 参数更改
-max_seq_len: 532  # fixed 512 for image + max 20 for text
+max_seq_len: 600  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600
 tokenizer_padding: max_length # instead of truncating to longest
 max_image_text_tokens: ${max_seq_len}
 

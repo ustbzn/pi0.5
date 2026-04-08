@@ -74,36 +74,47 @@ class DrivePiZeroInferenceAgent:
     
     
     def run(self, data_dict):
-        images_front = data_dict["image_front"]
-        images_front = images_front.unsqueeze(0)
-        images_front_history = data_dict["image_front_history"]
-        images_front_history = images_front_history.unsqueeze(0)
+        # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
+        cam_names = ['front', 'right', 'left', 'back']
+        cam_labels = [
+            'current front view', 'current right view',
+            'current left view', 'current rear view',
+            'previous front view', 'previous right view',
+            'previous left view', 'previous rear view',
+        ]
 
+        image_list = []
+        for cam in cam_names:
+            img = data_dict[f"image_{cam}"].unsqueeze(0)  # [1, H, W, C]
+            img = einops.rearrange(img, "B H W C -> B C H W")
+            image_list.append(img.unsqueeze(1))  # [1, 1, C, H, W]
+        for cam in cam_names:
+            img = data_dict[f"image_{cam}_time"].unsqueeze(0)  # [1, H, W, C]
+            img = einops.rearrange(img, "B H W C -> B C H W")
+            image_list.append(img.unsqueeze(1))  # [1, 1, C, H, W]
+
+        images = torch.cat(image_list, dim=1)  # [1, 8, C, H, W]
         state = data_dict["state"].unsqueeze(0)
         texts = [data_dict["language_instruction"]]
 
-        images_front = einops.rearrange(images_front, "B H W C -> B C H W")
-        images_front = images_front.unsqueeze(1)
-        images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")
-        images_front_history = images_front_history.unsqueeze(1)
-
-        images = torch.cat((images_front, images_front_history), dim=1)
+        batch_size = images.shape[0]
+        num_images_per_sample = images.shape[1]  # 8
 
         # 转换为 PIL Image 列表（Qwen3VLProcessor 需要）
         pil_images = []
-        for i in range(images.shape[0]):
-            for j in range(images.shape[1]):
+        for i in range(batch_size):
+            for j in range(num_images_per_sample):
                 img = Image.fromarray(
                     images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
                 )
                 pil_images.append(img)
 
-        # 构建 Qwen3VL 聊天格式
-        num_images_per_sample = images.shape[1]
+        # 构建 Qwen3VL 聊天格式（与训练一致，每张图像带语义标签）
         chat_texts = []
         for i, text in enumerate(texts):
             content = []
-            for _ in range(num_images_per_sample):
+            for label in cam_labels:
+                content.append({"type": "text", "text": f"{label}:"})
                 content.append({"type": "image"})
             content.append({"type": "text", "text": text})
             messages = [{"role": "user", "content": content}]
@@ -326,12 +337,14 @@ class DrivePiZeroInferenceAgent:
                     
                     # 准备数据
                     state = normalize.prepare_state(all_data)
-                    
+
                     data_dict = {}
-                    image_front_path = extract_image_path(all_data['his_cam_front'])
-                    data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
-                    image_front_time_path = extract_image_path(all_data['his_cam_front_time'])
-                    data_dict['image_front_history'] = image_normalization(image_front_time_path, (224, 224))
+                    # 4 cameras x 2 time steps = 8 images（与训练一致）
+                    for cam_name in ['front', 'right', 'left', 'back']:
+                        cam_path = extract_image_path(all_data[f'his_cam_{cam_name}'])
+                        data_dict[f'image_{cam_name}'] = image_normalization(cam_path, (224, 224))
+                        cam_time_path = extract_image_path(all_data[f'his_cam_{cam_name}_time'])
+                        data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, (224, 224))
                     data_dict["language_instruction"] = "predict trajectory"
                     data_dict['state'] = state
                     
@@ -565,12 +578,14 @@ if __name__ == '__main__':
                 all_data = pickle.load(f)
             normalize = Normalize.get_instance(statistic_path, norm_mode=inference_agent.norm_mode)
             state = normalize.prepare_state(all_data)
-            
+
             data_dict = {}
-            image_front_path = extract_image_path(all_data['his_cam_front'])
-            data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
-            image_front_time_path = extract_image_path(all_data['his_cam_front_time'])
-            data_dict['image_front_history'] = image_normalization(image_front_time_path, (224, 224))
+            # 4 cameras x 2 time steps = 8 images（与训练一致）
+            for cam_name in ['front', 'right', 'left', 'back']:
+                cam_path = extract_image_path(all_data[f'his_cam_{cam_name}'])
+                data_dict[f'image_{cam_name}'] = image_normalization(cam_path, (224, 224))
+                cam_time_path = extract_image_path(all_data[f'his_cam_{cam_name}_time'])
+                data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, (224, 224))
             data_dict["language_instruction"] = "predict trajectory"
             data_dict['state'] = state
             

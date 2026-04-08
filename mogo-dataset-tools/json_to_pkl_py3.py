@@ -47,6 +47,16 @@ import traceback
 import numpy as np
 
 
+# 导航指令映射：第一个路口的指令 -> 整数ID
+NAVIGATION_COMMAND_MAP = {
+    "straight": 0,
+    "turn left": 1,
+    "turn right": 2,
+    "u turn": 3,
+    "park": 4,
+}
+
+
 class StringWrapper:
     """
     包装字符串，使其具有 .numpy() 方法。
@@ -125,6 +135,26 @@ def convert_json_to_pkl(json_path, pkl_path, overwrite=True):
 
         if isinstance(pkl_data, dict):
             wrap_image_path_fields(pkl_data)
+
+            # 从 navigation_command 提取第一个路口的指令，映射为 navigation_id
+            nav_cmd = pkl_data.get('navigation_command')
+            if nav_cmd and isinstance(nav_cmd, list) and len(nav_cmd) > 0:
+                first_cmd = nav_cmd[0]  # 只使用第一个路口
+                if isinstance(first_cmd, list) and len(first_cmd) > 0:
+                    cmd_str = first_cmd[0]  # e.g. "straight", "turn left", "turn right"
+                    nav_id = NAVIGATION_COMMAND_MAP.get(cmd_str, -1)
+                    if nav_id == -1:
+                        print(f"[WARNING] 未知导航指令: {cmd_str}, 文件: {json_path}")
+                        nav_id = 0  # 回退到 straight
+                    # 存为与 window 维度一致的数组 (shape=[5,])，方便训练加载
+                    window_size = len(pkl_data.get('his_speed', {}).get('data', [0]*5)) \
+                        if isinstance(pkl_data.get('his_speed'), dict) \
+                        else (pkl_data['his_speed'].shape[0] if hasattr(pkl_data.get('his_speed'), 'shape') else 5)
+                    pkl_data['navigation_id'] = np.array([nav_id] * window_size, dtype=np.float32)
+                else:
+                    pkl_data['navigation_id'] = np.array([0] * 5, dtype=np.float32)
+            else:
+                pkl_data['navigation_id'] = np.array([0] * 5, dtype=np.float32)
 
         with open(pkl_path, 'wb') as f:
             pickle.dump(pkl_data, f, protocol=3)

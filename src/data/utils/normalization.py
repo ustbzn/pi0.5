@@ -72,6 +72,10 @@ class Normalize:
         self.target_far_x_99 = pct["command_far_x"][1]
         self.target_far_y_01 = pct["command_far_y"][0]
         self.target_far_y_99 = pct["command_far_y"][1]
+        # navigation_id: 离散值 (0=straight, 1=turn left, 2=turn right)
+        nav = pct.get("navigation_id")
+        self.nav_id_01 = nav[0] if nav else 0.0
+        self.nav_id_99 = nav[1] if nav else 2.0
 
         # min-max 参数：优先从嵌套 minmax 字段读取，再从扁平 *_min/*_max 读取，最后回退到分位数
         def _get_mm(field, idx, fallback_key, fallback_val):
@@ -98,6 +102,9 @@ class Normalize:
         self.target_far_x_max = _get_mm("command_far_x", 1, "command_far_x_max", self.target_far_x_99)
         self.target_far_y_min = _get_mm("command_far_y", 0, "command_far_y_min", self.target_far_y_01)
         self.target_far_y_max = _get_mm("command_far_y", 1, "command_far_y_max", self.target_far_y_99)
+        # navigation_id minmax
+        self.nav_id_min = _get_mm("navigation_id", 0, "navigation_id_min", self.nav_id_01)
+        self.nav_id_max = _get_mm("navigation_id", 1, "navigation_id_max", self.nav_id_99)
 
         self._initialized = True
 
@@ -160,19 +167,12 @@ class Normalize:
         his_theta = self._normalize_by_mode(
             all_data["his_theta"], self.theta_01, self.theta_99, self.theta_min, self.theta_max
         )
-        target_far_x = self._normalize_by_mode(
-            all_data["x_command_far"],
-            self.target_far_x_01,
-            self.target_far_x_99,
-            self.target_far_x_min,
-            self.target_far_x_max,
-        )
-        target_far_y = self._normalize_by_mode(
-            all_data["y_command_far"],
-            self.target_far_y_01,
-            self.target_far_y_99,
-            self.target_far_y_min,
-            self.target_far_y_max,
+        navigation_id = self._normalize_by_mode(
+            all_data["navigation_id"],
+            self.nav_id_01,
+            self.nav_id_99,
+            self.nav_id_min,
+            self.nav_id_max,
         )
 
         state = torch.tensor(
@@ -182,8 +182,7 @@ class Normalize:
                     his_acceleration,
                     his_angular_velocity,
                     his_theta[:, np.newaxis],
-                    target_far_x[:, np.newaxis],
-                    target_far_y[:, np.newaxis],
+                    navigation_id[:, np.newaxis],
                 ),
                 axis=1,
             )

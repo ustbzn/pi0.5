@@ -6,7 +6,7 @@ hydra:
 _target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
 
 current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi  # You need to set path
-run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_0331_4img
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_0407_4img_navi
 log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
 
 name: drive-pi0
@@ -49,7 +49,7 @@ data:
     statistics_path: ${data.train.dynamic_dir}/statistics.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset # 训练集不变
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi # 训练集不变
     fixed_dir: b2d_fixed_camera
     split: train
     num_of_action_experts: 13 # useless in drive-pi0
@@ -59,7 +59,7 @@ data:
     statistics_path: ${data.val.dynamic_dir}/statistics.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset # 测试集不变
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi # 测试集不变
     fixed_dir: b2d_fixed_camera
     split: val
     num_of_action_experts: 13 # useless in drive-pi0
@@ -84,7 +84,7 @@ n_epochs: 40
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: minmax
 # 需要修改的参数
-n_train: 60974  # total training samples; update when dataset size changes
+n_train: 52620  # total training samples; update when dataset size changes
 # n_updates: 总更新次数 = ceil(训练样本数 / 实际全局batch大小) * epoch数
 # 注意: 实际 global_batch_size 会在训练代码中自动计算 (448 = 4 GPUs * 16 per_device * 7 accumulation)
 # 使用向上取整确保每个epoch至少有一次更新: ceil(480 / 448) * n_epochs = 2 * 15 = 30
@@ -129,7 +129,7 @@ final_action_clip_value: 1.0  # data normalized in [-1,1]
 cond_steps: 5  # 必须与 window.sh 中的 --window_size 参数一致
 horizon_steps: 7  # 必须与 window.sh 中的 --horizon 参数一致
 action_dim: 2 # EEF_POS
-proprio_dim: 10  # 实际维度: his_speed(1) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + x_command_far(1) + y_command_far(1) = 10
+proprio_dim: 9  # 实际维度: his_speed(1) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + navigation_id(1) = 9
 state_dim: ${proprio_dim}
 max_seq_len: 600  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600
 tokenizer_padding: max_length # instead of truncating to longest
