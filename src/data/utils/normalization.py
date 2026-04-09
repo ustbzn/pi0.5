@@ -144,9 +144,33 @@ class Normalize:
         else:
             return self.recover_trajectory(x_norm, p01, p99)
 
+    # -------- navigation_id one-hot 编码 --------
+    NUM_NAV_CLASSES = 5  # straight=0, turn_left=1, turn_right=2, u_turn=3, park=4
+
+    def _nav_id_to_onehot(self, nav_id_array):
+        """将 navigation_id 数组转为 one-hot 编码
+
+        Args:
+            nav_id_array: shape (cond_steps,) 的数组，值为 0~4 的整数
+
+        Returns:
+            shape (cond_steps, NUM_NAV_CLASSES) 的 one-hot 数组
+        """
+        ids = np.round(nav_id_array).astype(int)
+        ids = np.clip(ids, 0, self.NUM_NAV_CLASSES - 1)
+        onehot = np.zeros((len(ids), self.NUM_NAV_CLASSES), dtype=np.float32)
+        onehot[np.arange(len(ids)), ids] = 1.0
+        return onehot
+
     # -------- 对外接口：state / traj / infer_traj --------
-    def prepare_state(self, all_data):
-        """根据当前模式对状态进行归一化"""
+    def prepare_state(self, all_data, nav_onehot: bool = False):
+        """根据当前模式对状态进行归一化
+
+        Args:
+            all_data: pkl 数据字典
+            nav_onehot: 是否将 navigation_id 编码为 one-hot 向量（5 维）。
+                        False 时使用原始的 minmax 归一化标量（1 维），保持向后兼容。
+        """
         his_speed = self._normalize_by_mode(
             all_data["his_speed"], self.speed_01, self.speed_99, self.speed_min, self.speed_max
         )
@@ -167,26 +191,30 @@ class Normalize:
         his_theta = self._normalize_by_mode(
             all_data["his_theta"], self.theta_01, self.theta_99, self.theta_min, self.theta_max
         )
-        navigation_id = self._normalize_by_mode(
-            all_data["navigation_id"],
-            self.nav_id_01,
-            self.nav_id_99,
-            self.nav_id_min,
-            self.nav_id_max,
-        )
 
-        state = torch.tensor(
-            np.concatenate(
-                (
-                    his_speed[:, np.newaxis],
-                    his_acceleration,
-                    his_angular_velocity,
-                    his_theta[:, np.newaxis],
-                    navigation_id[:, np.newaxis],
-                ),
-                axis=1,
+        parts = [
+            his_speed[:, np.newaxis],
+            his_acceleration,
+            his_angular_velocity,
+            his_theta[:, np.newaxis],
+        ]
+
+        if nav_onehot:
+            # 5 维 one-hot，不做连续归一化
+            nav_oh = self._nav_id_to_onehot(all_data["navigation_id"])
+            parts.append(nav_oh)
+        else:
+            # 向后兼容：1 维 minmax 归一化标量
+            navigation_id = self._normalize_by_mode(
+                all_data["navigation_id"],
+                self.nav_id_01,
+                self.nav_id_99,
+                self.nav_id_min,
+                self.nav_id_max,
             )
-        )
+            parts.append(navigation_id[:, np.newaxis])
+
+        state = torch.tensor(np.concatenate(parts, axis=1))
         return state
 
     def prepare_traj(self, all_data):

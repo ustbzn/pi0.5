@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 from PIL import Image
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from transformers import AutoTokenizer, Qwen3VLProcessor
 
 import swanlab
@@ -193,11 +193,29 @@ class DrivePiZeroTrainAgent:
         )
 
         # dataloader --- spawn one for each rank, num_workers=0
-        self.train_dataloader = DataLoader(  # batch: dict with keys 'state', 'trajectory', 'image_front'
-            Bench2DriveDataset(cfg.data.train).dataset,
+        train_dataset = Bench2DriveDataset(cfg.data.train).dataset
+
+        # 加权采样：平衡 navigation_id 类别分布
+        train_sampler = None
+        if cfg.get("nav_weighted_sampling", False):
+            log.info("Building weighted sampler for navigation_id balance...")
+            nav_labels = train_dataset.get_nav_labels()
+            from collections import Counter
+            label_counts = Counter(nav_labels)
+            log.info(f"Navigation label distribution: {dict(sorted(label_counts.items()))}")
+            # 每个类别的权重与其频率成反比
+            weights = [1.0 / label_counts[l] for l in nav_labels]
+            train_sampler = WeightedRandomSampler(
+                weights, num_samples=len(weights), replacement=True
+            )
+
+        self.train_dataloader = DataLoader(
+            train_dataset,
             batch_size=cfg.per_device_batch_size,
             pin_memory=True,
-            num_workers=cfg.num_workers
+            num_workers=cfg.num_workers,
+            shuffle=(train_sampler is None),
+            sampler=train_sampler,
         )
 
         self.run_eval = cfg.data.get("val", False)

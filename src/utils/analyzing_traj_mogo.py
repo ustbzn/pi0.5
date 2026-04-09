@@ -46,6 +46,15 @@ import torch
 from src.utils.metric import get_action_accuracy
 from src.data.utils.normalization import Normalize
 
+# navigation_id -> 映射前的导航指令文本（与 json_to_pkl_py3.py 中 NAVIGATION_COMMAND_MAP 反向对应）
+NAVIGATION_ID_TO_TEXT = {
+    0: "straight",
+    1: "turn left",
+    2: "turn right",
+    3: "u turn",
+    4: "park",
+}
+
 
 class MOGOTrajectoryAnalyzer:
     """MOGO 数据集轨迹分析器"""
@@ -418,29 +427,34 @@ class MOGOTrajectoryAnalyzer:
             "accuracies": accuracies,
         }
     
-    def _load_front_image_from_pkl(self, sample_idx: int) -> Optional[np.ndarray]:
-        """从pkl加载前视图像"""
+    def _load_front_image_from_pkl(self, sample_idx: int) -> Optional[Tuple[np.ndarray, Optional[str]]]:
+        """从pkl加载前视图像和导航指令文本
+
+        Returns:
+            (img_rgb, nav_text) 元组，img_rgb 为前视图像，nav_text 为映射前的导航指令文本（如 "straight"）。
+            加载失败时返回 None。
+        """
         if self.pkl_root_dir is None:
             print("错误: 未指定pkl文件根目录")
             return None
-        
+
         # 从映射中找到对应的pkl文件
         if sample_idx not in self.pkl_file_map:
             print(f"错误: 样本索引 {sample_idx} 没有对应的pkl文件")
             return None
-        
+
         timestamp, pkl_path = self.pkl_file_map[sample_idx]
         try:
             import pickle
             # 兼容 Python 2.7 生成的 pickle 文件
             with open(pkl_path, "rb") as f:
                 data = pickle.load(f, encoding='latin-1')
-            
+
             img_ref = data.get("his_cam_front", None)
             if img_ref is None:
                 print(f"错误: pkl缺少 his_cam_front 字段: {pkl_path}")
                 return None
-            
+
             # 兼容不同的数据格式（与 inference_mogo.py 保持一致）
             # 1) 处理 dict 类型（StringWrapper 序列化为 dict 的情况）
             if isinstance(img_ref, dict) and "_string_wrapper_marker" in img_ref:
@@ -456,17 +470,27 @@ class MOGOTrajectoryAnalyzer:
             else:
                 print(f"错误: his_cam_front 类型不支持: {type(img_ref)}")
                 return None
-            
+
             if not Path(img_path).exists():
                 print(f"错误: 图像文件不存在: {img_path}")
                 return None
-            
+
             img_bgr = cv2.imread(img_path)
             if img_bgr is None:
                 print(f"错误: 无法读取图像: {img_path}")
                 return None
-            
-            return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+            # 读取 navigation_id 并反向映射为文本
+            nav_text = None
+            nav_id_arr = data.get("navigation_id", None)
+            if nav_id_arr is not None:
+                if hasattr(nav_id_arr, '__len__') and len(nav_id_arr) > 0:
+                    nav_id = int(nav_id_arr[0])
+                else:
+                    nav_id = int(nav_id_arr)
+                nav_text = NAVIGATION_ID_TO_TEXT.get(nav_id, f"unknown({nav_id})")
+
+            return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB), nav_text
         except Exception as e:
             print(f"加载pkl失败 {pkl_path}: {e}")
             import traceback
@@ -505,9 +529,10 @@ class MOGOTrajectoryAnalyzer:
 
         gt_traj = self.gt_trajectories[sample_idx]
         pred_traj = self.pred_trajectories[sample_idx]
-        img_rgb = self._load_front_image_from_pkl(sample_idx)
-        if img_rgb is None:
+        result = self._load_front_image_from_pkl(sample_idx)
+        if result is None:
             return
+        img_rgb, nav_text = result
 
         # 获取场景信息
         scene_info = self.get_scene_info(sample_idx)
@@ -516,6 +541,24 @@ class MOGOTrajectoryAnalyzer:
             front_title = f"Front image (sample {sample_idx}, {timestamp}, step {local_idx})"
         else:
             front_title = f"Front image (sample {sample_idx})"
+
+        # 将导航指令文字叠加到前视图像上（左上角，醒目显示）
+        if nav_text:
+            front_title += f" | Nav: {nav_text}"
+            img_with_nav = img_rgb.copy()
+            # 使用 OpenCV 在图像上绘制带背景的导航指令文字
+            label = f"Nav: {nav_text}"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 1.2
+            thickness = 2
+            (tw, th), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+            # 绘制半透明背景矩形
+            overlay = img_with_nav.copy()
+            cv2.rectangle(overlay, (10, 10), (10 + tw + 10, 10 + th + baseline + 10), (0, 0, 0), -1)
+            cv2.addWeighted(overlay, 0.6, img_with_nav, 0.4, 0, img_with_nav)
+            # 绘制白色文字
+            cv2.putText(img_with_nav, label, (15, 10 + th + 5), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+            img_rgb = img_with_nav
 
         fig, axes = plt.subplots(
             1, 2,

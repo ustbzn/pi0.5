@@ -18,7 +18,7 @@ lora: False
 lora_r: 32
 lora_dropout: 0.0
 pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct  # You need to set path
-checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/logs/train/drive-pi0/2026-03-31_17-59_mogo_0331_4img/checkpoint/step2400.pt # You need to set path
+checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/logs/train/drive-pi0/2026-04-07_17-14_mogo_0407_4img_navi/checkpoint/step2080.pt # You need to set path
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: minmax
 

@@ -64,6 +64,7 @@ class DrivePiZeroInferenceAgent:
         )
         # 保存归一化模式（优先从 data 中读取）
         self.norm_mode = cfg.get("norm_mode") or cfg.data.get("norm_mode", "percentile")
+        self.nav_onehot = cfg.data.get("nav_onehot", False)
         print('Agent done')
     
     
@@ -239,7 +240,7 @@ class DrivePiZeroInferenceAgent:
                             all_data = pickle.load(f)
                     
                     # 准备数据
-                    state = normalize.prepare_state(all_data)
+                    state = normalize.prepare_state(all_data, nav_onehot=self.nav_onehot)
                     
                     data_dict = {}
                     image_front_path = extract_image_path(all_data['his_cam_front'])
@@ -435,7 +436,7 @@ if __name__ == '__main__':
                 # 如果是 Python 3 生成的 pickle，不需要 encoding 参数
                 all_data = pickle.load(f)
             normalize = Normalize.get_instance(statistic_path, norm_mode=inference_agent.norm_mode)
-            state = normalize.prepare_state(all_data)
+            state = normalize.prepare_state(all_data, nav_onehot=inference_agent.nav_onehot)
             
             data_dict = {}
             image_front_path = extract_image_path(all_data['his_cam_front'])

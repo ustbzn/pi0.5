@@ -72,17 +72,35 @@ def decode_path_value(value):
         return str(value)
 
 class TorchDataset(Dataset):
-    def __init__(self, data_path: str, statistics_path: str, use_fixed_images: bool, num_of_action_experts: int, norm_mode: str = "percentile"):
+    def __init__(self, data_path: str, statistics_path: str, use_fixed_images: bool, num_of_action_experts: int, norm_mode: str = "percentile", nav_onehot: bool = False):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
         self.statistics_path = statistics_path
         self.use_fixed_images = use_fixed_images
         self.num_of_action_experts = num_of_action_experts
         self.norm_mode = norm_mode
+        self.nav_onehot = nav_onehot
         self.list_data_dict = [f for f in os.listdir(self.data_path) if f.endswith('.pkl')]
     
     def __len__(self):
         return len(self.list_data_dict)
+
+    def get_nav_labels(self):
+        """预扫描所有样本的 navigation_id，用于构建 WeightedRandomSampler"""
+        labels = []
+        for fname in self.list_data_dict:
+            pkl_path = os.path.join(self.data_path, fname)
+            try:
+                with open(pkl_path, 'rb') as f:
+                    d = pickle.load(f)
+                nav = d.get('navigation_id')
+                if nav is not None and hasattr(nav, '__len__') and len(nav) > 0:
+                    labels.append(int(nav[0]))
+                else:
+                    labels.append(0)
+            except Exception:
+                labels.append(0)
+        return labels
 
     def __getitem__(self, i):
         data_dict = {}
@@ -90,7 +108,7 @@ class TorchDataset(Dataset):
         with open(pkl_data_path, 'rb') as f:
             all_data = pickle.load(f)
             normalize = Normalize.get_instance(self.statistics_path, norm_mode=self.norm_mode)
-            state = normalize.prepare_state(all_data)
+            state = normalize.prepare_state(all_data, nav_onehot=self.nav_onehot)
             data_dict['state'] = state
             # drive-pi0
             if 'cam_id' not in all_data.keys():
@@ -152,7 +170,8 @@ def prepare_b2d_dataset(
     split: Optional[str] = None,
     dynamic_dir_name: str = 'b2d_dynamic_camera',
     fixed_dir_name: str = 'b2d_fixed_camera',
-    norm_mode: str = "percentile"
+    norm_mode: str = "percentile",
+    nav_onehot: bool = False,
 ):
     """
     Select the dataset directory based on camera type and split.
@@ -165,7 +184,8 @@ def prepare_b2d_dataset(
             statistics_path=statistics_path,
             use_fixed_images=True,
             num_of_action_experts=num_of_action_experts,
-            norm_mode=norm_mode
+            norm_mode=norm_mode,
+            nav_onehot=nav_onehot,
         )
     data_path = os.path.join(work_dir, dynamic_dir_name)
     if split == 'train':
@@ -175,7 +195,8 @@ def prepare_b2d_dataset(
             statistics_path=statistics_path,
             use_fixed_images=False,
             num_of_action_experts=num_of_action_experts,
-            norm_mode=norm_mode
+            norm_mode=norm_mode,
+            nav_onehot=nav_onehot,
         )
     if split == 'val':
         val_data_path = os.path.join(data_path, 'val')
@@ -184,6 +205,7 @@ def prepare_b2d_dataset(
             statistics_path=statistics_path,
             use_fixed_images=False,
             num_of_action_experts=num_of_action_experts,
-            norm_mode=norm_mode
+            norm_mode=norm_mode,
+            nav_onehot=nav_onehot,
         )
     raise ValueError("split type must be 'train' or 'val'")

@@ -19,7 +19,8 @@ class Bench2DriveDataset:
             split=config.get("split", None),
             dynamic_dir_name=config.get("dynamic_dir", "b2d_dynamic_camera"),
             fixed_dir_name=config.get("fixed_dir", "b2d_fixed_camera"),
-            norm_mode=config.get("norm_mode", "percentile")
+            norm_mode=config.get("norm_mode", "percentile"),
+            nav_onehot=config.get("nav_onehot", False),
         )
         self.dataset = dataset
 
