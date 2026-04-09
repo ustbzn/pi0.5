@@ -4,5 +4,5 @@ python src/utils/analyzing_traj_mogo.py \
     --mode dual \
     --bev_xlim -1 50 \
     --bev_ylim -10 10 \
-    --output_dir visual_out/mogo-2503/dual_0407 \
-    # --scene_names 20251210141637
+    --output_dir visual_out/mogo-2503/20260312160557 \
+    --scene_names 20260312160557

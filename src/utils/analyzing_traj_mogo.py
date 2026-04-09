@@ -427,18 +427,19 @@ class MOGOTrajectoryAnalyzer:
             "accuracies": accuracies,
         }
     
-    def _load_front_image_from_pkl(self, sample_idx: int) -> Optional[Tuple[np.ndarray, Optional[str]]]:
-        """从pkl加载前视图像和导航指令文本
+    def _load_images_from_pkl(self, sample_idx: int) -> Optional[Tuple[dict, Optional[str]]]:
+        """从pkl加载4路摄像头图像（当前帧）和导航指令文本
 
         Returns:
-            (img_rgb, nav_text) 元组，img_rgb 为前视图像，nav_text 为映射前的导航指令文本（如 "straight"）。
-            加载失败时返回 None。
+            (imgs, nav_text)，其中 imgs 是 {'front': ndarray, 'right': ndarray,
+            'left': ndarray, 'back': ndarray}（RGB格式，缺失的摄像头为 None），
+            nav_text 为映射前的导航指令文本（如 "straight"）。
+            加载完全失败时返回 None。
         """
         if self.pkl_root_dir is None:
             print("错误: 未指定pkl文件根目录")
             return None
 
-        # 从映射中找到对应的pkl文件
         if sample_idx not in self.pkl_file_map:
             print(f"错误: 样本索引 {sample_idx} 没有对应的pkl文件")
             return None
@@ -446,38 +447,45 @@ class MOGOTrajectoryAnalyzer:
         timestamp, pkl_path = self.pkl_file_map[sample_idx]
         try:
             import pickle
-            # 兼容 Python 2.7 生成的 pickle 文件
             with open(pkl_path, "rb") as f:
                 data = pickle.load(f, encoding='latin-1')
 
-            img_ref = data.get("his_cam_front", None)
-            if img_ref is None:
-                print(f"错误: pkl缺少 his_cam_front 字段: {pkl_path}")
+            def _decode_img_ref(img_ref):
+                """将各种格式的图像路径引用解码为字符串路径"""
+                if isinstance(img_ref, dict) and "_string_wrapper_marker" in img_ref:
+                    img_ref = img_ref.get("_bytes_value", b"")
+                if hasattr(img_ref, "numpy"):
+                    img_ref = img_ref.numpy()
+                if isinstance(img_ref, bytes):
+                    return img_ref.decode("utf-8")
+                elif isinstance(img_ref, str):
+                    return img_ref
                 return None
 
-            # 兼容不同的数据格式（与 inference_mogo.py 保持一致）
-            # 1) 处理 dict 类型（StringWrapper 序列化为 dict 的情况）
-            if isinstance(img_ref, dict) and "_string_wrapper_marker" in img_ref:
-                img_ref = img_ref.get("_bytes_value", b"")
-            # 2) 处理有 .numpy() 方法的对象
-            if hasattr(img_ref, "numpy"):
-                img_ref = img_ref.numpy()
-            # 3) 处理 bytes 或 str
-            if isinstance(img_ref, bytes):
-                img_path = img_ref.decode("utf-8")
-            elif isinstance(img_ref, str):
-                img_path = img_ref
-            else:
-                print(f"错误: his_cam_front 类型不支持: {type(img_ref)}")
-                return None
+            def _load_cam(key):
+                """读取单路摄像头图像，失败返回 None"""
+                ref = data.get(key)
+                if ref is None:
+                    return None
+                path = _decode_img_ref(ref)
+                if not path or not Path(path).exists():
+                    return None
+                img_bgr = cv2.imread(path)
+                if img_bgr is None:
+                    return None
+                return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-            if not Path(img_path).exists():
-                print(f"错误: 图像文件不存在: {img_path}")
-                return None
+            # 4路摄像头的当前帧字段（his_cam_* 为当前时刻图像）
+            imgs = {
+                'front': _load_cam('his_cam_front'),
+                'right': _load_cam('his_cam_right'),
+                'left':  _load_cam('his_cam_left'),
+                'back':  _load_cam('his_cam_back'),
+            }
 
-            img_bgr = cv2.imread(img_path)
-            if img_bgr is None:
-                print(f"错误: 无法读取图像: {img_path}")
+            # 至少需要前视图才有意义
+            if imgs['front'] is None:
+                print(f"错误: pkl缺少 his_cam_front 字段或文件不存在: {pkl_path}")
                 return None
 
             # 读取 navigation_id 并反向映射为文本
@@ -490,12 +498,20 @@ class MOGOTrajectoryAnalyzer:
                     nav_id = int(nav_id_arr)
                 nav_text = NAVIGATION_ID_TO_TEXT.get(nav_id, f"unknown({nav_id})")
 
-            return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB), nav_text
+            return imgs, nav_text
         except Exception as e:
             print(f"加载pkl失败 {pkl_path}: {e}")
             import traceback
             traceback.print_exc()
             return None
+
+    # 保留旧接口名以兼容外部调用
+    def _load_front_image_from_pkl(self, sample_idx: int) -> Optional[Tuple[np.ndarray, Optional[str]]]:
+        result = self._load_images_from_pkl(sample_idx)
+        if result is None:
+            return None
+        imgs, nav_text = result
+        return imgs['front'], nav_text
     
     def get_scene_info(self, sample_idx: int) -> Optional[Tuple[str, int]]:
         """根据样本索引获取场景信息（时间戳和本地索引）"""
@@ -516,12 +532,12 @@ class MOGOTrajectoryAnalyzer:
         bev_xlim: Optional[Tuple[float, float]] = None,
         bev_ylim: Optional[Tuple[float, float]] = None,
     ):
-        """左：pkl前视图像；右：BEV 轨迹"""
+        """上：4路摄像头图像（front/right/left/back）；下：BEV 轨迹"""
         if self.gt_trajectories is None or self.pred_trajectories is None:
             print("错误: 请先加载轨迹数据")
             return
         if self.pkl_root_dir is None:
-            print("错误: 未提供 pkl_root_dir，无法加载前视图像")
+            print("错误: 未提供 pkl_root_dir，无法加载图像")
             return
         if sample_idx >= len(self.gt_trajectories):
             print(f"错误: 样本索引 {sample_idx} 超出范围")
@@ -529,113 +545,133 @@ class MOGOTrajectoryAnalyzer:
 
         gt_traj = self.gt_trajectories[sample_idx]
         pred_traj = self.pred_trajectories[sample_idx]
-        result = self._load_front_image_from_pkl(sample_idx)
+        result = self._load_images_from_pkl(sample_idx)
         if result is None:
             return
-        img_rgb, nav_text = result
+        imgs, nav_text = result
 
         # 获取场景信息
         scene_info = self.get_scene_info(sample_idx)
         if scene_info:
             timestamp, local_idx = scene_info
-            front_title = f"Front image (sample {sample_idx}, {timestamp}, step {local_idx})"
+            title_info = f"sample {sample_idx}, {timestamp}, step {local_idx}"
         else:
-            front_title = f"Front image (sample {sample_idx})"
-
-        # 将导航指令文字叠加到前视图像上（左上角，醒目显示）
+            title_info = f"sample {sample_idx}"
         if nav_text:
-            front_title += f" | Nav: {nav_text}"
-            img_with_nav = img_rgb.copy()
-            # 使用 OpenCV 在图像上绘制带背景的导航指令文字
-            label = f"Nav: {nav_text}"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 1.2
-            thickness = 2
-            (tw, th), baseline = cv2.getTextSize(label, font, font_scale, thickness)
-            # 绘制半透明背景矩形
-            overlay = img_with_nav.copy()
-            cv2.rectangle(overlay, (10, 10), (10 + tw + 10, 10 + th + baseline + 10), (0, 0, 0), -1)
-            cv2.addWeighted(overlay, 0.6, img_with_nav, 0.4, 0, img_with_nav)
-            # 绘制白色文字
-            cv2.putText(img_with_nav, label, (15, 10 + th + 5), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
-            img_rgb = img_with_nav
+            title_info += f" | Nav: {nav_text}"
 
-        fig, axes = plt.subplots(
-            1, 2,
-            figsize=(16, 6),
-            gridspec_kw={'width_ratios': [1.6, 1.0]}
+        # ----------------------------------------------------------------
+        # 布局：左边4个摄像头（2行2列），右边BEV轨迹
+        #   左侧 (col 0-1): 2行2列摄像头
+        #     第0行: front(col0), back(col1)
+        #     第1行: left(col2), right(col3)  <- 注意col索引在gs中
+        #   右侧 (col 2): BEV轨迹（跨2行）
+        # ----------------------------------------------------------------
+        # GridSpec: 2行 x 3列，左2列放摄像头，右1列放BEV
+        fig = plt.figure(figsize=(20, 9))
+        gs = fig.add_gridspec(
+            2, 3,
+            width_ratios=[1.0, 1.0, 1.2],
+            hspace=0.25,
+            wspace=0.12,
         )
 
-        # 左：前视图
-        axes[0].imshow(img_rgb)
-        axes[0].set_title(front_title)
-        axes[0].axis("off")
+        # 摄像头布局：第一排 front/back，第二排 left/right
+        cam_grid = [
+            ('front', 0, 0),  # row, col in left 2x2 grid
+            ('back',  0, 1),
+            ('left',  1, 0),
+            ('right', 1, 1),
+        ]
+        cam_labels = {
+            'front': 'Front',
+            'right': 'Right',
+            'left':  'Left',
+            'back':  'Back',
+        }
 
-        # 右：BEV 轨迹
-        # 数值上：gt_traj[:, 0] / pred_traj[:, 0] 是原始 fur_x，gt_traj[:, 1] / pred_traj[:, 1] 是原始 fur_y
-        # 可视化约定：
-        #   - 纵轴：x，向上为正（前方）
-        #   - 横轴：y，向右为正（右侧，往左 y 变小）
-        # 因此在图中使用 (y, x) 作为 (横, 纵)
-        axes[1].plot(gt_traj[:, 1], gt_traj[:, 0], "g-", linewidth=2, label="GT")
-        axes[1].plot(pred_traj[:, 1], pred_traj[:, 0], "r-", linewidth=2, label="Pred")
-        axes[1].scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
-        axes[1].scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
-        axes[1].scatter(gt_traj[0, 1], gt_traj[0, 0], color='green', s=100, marker='s', label='GT Start', zorder=5)
-        axes[1].scatter(pred_traj[0, 1], pred_traj[0, 0], color='red', s=100, marker='s', label='Pred Start', zorder=5)
-        
-        # 坐标轴语义：
-        #   - 横轴：Y（右正左负，往左 y 变小）
-        #   - 纵轴：X（前正后负）
-        axes[1].set_xlabel("Y (right positive)")
-        axes[1].set_ylabel("X (up positive)")
+        font_cv = cv2.FONT_HERSHEY_SIMPLEX
 
-        # 计算轨迹范围用于自动范围或兜底（仍基于原始 (x, y) 数值）
+        def _draw_nav_label(img, text):
+            """在图像左上角绘制带半透明黑底的白色导航文字"""
+            img = img.copy()
+            label = f"Nav: {text}"
+            font_scale, thickness = 0.9, 2
+            (tw, th), baseline = cv2.getTextSize(label, font_cv, font_scale, thickness)
+            overlay = img.copy()
+            cv2.rectangle(overlay, (6, 6), (6 + tw + 8, 6 + th + baseline + 8), (0, 0, 0), -1)
+            cv2.addWeighted(overlay, 0.6, img, 0.4, 0, img)
+            cv2.putText(img, label, (10, 6 + th + 4), font_cv, font_scale,
+                        (255, 255, 255), thickness, cv2.LINE_AA)
+            return img
+
+        # 左侧2x2摄像头
+        for cam, row, col in cam_grid:
+            ax = fig.add_subplot(gs[row, col])
+            img = imgs.get(cam)
+            if img is not None:
+                # 仅在 front 图上叠加导航指令文字
+                if cam == 'front' and nav_text:
+                    img = _draw_nav_label(img, nav_text)
+                ax.imshow(img)
+            else:
+                # 缺失摄像头：显示灰色占位
+                ax.set_facecolor('#cccccc')
+                ax.text(0.5, 0.5, f'{cam_labels[cam]}\n(N/A)',
+                        ha='center', va='center', transform=ax.transAxes,
+                        fontsize=12, color='#555555')
+            ax.set_title(cam_labels[cam], fontsize=11)
+            ax.axis("off")
+
+        # 右侧：BEV 轨迹（跨2行）
+        ax_bev = fig.add_subplot(gs[:, 2])
+
+        ax_bev.plot(gt_traj[:, 1], gt_traj[:, 0], "g-", linewidth=2, label="GT")
+        ax_bev.plot(pred_traj[:, 1], pred_traj[:, 0], "r-", linewidth=2, label="Pred")
+        ax_bev.scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
+        ax_bev.scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
+        ax_bev.scatter(gt_traj[0, 1], gt_traj[0, 0], color='green', s=100, marker='s', label='GT Start', zorder=5)
+        ax_bev.scatter(pred_traj[0, 1], pred_traj[0, 0], color='red', s=100, marker='s', label='Pred Start', zorder=5)
+
+        ax_bev.set_xlabel("Y (right positive)")
+        ax_bev.set_ylabel("X (up positive)")
+
         all_pts = np.concatenate([gt_traj, pred_traj], axis=0)
-        x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()  # 用于纵轴
-        y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()  # 用于横轴
+        x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()
+        y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()
         margin_x = max(1.0, 0.1 * (x_max - x_min + 1e-6))
         margin_y = max(1.0, 0.1 * (y_max - y_min + 1e-6))
 
         def _in_range(lim, data_min, data_max):
             return not ((data_max < lim[0]) or (data_min > lim[1]))
 
-        # bev_xlim / bev_ylim 依然使用 (x, y) 的物理含义：
-        #   bev_xlim 作用在纵轴 X，bev_ylim 作用在横轴 Y
         if bev_ylim and _in_range(bev_ylim, y_min, y_max):
-            # 横轴范围：Y
-            axes[1].set_xlim(bev_ylim)
+            ax_bev.set_xlim(bev_ylim)
         else:
-            axes[1].set_xlim(y_min - margin_y, y_max + margin_y)
+            ax_bev.set_xlim(y_min - margin_y, y_max + margin_y)
 
         if bev_xlim and _in_range(bev_xlim, x_min, x_max):
-            # 纵轴范围：X
-            axes[1].set_ylim(bev_xlim)
+            ax_bev.set_ylim(bev_xlim)
         else:
-            axes[1].set_ylim(x_min - margin_x, x_max + margin_x)
+            ax_bev.set_ylim(x_min - margin_x, x_max + margin_x)
 
-        # 横轴方向：向右 y 变大，向左 y 变小（标准方向，无需反转）
-        axes[1].set_aspect("equal")
-        axes[1].grid(True, alpha=0.3)
-        axes[1].legend()
-        axes[1].set_title("BEV Trajectory")
+        ax_bev.set_aspect("equal")
+        ax_bev.grid(True, alpha=0.3)
+        ax_bev.legend(loc='upper left', fontsize=9)
+        ax_bev.set_title("BEV Trajectory")
 
-        # 在整张画布右侧展示轨迹坐标
+        # 在 BEV 图右侧展示轨迹坐标数值（文本注释）
         gt_lines = [f"{i}: ({gt_traj[i, 0]:.2f}, {gt_traj[i, 1]:.2f})" for i in range(len(gt_traj))]
         pred_lines = [f"{i}: ({pred_traj[i, 0]:.2f}, {pred_traj[i, 1]:.2f})" for i in range(len(pred_traj))]
-        gt_text = "GT points:\n" + "\n".join(gt_lines)
-        pred_text = "Pred points:\n" + "\n".join(pred_lines)
-        fig.text(
-            0.93, 0.35,
-            f"{gt_text}\n\n{pred_text}",
-            ha="left", va="center",
-            fontsize=8,
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8)
-        )
+        coords_text = "GT:\n" + "\n".join(gt_lines) + "\n\nPred:\n" + "\n".join(pred_lines)
+        ax_bev.text(1.02, 1.0, coords_text, ha='left', va='top',
+                    transform=ax_bev.transAxes, fontsize=6,
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
 
-        plt.tight_layout()
+        fig.suptitle(title_info, fontsize=11, y=0.98)
+
         if save_path:
-            fig.savefig(save_path, dpi=150)
+            fig.savefig(save_path, dpi=150, bbox_inches='tight')
         else:
             plt.show()
         plt.close(fig)
