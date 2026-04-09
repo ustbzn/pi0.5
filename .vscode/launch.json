@@ -1,0 +1,129 @@
+{
+  // VS Code / Cursor Run & Debug configurations for DrivePi-0
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "DrivePi0 Train (base_debug.yaml) - Single GPU",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/Drive_pi/script/run.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/Drive_pi",
+      "justMyCode": false,
+      "redirectOutput": true,
+      "stopOnEntry": false,
+      "python": "/root/miniconda3/envs/drive_pi/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/Drive_pi:${env:PYTHONPATH}",
+        "TZ": "UTC-8",
+        "WANDB_DISABLED": "true",
+        "SWANLAB_API_KEY": "wMwCepr1MuBtmCchEgh9x",
+        "LOG_DIR": "${workspaceFolder}/Drive_pi/logs",
+        "PYTHONUNBUFFERED": "1",
+        "HYDRA_FULL_ERROR": "1",
+        "CUDA_VISIBLE_DEVICES": "0",
+        "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:512"
+      },
+      "args": [
+        "--config-path=../config/train/DrivePi0",
+        "--config-name=base_mogo.yaml",
+        "num_workers=0",
+        "use_torch_compile=false"
+      ]
+    },
+    {
+      "name": "DrivePi0 Train (base_debug.yaml) - Multi GPU (4 GPUs)",
+      "type": "python",
+      "request": "launch",
+      "module": "torch.distributed.run",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/DriveMoE",
+      "justMyCode": false,
+      "redirectOutput": true,
+      "stopOnEntry": false,
+      "env": {
+        "TZ": "UTC-8",
+        "WANDB_DISABLED": "true",
+        "SWANLAB_API_KEY": "wMwCepr1MuBtmCchEgh9x",
+        "LOG_DIR": "${workspaceFolder}/DriveMoE/logs",
+        "PYTHONUNBUFFERED": "1",
+        "HYDRA_FULL_ERROR": "1"
+      },
+      "args": [
+        "--nnodes=1",
+        "--nproc_per_node=4",
+        "--rdzv_backend=c10d",
+        "--standalone",
+        "script/run.py",
+        "--config-path=../config/train/DrivePi0",
+        "--config-name=base_debug.yaml",
+        "num_workers=0",
+        "use_torch_compile=false"
+      ]
+    },
+    {
+      "name": "DrivePi0 Train (base_nuscene.yaml) - Single GPU",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/DriveMoE/script/run.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/DriveMoE",
+      "justMyCode": false,
+      "redirectOutput": true,
+      "stopOnEntry": false,
+      "env": {
+        "TZ": "UTC-8",
+        "WANDB_DISABLED": "true",
+        "SWANLAB_API_KEY": "wMwCepr1MuBtmCchEgh9x",
+        "LOG_DIR": "${workspaceFolder}/DriveMoE/logs",
+        "PYTHONUNBUFFERED": "1",
+        "HYDRA_FULL_ERROR": "1",
+        "CUDA_VISIBLE_DEVICES": "0",
+        "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:512"
+      },
+      "args": [
+        "--config-path=../config/train/DrivePi0",
+        "--config-name=base_nuscene.yaml",
+        "num_workers=0",
+        "use_torch_compile=false"
+      ]
+    },
+    {
+      "name": "Qwen3VL model_test.py",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/Drive_pi/qwenvl/model_test.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/Drive_pi/qwenvl",
+      "justMyCode": false,
+      "redirectOutput": true,
+      "stopOnEntry": false,
+      "python": "/root/miniconda3/envs/drive_pi/bin/python",
+      "env": {
+        "CUDA_VISIBLE_DEVICES": "0",
+        "TF_CPP_MIN_LOG_LEVEL": "3",
+        "TF_ENABLE_ONEDNN_OPTS": "0"
+      },
+      "args": []
+    },
+    {
+      "name": "Qwen3VL test_load_model.py",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/Drive_pi/script/test_load_model.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/Drive_pi",
+      "justMyCode": false,
+      "redirectOutput": true,
+      "stopOnEntry": false,
+      "python": "/root/miniconda3/envs/drive_pi/bin/python",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/Drive_pi:${env:PYTHONPATH}",
+        "CUDA_VISIBLE_DEVICES": "0",
+        "TF_CPP_MIN_LOG_LEVEL": "3",
+        "TF_ENABLE_ONEDNN_OPTS": "0"
+      },
+      "args": []
+    }
+  ]
+}
