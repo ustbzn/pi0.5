@@ -1,6 +1,7 @@
 import logging
 import os
 import random
+import time
 from collections import deque
 
 import bitsandbytes as bnb
@@ -336,10 +337,12 @@ class DrivePiZeroTrainAgent:
 
     def run(self):
         timer = Timer()
+        train_start_time = time.time()
         cnt_batch = 0 if not hasattr(self, "cnt_batch") else self.cnt_batch
         cnt_update = (
             0 if not hasattr(self, "cnt_update") else self.cnt_update
         )  # resume training if loaded checkpoint
+        cnt_update_start = cnt_update  # record start update for ETA calculation
         loss_train_deque = deque(maxlen=self.grad_accumulation_steps)
         new_eval_from_last_log = False
         if self.multi_gpu:
@@ -566,7 +569,19 @@ class DrivePiZeroTrainAgent:
                 if self.main_rank and cnt_batch % self.log_freq == 0:
                     loss_train_metric = np.mean(loss_train_deque)
                     peak_vram = torch.cuda.max_memory_reserved(self.gpu_id) / (1024**3)
-                    log_msg = f"Batch {cnt_batch} Update {cnt_update}: t {timer():8.4f} | vram {peak_vram:6.3f} | train loss {loss_train_metric:6.4f} | action lr {self.action_optimizer.param_groups[0]['lr']:10.8f}"
+                    # estimate ETA based on elapsed time since training start
+                    updates_done = cnt_update - cnt_update_start
+                    if updates_done > 0:
+                        elapsed = time.time() - train_start_time
+                        secs_per_update = elapsed / updates_done
+                        remaining_updates = self.n_updates - cnt_update
+                        eta_secs = secs_per_update * remaining_updates
+                        eta_h = int(eta_secs // 3600)
+                        eta_m = int((eta_secs % 3600) // 60)
+                        eta_str = f"{eta_h}h{eta_m:02d}m"
+                    else:
+                        eta_str = "N/A"
+                    log_msg = f"Batch {cnt_batch} Update {cnt_update}: t {timer():8.4f} | vram {peak_vram:6.3f} | train loss {loss_train_metric:6.4f} | action lr {self.action_optimizer.param_groups[0]['lr']:10.8f} | eta {eta_str}"
                     log.info(log_msg)
                     # 构建 metrics 字典
                     metrics = {

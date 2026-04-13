@@ -4,9 +4,9 @@ export TZ='UTC-8'
 # SwanLab 配置
 export WANDB_DISABLED=true
 export SWANLAB_API_KEY='wMwCepr1MuBtmCchEgh9x'
-export PYTHONPATH="/pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi:$PYTHONPATH"
+export PYTHONPATH="/pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo:$PYTHONPATH"
 # 保存路径
-export LOG_DIR="/pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/logs"
+export LOG_DIR="/pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo/logs"
 
 # GPU check
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
@@ -14,7 +14,7 @@ NUM_GPU="$(nvidia-smi --list-gpus | wc -l)"
 echo "NUM_GPU=$NUM_GPU"
 
 # 配置文件：使用 one-hot 编码 + 加权采样的新配置
-BASE_CONFIG="qwen3_onehot.yaml"
+BASE_CONFIG="qwen3_navi250_histraj.yaml"
 
 # 自动寻找空闲端口
 find_free_port() {

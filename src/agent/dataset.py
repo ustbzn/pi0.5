@@ -21,6 +21,7 @@ class Bench2DriveDataset:
             fixed_dir_name=config.get("fixed_dir", "b2d_fixed_camera"),
             norm_mode=config.get("norm_mode", "percentile"),
             nav_onehot=config.get("nav_onehot", False),
+            use_his_trajectory=config.get("use_his_trajectory", False),
         )
         self.dataset = dataset
 

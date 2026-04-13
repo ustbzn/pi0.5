@@ -5,7 +5,7 @@ hydra:
     dir: ${log_dir}
 _target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
 
-current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi  # You need to set path
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo  # You need to set path
 run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_onehot_navi
 log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
 
