@@ -28,7 +28,8 @@ def flatten(data):
 def split_future_xy(all_data):
     if "fur_trajectory" in all_data:
         fur = np.asarray(all_data["fur_trajectory"], dtype=np.float32)
-        return fur[:, 0], fur[:, 1]
+        # fur_trajectory 存储顺序为 [y, x]，所以 [:,0]=y, [:,1]=x
+        return fur[:, 1], fur[:, 0]
     return np.asarray(all_data["fur_x"]), np.asarray(all_data["fur_y"])
 
 
@@ -39,7 +40,8 @@ def split_history_xy(all_data):
     his = np.asarray(his, dtype=np.float32)
     if his.ndim != 2 or his.shape[-1] != 2:
         raise ValueError(f"Unexpected his_trajectory shape: {his.shape}")
-    return his[:, 0], his[:, 1]
+    # his_trajectory 存储顺序为 [y, x]，所以 [:,0]=y, [:,1]=x
+    return his[:, 1], his[:, 0]
 
 
 

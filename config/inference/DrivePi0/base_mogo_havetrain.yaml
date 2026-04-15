@@ -5,7 +5,7 @@ hydra:
     dir: ${log_dir}
 _target_: src.agent.drivepi0.eval.DrivePiZeroEvalAgent
 
-current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi  # You need to set path
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo  # You need to set path
 log_dir: ${oc.env:LOG_DIR}/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
 name: drive-pi0
 device: cuda
@@ -18,19 +18,21 @@ lora: False
 lora_r: 32
 lora_dropout: 0.0
 pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct  # You need to set path
-checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/logs/train/drive-pi0/2026-04-07_17-14_mogo_0407_4img_navi/checkpoint/step2080.pt # You need to set path
+checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo/logs/train/drive-pi0/2026-04-10_19-07_mogo_navi250_histraj/checkpoint/step11680.pt # You need to set path
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: minmax
 
 data:
   # statistics_path: ${current_dir}/datasets/mogo-test/statistics.json
-  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi/statistics.json
+  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_250/statistics.json
   use_fixed_images: False
   work_dir: ${current_dir}
   split: val
   num_of_action_experts: 13 # useless in drive-pi0
   shuffle_buffer_size: 200000
   norm_mode: ${norm_mode}
+  use_his_trajectory: True
+  nav_onehot: False
 
 
 eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
@@ -39,16 +41,16 @@ device_batch_size: 32
 num_workers: 6
 flow_sampling: beta
 num_inference_steps: 10
-final_action_clip_value: 1.0  # data normalized in [-1,1]
+final_action_clip_value:   # data normalized in [-1,1]
 debug: False
 # 保存轨迹数据（用于后续可视化）
 save_trajectories: True
 # 需要修改的参数：cond_steps, horizon_steps
 cond_steps: 5
-horizon_steps: 7
+horizon_steps: 6
 
 action_dim: 2 # EEF_POS
-proprio_dim: 9  # his_speed(1) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + navigation_id(1) = 9
+proprio_dim: 13  # his_speed(3) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + his_trajectory(2) + navigation_id(1) = 13
 state_dim: ${proprio_dim}
 # 参数更改
 max_seq_len: 600  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600

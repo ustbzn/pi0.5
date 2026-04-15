@@ -71,6 +71,7 @@ class DrivePiZeroInferenceAgent:
         # 保存归一化模式（优先从 data 中读取）
         self.norm_mode = cfg.get("norm_mode") or cfg.data.get("norm_mode", "percentile")
         self.nav_onehot = cfg.data.get("nav_onehot", False)
+        self.use_his_trajectory = cfg.data.get("use_his_trajectory", False)
         print('Agent done')
     
     
@@ -194,7 +195,7 @@ class DrivePiZeroInferenceAgent:
 
         print(f"Loaded {len(filtered_ckpt)} / {len(model_state)} keys from {path}")
     
-    def run_batch_inference(self, val_data_dir: str, output_dir: str, statistic_path: str = "statistics.json", max_samples: Optional[int] = None):
+    def run_batch_inference(self, val_data_dir: str, output_dir: str, statistic_path: str = "statistics.json", max_samples: Optional[int] = None, rank: int = 0, world_size: int = 1):
         """
         批量推理，按时间戳目录（类似场景）处理数字命名的 pkl 文件
         每个时间戳目录生成独立的 npy 文件（与 inference.py 的逻辑一致）
@@ -238,19 +239,13 @@ class DrivePiZeroInferenceAgent:
             stats_data = pct
             
         print(f"\n{'='*60}")
-        print(f"归一化参数 (statistics.json):")
+        print(f"归一化参数 (statistics.json) [norm_mode={norm_mode}]:")
         print(f"{'='*60}")
-        print(f"轨迹归一化参数:")
-        print(f"  fur_x: [{stats_data['fur_x'][0]:.6f}, {stats_data['fur_x'][1]:.6f}] (1%, 99%百分位数)")
-        print(f"  fur_y: [{stats_data['fur_y'][0]:.6f}, {stats_data['fur_y'][1]:.6f}] (1%, 99%百分位数)")
-        print(f"目标点归一化参数:")
-        print(f"  command_far_x: [{stats_data['command_far_x'][0]:.6f}, {stats_data['command_far_x'][1]:.6f}] (1%, 99%百分位数)")
-        print(f"  command_far_y: [{stats_data['command_far_y'][0]:.6f}, {stats_data['command_far_y'][1]:.6f}] (1%, 99%百分位数)")
-        print(f"状态归一化参数:")
-        print(f"  speed: [{stats_data['speed'][0]:.6f}, {stats_data['speed'][1]:.6f}] (1%, 99%百分位数)")
-        print(f"  acceleration: [{stats_data['acceleration'][0]:.6f}, {stats_data['acceleration'][1]:.6f}] (1%, 99%百分位数)")
-        print(f"  angular_velocity: [{stats_data['angular_velocity'][0]:.6f}, {stats_data['angular_velocity'][1]:.6f}] (1%, 99%百分位数)")
-        print(f"  theta: [{stats_data['theta'][0]:.6f}, {stats_data['theta'][1]:.6f}] (1%, 99%百分位数)")
+        for key, val in stats_data.items():
+            try:
+                print(f"  {key}: [{val[0]:.6f}, {val[1]:.6f}]")
+            except Exception:
+                print(f"  {key}: {val}")
         print(f"{'='*60}\n")
         
         # 处理图像路径提取的辅助函数
@@ -337,16 +332,40 @@ class DrivePiZeroInferenceAgent:
                             all_data = pickle.load(f)
                     
                     # 准备数据
-                    state = normalize.prepare_state(all_data, nav_onehot=self.nav_onehot)
+                    # 与 dataset.py 保持一致：若无 navigation_id，从 navigation_command 推断并填充
+                    if 'navigation_id' not in all_data:
+                        from src.data.dataset import build_navigation_id_sequence
+                        target_len = np.asarray(all_data['his_theta']).shape[0]
+                        all_data = dict(all_data)
+                        all_data['navigation_id'] = build_navigation_id_sequence(all_data, target_len)
+                    state = normalize.prepare_state(
+                        all_data,
+                        nav_onehot=self.nav_onehot,
+                        use_his_trajectory=getattr(self, 'use_his_trajectory', False),
+                    )
 
                     data_dict = {}
                     # 4 cameras x 2 time steps = 8 images（与训练一致）
-                    for cam_name in ['front', 'right', 'left', 'back']:
-                        cam_path = extract_image_path(all_data[f'his_cam_{cam_name}'])
+                    # 新数据格式：当前帧 cam_front / cam_left / cam_right / cam_back
+                    #             上一帧  cam_front_prev_1 / cam_left_prev_1 / cam_right_prev_1 / cam_back_prev_1
+                    cam_key_map = {
+                        'front': ('cam_front',      'cam_front_prev_1'),
+                        'right': ('cam_right',      'cam_right_prev_1'),
+                        'left':  ('cam_left',       'cam_left_prev_1'),
+                        'back':  ('cam_back',       'cam_back_prev_1'),
+                    }
+                    for cam_name, (cur_key, prev_key) in cam_key_map.items():
+                        cam_path = extract_image_path(all_data[cur_key])
                         data_dict[f'image_{cam_name}'] = image_normalization(cam_path, (224, 224))
-                        cam_time_path = extract_image_path(all_data[f'his_cam_{cam_name}_time'])
+                        cam_time_path = extract_image_path(all_data[prev_key])
                         data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, (224, 224))
-                    data_dict["language_instruction"] = "predict trajectory"
+                    nav_desc = all_data.get('navigation_command_descreption')
+                    if nav_desc is not None:
+                        nav_desc = np.asarray(nav_desc).reshape(-1)
+                        # data_dict["language_instruction"] = str(nav_desc[0])
+                        data_dict['language_instruction'] = f"Predict trajectory based on the navigation command: {str(nav_desc[0])}"
+                    else:
+                        data_dict["language_instruction"] = "predict trajectory"
                     data_dict['state'] = state
                     
                     # 推理
@@ -373,21 +392,20 @@ class DrivePiZeroInferenceAgent:
                         pred_traj_real = pred_traj_real.cpu().numpy()
                     
                     # 获取真实轨迹
-                    fur_x_gt = all_data["fur_x"]
-                    fur_y_gt = all_data["fur_y"]
-                    if isinstance(fur_x_gt, np.ndarray):
-                        fur_x_gt_arr = fur_x_gt
-                        fur_y_gt_arr = fur_y_gt
+                    # 新数据格式：fur_trajectory ndarray [N, 2]，存储顺序为 [y, x]
+                    if "fur_trajectory" in all_data:
+                        fur_raw = np.asarray(all_data["fur_trajectory"], dtype=np.float32)  # [N, 2] (y, x)
+                        gt_traj_real = np.stack([fur_raw[:, 1], fur_raw[:, 0]], axis=-1)  # 转为 [N, 2] (x, y)
                     else:
-                        fur_x_gt_arr = np.array(fur_x_gt)
-                        fur_y_gt_arr = np.array(fur_y_gt)
-                    if fur_x_gt_arr.ndim == 2:
-                        fur_x_gt_last = fur_x_gt_arr[-1]
-                        fur_y_gt_last = fur_y_gt_arr[-1]
-                    else:
-                        fur_x_gt_last = fur_x_gt_arr
-                        fur_y_gt_last = fur_y_gt_arr
-                    gt_traj_real = np.stack([fur_x_gt_last, fur_y_gt_last], axis=-1)
+                        # 兼容旧格式 fur_x / fur_y
+                        fur_x_gt = all_data["fur_x"]
+                        fur_y_gt = all_data["fur_y"]
+                        fur_x_gt_arr = np.array(fur_x_gt) if not isinstance(fur_x_gt, np.ndarray) else fur_x_gt
+                        fur_y_gt_arr = np.array(fur_y_gt) if not isinstance(fur_y_gt, np.ndarray) else fur_y_gt
+                        if fur_x_gt_arr.ndim == 2:
+                            fur_x_gt_arr = fur_x_gt_arr[-1]
+                            fur_y_gt_arr = fur_y_gt_arr[-1]
+                        gt_traj_real = np.stack([fur_x_gt_arr, fur_y_gt_arr], axis=-1)
                     
                     # 存储（已经是 numpy 数组）
                     scene_pred_trajectories.append(pred_traj_real)
@@ -460,7 +478,14 @@ class DrivePiZeroInferenceAgent:
         if not timestamp_dirs:
             print(f"[WARNING] No valid timestamp directories or pkl files found in {val_data_path}")
             return
-        
+
+        # 多卡数据分片：按 rank 划分 timestamp_dirs
+        total = len(timestamp_dirs)
+        if world_size > 1:
+            # 将所有任务均匀分配给各进程
+            timestamp_dirs = timestamp_dirs[rank::world_size]
+            print(f"[Multi-GPU] rank={rank}/{world_size}: 负责 {len(timestamp_dirs)}/{total} 个 timestamp 目录")
+
         print(f"Found {len(timestamp_dirs)} timestamp directories/groups to process")
         
         # 遍历每个时间戳目录（类似 inference.py 遍历场景）
@@ -533,10 +558,21 @@ if __name__ == '__main__':
                         help="Output directory (default: logs/inference/drive-pi0/TIMESTAMP)")
     parser.add_argument("--max_samples", type=int, default=None,
                         help="Maximum number of samples to process (for debugging, None means process all)")
+    parser.add_argument("--rank", type=int, default=0,
+                        help="当前进程的 rank（0-indexed），用于多卡并行推理")
+    parser.add_argument("--world_size", type=int, default=1,
+                        help="总进程数（GPU 数量），用于多卡并行推理")
     args = parser.parse_args()
     
     config = OmegaConf.load(args.config_path)
     statistic_path = args.statistic_path
+
+    # 多卡推理：每个进程通过 CUDA_VISIBLE_DEVICES=X 隔离 GPU，
+    # gpu_id 统一设为 0（进程内唯一的 GPU）
+    if args.world_size > 1:
+        OmegaConf.update(config, "gpu_id", 0, merge=True)
+        print(f"[Multi-GPU] rank={args.rank}/{args.world_size}, "
+              f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
     
     # 设置输出目录
     if args.output_dir is None:
@@ -608,7 +644,9 @@ if __name__ == '__main__':
             val_data_dir=args.val_data_dir,
             output_dir=str(output_dir),
             statistic_path=statistic_path,
-            max_samples=args.max_samples
+            max_samples=args.max_samples,
+            rank=args.rank,
+            world_size=args.world_size,
         )
         
         print(f"Batch inference completed. Results saved to: {output_dir}")

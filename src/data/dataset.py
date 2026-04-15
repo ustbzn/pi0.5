@@ -185,7 +185,8 @@ class TorchDataset(Dataset):
             nav_desc = all_data.get('navigation_command_descreption')
             if nav_desc is not None:
                 nav_desc = np.asarray(nav_desc).reshape(-1)
-                data_dict['language_instruction'] = str(nav_desc[0])
+                # data_dict['language_instruction'] = str(nav_desc[0])
+                data_dict['language_instruction'] = f"Predict trajectory based on the navigation command: {str(nav_desc[0])}"
             else:
                 data_dict['language_instruction'] = 'predict trajectory'
         return data_dict

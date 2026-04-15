@@ -106,15 +106,19 @@ def draw_bev_trajectory(data, ax, x_range=[-20, 20], y_range=[-1, 30]):
     if 'fur_x' in data and 'fur_y' in data:
         fur_x = data['fur_x']
         fur_y = data['fur_y']
-        
+
         # fur_x和fur_y的shape是(1, 7)
         if fur_x.shape == (1, 7) and fur_y.shape == (1, 7):
             x_points = fur_x[0]
             y_points = fur_y[0]
-            
-            # 绘制轨迹线
-            ax.plot(x_points, y_points, 'o-', color='green', linewidth=2, 
-                   markersize=6, alpha=0.8, label='Future Trajectory')
+
+            # 从原点 (0,0) 开始连线
+            x_with_origin = np.concatenate([[0.0], x_points])
+            y_with_origin = np.concatenate([[0.0], y_points])
+
+            # 绘制轨迹线（从原点开始）
+            ax.plot(x_with_origin, y_with_origin, '-', color='green', linewidth=2, alpha=0.8, label='Future Trajectory')
+            ax.scatter(x_points, y_points, c='green', s=36, alpha=0.8, zorder=4)
     
     # 添加图例
     ax.legend(loc='upper right', fontsize=8)

@@ -54,6 +54,8 @@ NAVIGATION_ID_TO_TEXT = {
     3: "u turn",
     4: "park",
 }
+# 反向映射：文本 -> id（用于从 navigation_command 推断 nav_id）
+NAVIGATION_COMMAND_TO_ID = {v: k for k, v in NAVIGATION_ID_TO_TEXT.items()}
 
 
 class MOGOTrajectoryAnalyzer:
@@ -243,10 +245,55 @@ class MOGOTrajectoryAnalyzer:
         
         if len(all_gt_trajectories) == 0:
             raise ValueError("没有找到有效的轨迹文件")
-        
+
         # 合并所有场景
         self.gt_trajectories = np.concatenate(all_gt_trajectories, axis=0)
         self.pred_trajectories = np.concatenate(all_pred_trajectories, axis=0)
+
+        # ----------------------------------------------------------------
+        # 关键：重建 pkl_file_map，使其与当前已加载场景的索引严格对齐。
+        # _build_pkl_file_map 按全量时间戳排序编号，与 scene_names 过滤后
+        # 的 current_idx 空间不同，必须在 load_trajectories 结束后重建。
+        # ----------------------------------------------------------------
+        if self.pkl_root_dir is not None:
+            self.pkl_file_map = {}
+            # 重新收集各时间戳的 pkl 文件（复用 _build_pkl_file_map 的解析逻辑）
+            timestamp_pkl_map: Dict[str, List] = {}
+            pkl_files_in_root = list(self.pkl_root_dir.glob("*.pkl"))
+            if pkl_files_in_root:
+                for pkl_file in pkl_files_in_root:
+                    m = re.match(r'(\d+)_step(\d+)\.pkl$', pkl_file.name)
+                    if m:
+                        ts, step = m.group(1), int(m.group(2))
+                        timestamp_pkl_map.setdefault(ts, []).append((step, pkl_file))
+            else:
+                for ts_dir in sorted(self.pkl_root_dir.iterdir()):
+                    if not ts_dir.is_dir():
+                        continue
+                    ts = ts_dir.name
+                    drivepi_dir = ts_dir / "drivepi"
+                    search_dir = drivepi_dir if drivepi_dir.exists() else ts_dir
+                    for pkl_file in search_dir.glob("*.pkl"):
+                        m = re.match(r'(\d+)_step(\d+)\.pkl$', pkl_file.name)
+                        if m and m.group(1) == ts:
+                            timestamp_pkl_map.setdefault(ts, []).append((int(m.group(2)), pkl_file))
+                            continue
+                        m2 = re.match(r'(\d+)\.pkl$', pkl_file.name)
+                        if m2:
+                            timestamp_pkl_map.setdefault(ts, []).append((int(m2.group(1)), pkl_file))
+            # 排序
+            for ts in timestamp_pkl_map:
+                timestamp_pkl_map[ts] = sorted(timestamp_pkl_map[ts], key=lambda x: x[0])
+
+            # 只为已加载的场景建立映射，start_idx 严格取自 scene_data
+            for timestamp in self.scene_names:
+                if timestamp not in self.scene_data:
+                    continue
+                if timestamp not in timestamp_pkl_map:
+                    continue
+                start_idx = self.scene_data[timestamp]['start_idx']
+                for offset, (_, pkl_file) in enumerate(timestamp_pkl_map[timestamp]):
+                    self.pkl_file_map[start_idx + offset] = (timestamp, pkl_file)
         
         print(f"✓ 加载完成")
         print(f"  加载了 {len(self.scene_names)} 个时间戳")
@@ -477,10 +524,14 @@ class MOGOTrajectoryAnalyzer:
 
             # 4路摄像头的当前帧字段（his_cam_* 为当前时刻图像）
             imgs = {
-                'front': _load_cam('his_cam_front'),
-                'right': _load_cam('his_cam_right'),
-                'left':  _load_cam('his_cam_left'),
-                'back':  _load_cam('his_cam_back'),
+                'front': _load_cam('cam_front'),
+                'right': _load_cam('cam_right'),
+                'left':  _load_cam('cam_left'),
+                'back':  _load_cam('cam_back'),
+                # 'front': _load_cam('his_cam_front'),
+                # 'right': _load_cam('his_cam_right'),
+                # 'left':  _load_cam('his_cam_left'),
+                # 'back':  _load_cam('his_cam_back'),
             }
 
             # 至少需要前视图才有意义
@@ -490,13 +541,26 @@ class MOGOTrajectoryAnalyzer:
 
             # 读取 navigation_id 并反向映射为文本
             nav_text = None
-            nav_id_arr = data.get("navigation_id", None)
-            if nav_id_arr is not None:
-                if hasattr(nav_id_arr, '__len__') and len(nav_id_arr) > 0:
-                    nav_id = int(nav_id_arr[0])
+            if 'navigation_id' not in data:
+                # 从 navigation_command 推断 nav_id，不依赖外部 import
+                nav_id = 0
+                cmd = data.get('navigation_command')
+                if cmd is not None:
+                    cmd_arr = np.asarray(cmd)
+                    if cmd_arr.size > 0:
+                        token = str(
+                            cmd_arr.reshape(-1, cmd_arr.shape[-1])[0][0]
+                            if cmd_arr.ndim >= 2 else cmd_arr.reshape(-1)[0]
+                        ).strip().lower()
+                        nav_id = NAVIGATION_COMMAND_TO_ID.get(token, 0)
+                nav_id_val = nav_id
+            else:
+                nav_id_arr = data.get("navigation_id")
+                if nav_id_arr is not None:
+                    nav_id_val = int(nav_id_arr[0]) if hasattr(nav_id_arr, '__len__') and len(nav_id_arr) > 0 else int(nav_id_arr)
                 else:
-                    nav_id = int(nav_id_arr)
-                nav_text = NAVIGATION_ID_TO_TEXT.get(nav_id, f"unknown({nav_id})")
+                    nav_id_val = 0
+            nav_text = NAVIGATION_ID_TO_TEXT.get(nav_id_val, f"unknown({nav_id_val})")
 
             return imgs, nav_text
         except Exception as e:
@@ -626,17 +690,21 @@ class MOGOTrajectoryAnalyzer:
         # 右侧：BEV 轨迹（跨2行）
         ax_bev = fig.add_subplot(gs[:, 2])
 
-        ax_bev.plot(gt_traj[:, 1], gt_traj[:, 0], "g-", linewidth=2, label="GT")
-        ax_bev.plot(pred_traj[:, 1], pred_traj[:, 0], "r-", linewidth=2, label="Pred")
+        # 从原点 (0,0) 开始连线到轨迹各点
+        origin = np.array([[0.0, 0.0]])
+        gt_traj_with_origin = np.concatenate([origin, gt_traj], axis=0)
+        pred_traj_with_origin = np.concatenate([origin, pred_traj], axis=0)
+
+        ax_bev.plot(gt_traj_with_origin[:, 1], gt_traj_with_origin[:, 0], "g-", linewidth=2, label="GT")
+        ax_bev.plot(pred_traj_with_origin[:, 1], pred_traj_with_origin[:, 0], "r-", linewidth=2, label="Pred")
         ax_bev.scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
         ax_bev.scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
-        ax_bev.scatter(gt_traj[0, 1], gt_traj[0, 0], color='green', s=100, marker='s', label='GT Start', zorder=5)
-        ax_bev.scatter(pred_traj[0, 1], pred_traj[0, 0], color='red', s=100, marker='s', label='Pred Start', zorder=5)
+        ax_bev.scatter(0, 0, color='blue', s=100, marker='s', label='Start Point', zorder=5)
 
         ax_bev.set_xlabel("Y (right positive)")
         ax_bev.set_ylabel("X (up positive)")
 
-        all_pts = np.concatenate([gt_traj, pred_traj], axis=0)
+        all_pts = np.concatenate([gt_traj, pred_traj, origin], axis=0)
         x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()
         y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()
         margin_x = max(1.0, 0.1 * (x_max - x_min + 1e-6))
