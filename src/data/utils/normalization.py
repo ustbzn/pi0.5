@@ -153,6 +153,11 @@ class Normalize:
 
         if use_his_trajectory:
             his_traj = all_data.get("his_trajectory")
+            # 当前帧原点 (0, 0) 在归一化空间中的值，用于补齐第 5 个 token
+            origin_x_norm = float(self._normalize_by_mode(
+                np.array(0.0), self.his_x_01, self.his_x_99, self.his_x_min, self.his_x_max))
+            origin_y_norm = float(self._normalize_by_mode(
+                np.array(0.0), self.his_y_01, self.his_y_99, self.his_y_min, self.his_y_max))
             if his_traj is not None:
                 his_traj = np.asarray(his_traj, dtype=np.float32)
                 # his_trajectory 存储顺序为 [y, x]，所以 [:,0]=y, [:,1]=x
@@ -161,13 +166,14 @@ class Normalize:
                 his_traj = np.stack([his_x, his_y], axis=1)
                 target_len = his_theta.shape[0]
                 if his_traj.shape[0] < target_len:
-                    pad = np.zeros((target_len - his_traj.shape[0], 2), dtype=np.float32)
+                    pad_len = target_len - his_traj.shape[0]
+                    pad = np.full((pad_len, 2), [origin_x_norm, origin_y_norm], dtype=np.float32)
                     his_traj = np.concatenate([his_traj, pad], axis=0)
                 elif his_traj.shape[0] > target_len:
                     his_traj = his_traj[-target_len:]
                 parts.append(his_traj)
             else:
-                parts.append(np.zeros((his_theta.shape[0], 2), dtype=np.float32))
+                parts.append(np.full((his_theta.shape[0], 2), [origin_x_norm, origin_y_norm], dtype=np.float32))
 
         if nav_onehot and "navigation_id" in all_data:
             parts.append(self._nav_id_to_onehot(np.asarray(all_data["navigation_id"])))
@@ -180,6 +186,23 @@ class Normalize:
                 self.nav_id_max,
             )
             parts.append(self._ensure_2d(navigation_id))
+            
+        # if "fur_trajectory" in all_data or ("fur_x" in all_data and "fur_y" in all_data):
+        #     target_far_x = self._normalize_by_mode(
+        #     all_data["fur_trajectory"][-1][1] if "fur_trajectory" in all_data else all_data["fur_x"],
+        #     self.fur_x_01,
+        #     self.fur_x_99,
+        #     self.fur_x_min,
+        #     self.fur_x_max,
+        #     )
+        #     target_far_y = self._normalize_by_mode(
+        #         all_data["fur_trajectory"][-1][0] if "fur_trajectory" in all_data else all_data["fur_y"],
+        #         self.fur_y_01,
+        #         self.fur_y_99,
+        #         self.fur_y_min,
+        #         self.fur_y_max,
+        #     )
+        #     parts.append(np.array([[target_far_x, target_far_y]], dtype=np.float32))
 
         state = torch.tensor(np.concatenate(parts, axis=1), dtype=torch.float32)
         return state
