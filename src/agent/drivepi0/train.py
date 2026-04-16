@@ -210,6 +210,27 @@ class DrivePiZeroTrainAgent:
                 weights, num_samples=len(weights), replacement=True
             )
 
+        # 加权采样：平衡轨迹运动模式（静止/转弯/直行）
+        traj_sampling_cfg = cfg.get("trajectory_weighted_sampling", None)
+        if traj_sampling_cfg and traj_sampling_cfg.get("enable", False):
+            log.info("Building weighted sampler for trajectory type balance...")
+            weights, stats = train_dataset.get_trajectory_weights(
+                static_threshold=traj_sampling_cfg.get("static_threshold", 1.0),
+                turn_threshold=traj_sampling_cfg.get("turn_threshold", 2.0),
+                static_weight=traj_sampling_cfg.get("static_weight", 2.0),
+                turn_weight=traj_sampling_cfg.get("turn_weight", 3.0),
+                straight_weight=traj_sampling_cfg.get("straight_weight", 1.0),
+            )
+            log.info(f"Trajectory type distribution: {stats}")
+            log.info(
+                f"Sampling weights: straight={traj_sampling_cfg.get('straight_weight', 1.0)}, "
+                f"turn={traj_sampling_cfg.get('turn_weight', 3.0)}, "
+                f"static={traj_sampling_cfg.get('static_weight', 2.0)}"
+            )
+            train_sampler = WeightedRandomSampler(
+                weights, num_samples=len(weights), replacement=True
+            )
+
         self.train_dataloader = DataLoader(
             train_dataset,
             batch_size=cfg.per_device_batch_size,

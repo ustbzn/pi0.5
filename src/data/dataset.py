@@ -101,6 +101,59 @@ class TorchDataset(Dataset):
                 labels.append(0)
         return labels
 
+    def get_trajectory_weights(
+        self,
+        static_threshold: float = 1.0,
+        turn_threshold: float = 2.0,
+        static_weight: float = 2.0,
+        turn_weight: float = 3.0,
+        straight_weight: float = 1.0,
+    ):
+        """根据轨迹运动模式为每个样本计算采样权重。
+
+        分类规则（按优先级）：
+          1. 转弯: fur_trajectory 末端横向位移 > turn_threshold
+          2. 静止: fur_trajectory 末端总位移 < static_threshold
+          3. 直行: 其余
+
+        Args:
+            static_threshold: 判定静止的位移阈值 (米)
+            turn_threshold:   判定转弯的横向偏移阈值 (米)
+            static_weight:    静止样本的采样权重
+            turn_weight:      转弯样本的采样权重
+            straight_weight:  直行样本的采样权重
+
+        Returns:
+            weights: list[float], 与 self.list_data_dict 等长的权重列表
+            stats:   dict, 各类别的样本计数
+        """
+        weights = []
+        stats = {"straight": 0, "turn": 0, "static": 0}
+        for fname in self.list_data_dict:
+            pkl_path = os.path.join(self.data_path, fname)
+            try:
+                with open(pkl_path, 'rb') as f:
+                    d = pickle.load(f)
+                fur = np.asarray(d["fur_trajectory"], dtype=np.float32)  # (6, 2) [y, x]
+                final_y, final_x = fur[-1, 0], fur[-1, 1]
+                displacement = np.sqrt(final_y ** 2 + final_x ** 2)
+                lateral = abs(final_y)
+
+                # 转弯优先判定（转弯样本位移一般也 > static_threshold）
+                if lateral > turn_threshold:
+                    weights.append(turn_weight)
+                    stats["turn"] += 1
+                elif displacement < static_threshold:
+                    weights.append(static_weight)
+                    stats["static"] += 1
+                else:
+                    weights.append(straight_weight)
+                    stats["straight"] += 1
+            except Exception:
+                weights.append(straight_weight)
+                stats["straight"] += 1
+        return weights, stats
+
     @staticmethod
     def _pick_image_path(all_data, *keys):
         for key in keys:

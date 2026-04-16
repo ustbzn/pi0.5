@@ -18,13 +18,13 @@ lora: False
 lora_r: 32
 lora_dropout: 0.0
 pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct  # You need to set path
-checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo/logs/train/drive-pi0/2026-04-14_16-40_mogo_naviv2_histraj_language/checkpoint/step2360.pt # You need to set path
+checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo/logs/train/drive-pi0/2026-04-15_16-37_mogo_naviv2_9dim_databalanced/checkpoint/step2360.pt # You need to set path
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: minmax
 
 data:
   # statistics_path: ${current_dir}/datasets/mogo-test/statistics.json
-  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/statistics.json
+  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/statistics_9dim.json
   use_fixed_images: False
   work_dir: ${current_dir}
   split: val
@@ -50,7 +50,7 @@ cond_steps: 5
 horizon_steps: 6
 
 action_dim: 2 # EEF_POS
-proprio_dim: 13  # his_speed(3) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + his_trajectory(2) + navigation_id(1) = 13
+proprio_dim: 9  # his_speed(2) + his_acceleration(2) + his_angular_velocity(1) + his_theta(1) + his_trajectory(2) + navigation_id(1) = 9
 state_dim: ${proprio_dim}
 # 参数更改
 max_seq_len: 600  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600

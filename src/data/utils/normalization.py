@@ -125,18 +125,21 @@ class Normalize:
         return x
 
     def prepare_state(self, all_data, nav_onehot: bool = False, use_his_trajectory: bool = False):
+        # his_speed: (N,3) -> 取前2维 (y,x)，丢弃 dim2（恒为0）
         his_speed = self._ensure_2d(self._normalize_by_mode(
-            np.asarray(all_data["his_speed"]), self.speed_01, self.speed_99, self.speed_min, self.speed_max
+            np.asarray(all_data["his_speed"])[:, :2], self.speed_01, self.speed_99, self.speed_min, self.speed_max
         ))
+        # his_acceleration: (N,3) -> 取前2维 (y,x)，丢弃 dim2
         his_acceleration = self._ensure_2d(self._normalize_by_mode(
-            np.asarray(all_data["his_acceleration"]),
+            np.asarray(all_data["his_acceleration"])[:, :2],
             self.acceleration_01,
             self.acceleration_99,
             self.acceleration_min,
             self.acceleration_max,
         ))
+        # his_angular_velocity: (N,3) -> 仅取 dim2 (yaw)，dim0/dim1 恒为0
         his_angular_velocity = self._ensure_2d(self._normalize_by_mode(
-            np.asarray(all_data["his_angular_velocity"]),
+            np.asarray(all_data["his_angular_velocity"])[:, 2:3],
             self.angular_velocity_01,
             self.angular_velocity_99,
             self.angular_velocity_min,

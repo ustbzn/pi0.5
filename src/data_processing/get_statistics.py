@@ -89,9 +89,13 @@ def generate_data(data_path, output_path='statistics.json'):
         with open(pkl_data_path, 'rb') as f:
             all_data = pickle.load(f)
             his_theta.append(np.asarray(all_data['his_theta']))
-            his_angular_velocity.append(np.asarray(all_data['his_angular_velocity']))
-            his_acceleration.append(np.asarray(all_data['his_acceleration']))
-            his_speed.append(np.asarray(all_data['his_speed']))
+            # 与 normalization.py prepare_state 保持一致的降维切片:
+            # angular_velocity: 仅取 dim2 (yaw), dim0/dim1 恒为0
+            his_angular_velocity.append(np.asarray(all_data['his_angular_velocity'])[:, 2:3])
+            # acceleration: 取前2维 (y, x), 丢弃 dim2
+            his_acceleration.append(np.asarray(all_data['his_acceleration'])[:, :2])
+            # speed: 取前2维 (y, x), 丢弃 dim2 (恒为0)
+            his_speed.append(np.asarray(all_data['his_speed'])[:, :2])
 
             hx, hy = split_history_xy(all_data)
             if hx is not None:

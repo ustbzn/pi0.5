@@ -9,9 +9,9 @@ export PYTHONPATH="/pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo:$PYTHON
 WORLD_SIZE=4
 VAL_DATA_DIR=/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/val
 CONFIG_PATH=config/inference/DrivePi0/qwen_mogo_havetrain.yaml
-STATISTIC_PATH=/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/statistics.json
-OUTPUT_DIR=inference_out/mogo-2503/inference/no_VLM_0414
-LOG_DIR=inference_out/mogo-2503/logs/no_VLM_0414
+STATISTIC_PATH=/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/statistics_9dim.json
+OUTPUT_DIR=inference_out/mogo-2503/inference/no_VLM_0415
+LOG_DIR=inference_out/mogo-2503/logs/no_VLM_0415
 
 mkdir -p ${OUTPUT_DIR}
 mkdir -p ${LOG_DIR}

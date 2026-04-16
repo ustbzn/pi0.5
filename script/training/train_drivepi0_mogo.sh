@@ -14,7 +14,7 @@ NUM_GPU="$(nvidia-smi --list-gpus | wc -l)"
 echo "NUM_GPU=$NUM_GPU"
 
 # 配置文件：使用 one-hot 编码 + 加权采样的新配置
-BASE_CONFIG="qwen3_naviv2_histraj_language.yaml"
+BASE_CONFIG="qwen3_naviv2_9dim.yaml"
 
 # 自动寻找空闲端口
 find_free_port() {
