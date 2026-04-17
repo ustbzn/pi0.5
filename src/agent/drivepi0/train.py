@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import random
 import time
@@ -11,6 +12,7 @@ import torch
 from omegaconf import OmegaConf
 from PIL import Image
 from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data.distributed import DistributedSampler
 from transformers import AutoTokenizer, Qwen3VLProcessor
 
 import swanlab
@@ -25,6 +27,54 @@ from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_bil
 log = logging.getLogger(__name__)
 
 # os.environ["WANDB__SERVICE_WAIT"] = "300"
+
+
+class DistributedWeightedSampler(torch.utils.data.Sampler):
+    """WeightedRandomSampler + DistributedSampler 的组合版。
+
+    所有 rank 使用相同的 seed+epoch 生成同一份全局采样索引，
+    然后每个 rank 只取属于自己的切片，保证：
+      1) 各 rank 数据互不重叠
+      2) 加权采样逻辑保持不变
+      3) 调用 set_epoch() 后每个 epoch 的数据顺序不同
+    """
+
+    def __init__(self, weights, num_samples, num_replicas=None, rank=None,
+                 replacement=True, seed=0):
+        import torch.distributed as dist
+        if num_replicas is None:
+            num_replicas = dist.get_world_size()
+        if rank is None:
+            rank = dist.get_rank()
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.replacement = replacement
+        self.seed = seed
+        self.epoch = 0
+        self.weights = torch.as_tensor(weights, dtype=torch.double)
+        # 向上取整，保证各 rank 样本数相同
+        self.num_samples_per_rank = int(math.ceil(num_samples / self.num_replicas))
+        self.total_size = self.num_samples_per_rank * self.num_replicas
+
+    def __iter__(self):
+        g = torch.Generator()
+        g.manual_seed(self.seed + self.epoch)
+        # 所有 rank 用同一 generator 生成全局索引
+        indices = torch.multinomial(
+            self.weights, self.total_size,
+            replacement=self.replacement, generator=g,
+        ).tolist()
+        # 每个 rank 取间隔为 num_replicas 的子集
+        indices = indices[self.rank::self.num_replicas]
+        assert len(indices) == self.num_samples_per_rank
+        return iter(indices)
+
+    def __len__(self):
+        return self.num_samples_per_rank
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+
 
 class DrivePiZeroTrainAgent:
     def __init__(self, cfg):
@@ -196,8 +246,10 @@ class DrivePiZeroTrainAgent:
         # dataloader --- spawn one for each rank, num_workers=0
         train_dataset = Bench2DriveDataset(cfg.data.train).dataset
 
+        # ---- 构建采样权重 (如果启用了加权采样) ----
+        sample_weights = None
+
         # 加权采样：平衡 navigation_id 类别分布
-        train_sampler = None
         if cfg.get("nav_weighted_sampling", False):
             log.info("Building weighted sampler for navigation_id balance...")
             nav_labels = train_dataset.get_nav_labels()
@@ -205,16 +257,13 @@ class DrivePiZeroTrainAgent:
             label_counts = Counter(nav_labels)
             log.info(f"Navigation label distribution: {dict(sorted(label_counts.items()))}")
             # 每个类别的权重与其频率成反比
-            weights = [1.0 / label_counts[l] for l in nav_labels]
-            train_sampler = WeightedRandomSampler(
-                weights, num_samples=len(weights), replacement=True
-            )
+            sample_weights = [1.0 / label_counts[l] for l in nav_labels]
 
         # 加权采样：平衡轨迹运动模式（静止/转弯/直行）
         traj_sampling_cfg = cfg.get("trajectory_weighted_sampling", None)
         if traj_sampling_cfg and traj_sampling_cfg.get("enable", False):
             log.info("Building weighted sampler for trajectory type balance...")
-            weights, stats = train_dataset.get_trajectory_weights(
+            traj_weights, stats = train_dataset.get_trajectory_weights(
                 static_threshold=traj_sampling_cfg.get("static_threshold", 1.0),
                 turn_threshold=traj_sampling_cfg.get("turn_threshold", 2.0),
                 static_weight=traj_sampling_cfg.get("static_weight", 2.0),
@@ -227,9 +276,37 @@ class DrivePiZeroTrainAgent:
                 f"turn={traj_sampling_cfg.get('turn_weight', 3.0)}, "
                 f"static={traj_sampling_cfg.get('static_weight', 2.0)}"
             )
-            train_sampler = WeightedRandomSampler(
-                weights, num_samples=len(weights), replacement=True
-            )
+            sample_weights = traj_weights
+
+        # ---- 根据 multi_gpu 和加权采样构建最终 sampler ----
+        if self.multi_gpu:
+            if sample_weights is not None:
+                # 多卡 + 加权采样：使用 DistributedWeightedSampler
+                train_sampler = DistributedWeightedSampler(
+                    weights=sample_weights,
+                    num_samples=len(train_dataset),
+                    replacement=True,
+                    seed=self.seed,
+                )
+                log.info("Using DistributedWeightedSampler for multi-GPU weighted sampling")
+            else:
+                # 多卡 + 无加权：使用标准 DistributedSampler
+                train_sampler = DistributedSampler(
+                    train_dataset,
+                    shuffle=True,
+                    seed=self.seed,
+                )
+                log.info("Using DistributedSampler for multi-GPU training")
+        else:
+            if sample_weights is not None:
+                # 单卡 + 加权采样：使用 WeightedRandomSampler
+                train_sampler = WeightedRandomSampler(
+                    sample_weights, num_samples=len(sample_weights), replacement=True
+                )
+            else:
+                train_sampler = None
+
+        self.train_sampler = train_sampler  # 保存引用，用于 set_epoch()
 
         self.train_dataloader = DataLoader(
             train_dataset,
@@ -243,11 +320,19 @@ class DrivePiZeroTrainAgent:
         self.run_eval = cfg.data.get("val", False)
         if self.run_eval:
             # use validation split; rebuild iterator each eval to avoid StopIteration
+            val_dataset = Bench2DriveDataset(cfg.data.val).dataset
+            if self.multi_gpu:
+                self.val_sampler = DistributedSampler(
+                    val_dataset, shuffle=False,
+                )
+            else:
+                self.val_sampler = None
             self.val_dataloader = DataLoader(
-                Bench2DriveDataset(cfg.data.val).dataset,
-                    batch_size=cfg.per_device_batch_size,
-                    pin_memory=True,
+                val_dataset,
+                batch_size=cfg.per_device_batch_size,
+                pin_memory=True,
                 num_workers=cfg.num_workers,
+                sampler=self.val_sampler,
             )
             self.eval_thresholds = cfg.eval_thresholds
             self.eval_freq = cfg.eval_freq
@@ -475,7 +560,14 @@ class DrivePiZeroTrainAgent:
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             return inputs
     
+        epoch = 0
         while 1:
+            # ---- 每个 epoch 开始时更新 sampler 的 epoch ----
+            # 确保各 rank 在每个 epoch 采样到不同的数据
+            if self.train_sampler is not None and hasattr(self.train_sampler, 'set_epoch'):
+                self.train_sampler.set_epoch(epoch)
+                log.info(f"Set train sampler epoch to {epoch}")
+
             for batch in self.train_dataloader:
                 '''
                 batch: dict with keys 'state', 'image_{front,right,left,back}', 'image_{front,right,left,back}_time', 'trajectory', 'language_instruction'
@@ -635,6 +727,8 @@ class DrivePiZeroTrainAgent:
                 cnt_batch += 1
                 if cnt_update >= self.n_updates:
                     return
+            # ---- 一个 epoch 结束 ----
+            epoch += 1
 
     @log_execution_time()
     def save_training(self, cnt_update, cnt_batch):

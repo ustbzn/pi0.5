@@ -1,0 +1,253 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU  # You need to set path
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_naviv2_9dim_8gpu
+log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
+
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct   # You need to set path
+load_pretrained_weights: True
+
+# 模式 1: 首次训练（从预训练 Qwen3-VL 开始）
+# resume_checkpoint_path:
+# finetune_checkpoint_path:
+
+# 模式 2: 断点续训（恢复一切，接着跑）
+# resume_checkpoint_path: /pcpt/.../checkpoint/step960.pt
+# finetune_checkpoint_path:
+
+# 模式 3: 微调（用 step960 的模型权重，但全新的优化器和学习率）
+# resume_checkpoint_path:
+# finetune_checkpoint_path: /pcpt/.../checkpoint/step960.pt
+
+resume_checkpoint_path:
+finetune_checkpoint_path:   # 填入 checkpoint 路径则从该模型 finetune（全新优化器+学习率）
+# resume_checkpoint_path: ${current_dir}/checkpoint
+
+train_vlm: False  # 是否训练 VLM 模块；如果 False，VLM 模块权重冻结不更新
+action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
+use_torch_compile: True
+use_bf16: True
+# use_fp16: False
+# 混合精度
+use_amp: True
+quantize: False
+lora: False
+lora_r: 32
+lora_dropout: 0.05
+
+data:
+  train:
+    statistics_path: ${data.train.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2 # 训练集不变
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13 # useless in drive-pi0
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}  # 引用顶层的 norm_mode
+    use_his_trajectory: True
+  val:
+    statistics_path: ${data.val.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2 # 测试集不变
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13 # useless in drive-pi0
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}  # 引用顶层的 norm_mode
+    use_his_trajectory: True
+
+swanlab:
+  enable: True
+  project: DriveMoE_Qwen3
+  experiment_name: ${run_name}
+  mode: cloud
+  description: null
+  entity: null
+
+# wandb:
+#   entity: null
+#   project: drive-pi0
+#   run: ${now:%H-%M-%S}_${name}
+
+log_freq: 16
+n_epochs: 60
+# 归一化方法: percentile_clip, percentile, minmax
+norm_mode: minmax
+# 轨迹类型加权采样：对转弯/静止样本过采样，缓解数据不平衡
+trajectory_weighted_sampling:
+  enable: True
+  static_threshold: 1.0     # 末端位移 < 1m 判定为静止
+  turn_threshold: 2.0       # 末端横向偏移 > 2m 判定为转弯
+  static_weight: 2.0        # 静止样本采样权重
+  turn_weight: 3.0          # 转弯样本采样权重
+  straight_weight: 1.0      # 直行样本采样权重
+# 需要修改的参数
+n_train: 59778  # total training samples for mogo_dataset_navi_v2 train split
+# n_updates: 总更新次数 = ceil(训练样本数 / 实际全局batch大小) * epoch数
+# 注意: 实际 global_batch_size 会在训练代码中自动计算 (448 = 4 GPUs * 16 per_device * 7 accumulation)
+# 使用向上取整确保每个epoch至少有一次更新: ceil(480 / 448) * n_epochs = 2 * 15 = 30
+# 或者可以设置更大的值，让模型训练更多步
+n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}  # 向上取整
+# save_model_freq: 每多少个更新保存一次模型
+# 设置为每个epoch保存一次: ceil(n_train / global_batch_size)
+# 如果希望更频繁保存，可以减小这个值
+save_model_freq: ${eval:'(${n_train} + ${global_batch_size} - 1) // ${global_batch_size}'}  # 向上取整，每个epoch保存一次
+eval_freq: 1000
+# eval_freq: ${eval:'${n_train} // ${global_batch_size} * 4'}
+eval_size: 1024
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+
+# 需要修改的参数
+# 注意: 实际 global_batch_size = per_device_batch_size * grad_accumulation_steps * num_gpus
+# 如果有4个GPU，每个设备16，建议设置为 64 的倍数 (4 * 16 = 64)
+# 例如: 64, 128, 192, 256, 320, 384, 448, 512 等
+global_batch_size: 1024  # 1 GPU * 16 per_device * 7 accumulation = 64
+per_device_batch_size: 80 # 8 images, A100-80GB 实测峰值 ~68GB, 留 ~12GB 余量
+num_workers: 8
+# 学习率
+action_lr: 1e-5
+vlm_lr: 1e-5
+action_lr_scheduler:
+  first_cycle_steps: ${n_updates} # n_updates
+  min_lr: 1e-8
+  warmup_steps: 200 # a bit of warmup
+vlm_lr_scheduler:
+  first_cycle_steps: ${n_updates} # n_updates
+  min_lr: 1e-8
+  warmup_steps: 200
+action_weight_decay: 0
+vlm_weight_decay: 0
+# 梯度裁剪
+max_grad_norm: 1.0
+
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0  # data normalized in [-1,1]
+
+cond_steps: 5  # 必须与 window.sh 中的 --window_size 参数一致
+horizon_steps: 6  # fur_trajectory in mogo_dataset_navi_250 has 6 future points
+action_dim: 2 # EEF_POS
+proprio_dim: 9  # his_speed(2) + his_acceleration(2) + his_angular_velocity(1) + his_theta(1) + his_trajectory(2) + navigation_id(1) = 9
+state_dim: ${proprio_dim}
+max_seq_len: 600  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600
+tokenizer_padding: max_length # instead of truncating to longest
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:   # qwen3-vl
+    hidden_size: 2048  # Qwen3-VL-2B 的 hidden_size
+    intermediate_size: 6144  # Qwen3-VL-2B 的 intermediate_size（官方值）
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:  # not applicable for qwen3-vl
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256 # only applicable if using adaptive
+
+# Fixed
+pad_token_id: 0
+
+# vision:
+#   _target_: src.model.qwen3.vision.Qwen3VisionModel  # 使用 Qwen3VisionModel
+#   config:
+#     hidden_size: 1024  # Qwen3-VL-2B 的 vision hidden_size（官方值）
+#     intermediate_size: 4096  # 官方值
+#     depth: 24  # Qwen3-VL-2B 的 vision 层数（官方值）
+#     num_attention_heads: 16  # 官方值
+#     num_channels: 3
+#     in_channels: 3
+#     patch_size: 16  # Qwen3-VL-2B 的 patch_size（官方值）
+#     temporal_patch_size: 2  # 官方值
+#     spatial_merge_size: 2  # 官方值
+#     num_position_embeddings: 2304  # 官方值
+#     out_hidden_size: 2048  # 官方值
+#     hidden_act: "gelu_pytorch_tanh"  # 官方值
+#     layer_norm_eps: 1e-6
+#     attention_dropout: 0.0
+#     num_image_tokens: 512  # 2 images: 256 * 2
+#     # DeepStack配置（官方）
+#     deepstack_visual_indexes: [5, 11, 17]  # DeepStack技术，融合多级ViT特征
+#     # 官方代码的图像处理参数
+#     max_pixels: 576 * 28 * 28  # 最大像素数（官方默认值）
+#     min_pixels: 16 * 28 * 28   # 最小像素数（官方默认值）
+#     lora:
+#       r: ${lora_r}
+#       dropout: ${lora_dropout}
+#   use_quantize: ${quantize}
+#   use_lora: ${lora}
+
+# vision_projector:
+#   _target_: src.model.qwen3.vision.Qwen3MultiModalProjector  # 使用 Qwen3MultiModalProjector
+#   config:
+#     vision_config:
+#       hidden_size: 1024  # Qwen3-VL-2B 的 vision hidden_size（官方值）
+#       projection_dim: 2048  # 官方值（out_hidden_size）
+#     lora:
+#       r: ${lora_r}
+#       dropout: ${lora_dropout}
+#   use_quantize: ${quantize}
+#   use_lora: ${lora}
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28  # 修改为 28（Qwen3-VL-2B 的层数）
+    num_attention_heads: 16  # Qwen3-VL-2B 的 attention heads（官方值）
+    num_key_value_heads: 8  # Qwen3-VL-2B 的 KV heads（官方值）
+    head_dim: 128  # Qwen3-VL-2B 的 head_dim（官方值）
+    hidden_act: "gelu_pytorch_tanh"  # 官方值
+    max_position_embeddings: 262144  # Qwen3-VL-2B 的 max position embeddings（官方值）
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000  # Qwen3-VL-2B 的 rope_theta（官方值）
+    attention_bias: False  # Qwen3-VL-2B 不使用 bias（官方值）
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    # RoPE配置（官方）
+    rope_scaling:
+      mrope_interleaved: true  # Interleaved-MRoPE（官方值）
+      mrope_section: [24, 20, 20]  # 官方值
+      rope_type: "default"
+
+# 修改 token 相关配置
+image_token_index: 151655  # Qwen3-VL-2B 的图像 token ID（官方值）
+video_token_id: 151656  # Qwen3-VL-2B 的视频 token ID（官方值）
+vision_start_token_id: 151652  # Qwen3-VL-2B 的视觉开始token ID（官方值）
+vision_end_token_id: 151653  # Qwen3-VL-2B 的视觉结束token ID（官方值）
+vocab_size: 151936  # Qwen3-VL-2B 的 vocab size（官方值）
+bos_token_id: 151643  # Qwen3-VL-2B 的 bos token ID（官方值）
+eos_token_id: 151645  # Qwen3-VL-2B 的 eos token ID（官方值）
