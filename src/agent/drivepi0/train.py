@@ -677,6 +677,7 @@ class DrivePiZeroTrainAgent:
                             ]
                         )
                         log.info(log_msg)
+                        self.save_training(cnt_update, cnt_batch)
 
                 # log loss
                 if self.main_rank and cnt_batch % self.log_freq == 0:

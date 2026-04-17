@@ -65,6 +65,13 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self.final_action_clip_value = cfg.final_action_clip_value
         self.flow_sig_min = cfg.get("flow_sig_min", 0.001)
 
+        # Trajectory auxiliary losses
+        traj_loss_cfg = cfg.get("trajectory_loss", {})
+        self.lambda_smooth = traj_loss_cfg.get("lambda_smooth", 0.0)
+        self.lambda_accel = traj_loss_cfg.get("lambda_accel", 0.0)
+        self.endpoint_weight_mode = traj_loss_cfg.get("endpoint_weight_mode", "none")
+        self.endpoint_weight_max = traj_loss_cfg.get("endpoint_weight_max", 3.0)
+
         # text input only
         self.embed_tokens = nn.Embedding(
             cfg.vocab_size,
@@ -796,7 +803,33 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
         # compare to true velocity
         d_psi = x1 - (1 - self.flow_sig_min) * x0
-        loss = torch.mean((v_psi - d_psi) ** 2)
+        residual = v_psi - d_psi  # [B, H, A]
+
+        # --- distance-weighted MSE: give higher weight to farther points ---
+        if self.endpoint_weight_mode == "linear":
+            # weight linearly increases: 1.0, 1+k, 1+2k, ..., endpoint_weight_max
+            H = residual.shape[1]
+            w = torch.linspace(1.0, self.endpoint_weight_max, H,
+                               device=residual.device, dtype=residual.dtype)
+            point_weights = w[None, :, None]  # [1, H, 1]
+            mse_loss = torch.mean(residual ** 2 * point_weights)
+        else:
+            mse_loss = torch.mean(residual ** 2)
+
+        loss = mse_loss
+
+        # --- smoothness loss: penalize velocity field jerk between adjacent points ---
+        if self.lambda_smooth > 0:
+            v_diff = v_psi[:, 1:, :] - v_psi[:, :-1, :]
+            smooth_loss = torch.mean(v_diff ** 2)
+            loss = loss + self.lambda_smooth * smooth_loss
+
+        # --- acceleration loss: penalize second-order difference of velocity field ---
+        if self.lambda_accel > 0 and v_psi.shape[1] >= 3:
+            v_accel = v_psi[:, 2:, :] - 2 * v_psi[:, 1:-1, :] + v_psi[:, :-2, :]
+            accel_loss = torch.mean(v_accel ** 2)
+            loss = loss + self.lambda_accel * accel_loss
+
         return loss.to(v_psi.dtype)
 
 
