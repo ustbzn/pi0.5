@@ -527,7 +527,7 @@ class JointModel(nn.Module):
                 kv_caches=kv_caches,
                 cache_mode=cache_mode,
                 post_attn_skip_names=final_layer_post_attn_skip_names
-                    if is_final_layer else ["vlm"],
+                    if is_final_layer else [],
             )
             # 合并回 embeds_all
             embeds_all.update(embeds_updated)

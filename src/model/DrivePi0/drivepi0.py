@@ -275,8 +275,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
             f"{last_hidden_layer_index}.post" in name
             or f"{last_hidden_layer_index}.mlp" in name
             or f"{last_hidden_layer_index}.self_attn.o_proj" in name
-            or f"{last_hidden_layer_index}.self_attn.v_proj" in name
-        ):  # final norm is not initialized
+        ):
             return True
         return False
 

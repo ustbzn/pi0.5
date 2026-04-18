@@ -22,6 +22,7 @@ class VLMMixtureAdapter(nn.Module):
         return self._head_dim
 
     # ── 供 forward_mixture_layers 调用 ───────────────────────────────
+    @torch.compiler.disable
     def layer_func(self, func_name: str, layer_idx: int, *args):
         layer = self.model.layers[layer_idx]
 
@@ -53,6 +54,7 @@ class VLMMixtureAdapter(nn.Module):
         else:
             raise ValueError(f"VLMMixtureAdapter.layer_func: 未知 func_name='{func_name}'")
 
+    @torch.compiler.disable
     def attn_func(self, func_name: str, layer_idx: int, *args):
         layer = self.model.layers[layer_idx]
         attn  = layer.self_attn
@@ -131,6 +133,7 @@ class VLMMixtureAdapter(nn.Module):
         else:
             raise ValueError(f"VLMMixtureAdapter.attn_func: 未知 func_name='{func_name}'")
 
+    @torch.compiler.disable
     def forward_norm(self, hidden_states, time_cond=None):
         """对应 Mixture.forward_norm，用于最终 layer norm。"""
         if hidden_states is None:
