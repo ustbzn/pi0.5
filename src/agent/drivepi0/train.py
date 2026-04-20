@@ -170,11 +170,19 @@ class DrivePiZeroTrainAgent:
 
         self.model = DrivePiZero(cfg, use_ddp=self.multi_gpu, load_pretrained=load_pretrained)
         if has_resume:
+            # Resume: inject LoRA first so checkpoint keys match
+            if cfg.lora:
+                self.model.inject_lora(cfg)
             self.load_checkpoint(cfg.resume_checkpoint_path)
         elif has_finetune:
+            # Finetune: load base weights first, then inject LoRA
             self._load_model_weights_only(cfg.finetune_checkpoint_path)
+            if cfg.lora:
+                self.model.inject_lora(cfg)
         elif cfg.load_pretrained_weights:
             self.model.load_pretrained_weights()
+            if cfg.lora:
+                self.model.inject_lora(cfg)
         self.model.tie_action_proprio_weights()
         self.model.freeze_unused_weights()
         if cfg.lora:

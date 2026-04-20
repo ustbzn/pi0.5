@@ -40,6 +40,8 @@ class DrivePiZeroInferenceAgent:
         self.dtype = torch.bfloat16 if cfg.get("use_bf16", False) else torch.float32
         self.model = DrivePiZeroInference(cfg, use_ddp=False, load_pretrained=False)
         self.model.tie_action_proprio_weights()
+        if cfg.get("lora", False):
+            self.model.inject_lora(cfg)
         self.load_checkpoint(cfg.checkpoint_path)
         self.model.freeze_all_weights()
         self.model.to(self.dtype)

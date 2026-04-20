@@ -279,6 +279,97 @@ class DrivePiZero(nn.Module, NoSyncBase):
             return True
         return False
 
+    def inject_lora(self, cfg):
+        """Inject LoRA adapters into configurable components.
+
+        Controlled by cfg fields:
+          - lora_vlm (bool):           language model attention (q/k/v/o_proj)
+          - lora_vlm_mlp (bool):       language model MLP (gate/up/down_proj)
+          - lora_vision (bool):        vision tower attention (qkv, proj)
+          - lora_vision_mlp (bool):    vision tower MLP (linear_fc1/fc2)
+          - lora_vision_merger (bool): vision-text merger & deepstack mergers
+
+        Must be called AFTER loading base weights (for finetune) or BEFORE
+        loading a LoRA checkpoint (for resume).
+        """
+        from src.model.lora import LoRALinear
+
+        r = cfg.lora_r
+        lora_alpha = cfg.get("lora_alpha", r)
+        lora_dropout = cfg.lora_dropout
+        total = 0
+
+        def _wrap(module, attr_name):
+            original = getattr(module, attr_name)
+            if isinstance(original, nn.Linear):
+                setattr(module, attr_name, LoRALinear(
+                    original, r=r, lora_alpha=lora_alpha,
+                    lora_dropout=lora_dropout,
+                ))
+                return 1
+            return 0
+
+        # --- VLM language model ---
+        if cfg.get("lora_vlm", True):
+            vlm_attn_targets = cfg.get(
+                "lora_vlm_target_modules",
+                ["q_proj", "k_proj", "v_proj", "o_proj"],
+            )
+            language_model = self.joint_model.mixtures["vlm"].model
+            cnt = 0
+            for layer in language_model.layers:
+                for name in vlm_attn_targets:
+                    if hasattr(layer.self_attn, name):
+                        cnt += _wrap(layer.self_attn, name)
+            log.info(f"LoRA VLM attention: {cnt} layers (targets={vlm_attn_targets})")
+            total += cnt
+
+        if cfg.get("lora_vlm_mlp", False):
+            mlp_targets = ["gate_proj", "up_proj", "down_proj"]
+            language_model = self.joint_model.mixtures["vlm"].model
+            cnt = 0
+            for layer in language_model.layers:
+                for name in mlp_targets:
+                    if hasattr(layer.mlp, name):
+                        cnt += _wrap(layer.mlp, name)
+            log.info(f"LoRA VLM MLP: {cnt} layers")
+            total += cnt
+
+        # --- Vision tower ---
+        if cfg.get("lora_vision", False):
+            cnt = 0
+            for block in self.vision_tower.blocks:
+                for name in ["qkv", "proj"]:
+                    if hasattr(block.attn, name):
+                        cnt += _wrap(block.attn, name)
+            log.info(f"LoRA Vision attention: {cnt} layers")
+            total += cnt
+
+        if cfg.get("lora_vision_mlp", False):
+            cnt = 0
+            for block in self.vision_tower.blocks:
+                for name in ["linear_fc1", "linear_fc2"]:
+                    if hasattr(block.mlp, name):
+                        cnt += _wrap(block.mlp, name)
+            log.info(f"LoRA Vision MLP: {cnt} layers")
+            total += cnt
+
+        if cfg.get("lora_vision_merger", False):
+            cnt = 0
+            merger = self.vision_tower.merger
+            for name in ["linear_fc1", "linear_fc2"]:
+                if hasattr(merger, name):
+                    cnt += _wrap(merger, name)
+            if hasattr(self.vision_tower, "deepstack_merger_list"):
+                for ds_merger in self.vision_tower.deepstack_merger_list:
+                    for name in ["linear_fc1", "linear_fc2"]:
+                        if hasattr(ds_merger, name):
+                            cnt += _wrap(ds_merger, name)
+            log.info(f"LoRA Vision merger: {cnt} layers")
+            total += cnt
+
+        log.info(f"LoRA injection complete: {total} total layers (r={r}, alpha={lora_alpha})")
+
     def freeze_non_lora_weights_in_vlm(self):
         """Keep all bias frozen"""
         for name, param in self.vision_tower.named_parameters():
@@ -817,16 +908,24 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
         loss = mse_loss
 
-        # --- smoothness loss: penalize velocity field jerk between adjacent points ---
+        # --- smoothness / accel loss on RECONSTRUCTED trajectory, not raw velocity ---
+        # v_psi predicts d_psi = x1 - (1-σ_min)*x0.  Recover implied x1:
+        #   x1_hat = psi_t + (1-t) * v_psi  (Euler single-step estimate)
+        # This removes the per-point noise x0 that makes raw v_psi non-smooth.
+        if self.lambda_smooth > 0 or self.lambda_accel > 0:
+            t_expand = t[:, None, None]  # [B, 1, 1]
+            x1_hat = psi_t + (1 - t_expand) * v_psi
+
         if self.lambda_smooth > 0:
-            v_diff = v_psi[:, 1:, :] - v_psi[:, :-1, :]
-            smooth_loss = torch.mean(v_diff ** 2)
+            traj_diff = x1_hat[:, 1:, :] - x1_hat[:, :-1, :]
+            gt_diff = x1[:, 1:, :] - x1[:, :-1, :]
+            smooth_loss = torch.mean((traj_diff - gt_diff) ** 2)
             loss = loss + self.lambda_smooth * smooth_loss
 
-        # --- acceleration loss: penalize second-order difference of velocity field ---
-        if self.lambda_accel > 0 and v_psi.shape[1] >= 3:
-            v_accel = v_psi[:, 2:, :] - 2 * v_psi[:, 1:-1, :] + v_psi[:, :-2, :]
-            accel_loss = torch.mean(v_accel ** 2)
+        if self.lambda_accel > 0 and x1.shape[1] >= 3:
+            traj_accel = x1_hat[:, 2:, :] - 2 * x1_hat[:, 1:-1, :] + x1_hat[:, :-2, :]
+            gt_accel = x1[:, 2:, :] - 2 * x1[:, 1:-1, :] + x1[:, :-2, :]
+            accel_loss = torch.mean((traj_accel - gt_accel) ** 2)
             loss = loss + self.lambda_accel * accel_loss
 
         return loss.to(v_psi.dtype)
