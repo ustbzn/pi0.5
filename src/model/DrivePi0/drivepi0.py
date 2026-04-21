@@ -310,7 +310,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
             return 0
 
         # --- VLM language model ---
-        if cfg.get("lora_vlm", True):
+        if cfg.get("lora_vlm", False):
             vlm_attn_targets = cfg.get(
                 "lora_vlm_target_modules",
                 ["q_proj", "k_proj", "v_proj", "o_proj"],

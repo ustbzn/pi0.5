@@ -432,10 +432,12 @@ class DrivePiZeroTrainAgent:
                     eval_l1_loss = eval_l1_loss / self.per_device_num_eval_batch
                     self.model.train()
                     if self.multi_gpu:
+                        dist.barrier()
                         dist.all_reduce(eval_accuracy, op=dist.ReduceOp.SUM)
                         dist.all_reduce(eval_l1_loss, op=dist.ReduceOp.SUM)
                         eval_accuracy /= dist.get_world_size()
                         eval_l1_loss /= dist.get_world_size()
+                        eval_accuracy = torch.clamp(eval_accuracy, 0.0, 1.0)
                     if self.main_rank:
                         log_msg = f"Eval | l1 Loss: {eval_l1_loss.item():.3f} | "
                         log_msg += " | ".join(
