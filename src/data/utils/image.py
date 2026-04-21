@@ -33,12 +33,18 @@ def resize_image_tensor(image: torch.Tensor, size: Tuple[int, int]) -> torch.Ten
 
 
 def read_resize_encode_image_pytorch(path: str, size: Tuple[int, int]) -> bytes:
-    """Reads, decodes, resizes, and then re-encodes an image using PyTorch."""
+    """Reads, decodes, resizes, and then re-encodes an image using PyTorch.
+
+    Args:
+        path: 图像文件路径
+        size: 目标尺寸 (H, W)，直接缩放到该尺寸
+    """
     image = Image.open(path)
-    
-    resize_transform = transforms.Resize(size)
-    image = resize_transform(image)
-    
+
+    # 直接缩放到目标 (H, W) — 调用方应传入正确宽高比的尺寸
+    target_h, target_w = size
+    image = image.resize((target_w, target_h), Image.BILINEAR)
+
     image = image.convert("RGB")
     image = torch.tensor(np.array(image), dtype=torch.float32)
     image = torch.round(image)

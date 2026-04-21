@@ -125,16 +125,21 @@ class Normalize:
             return x[:, np.newaxis]
         return x
 
-    def prepare_state(
-        self,
-        all_data,
-        nav_onehot: bool = False,
-        use_his_trajectory: bool = False,
-        state_frame_index: Optional[int] = None,
+    def prepare_state(self, 
+                      all_data, 
+                      nav_onehot: bool = False, 
+                      use_his_trajectory: bool = False, 
+                      use_hdmap_proprio: bool = False,
+                      state_frame_index: Optional[int] = None,
     ):
-        # his_speed: (N,3) -> 取前2维 (y,x)，丢弃 dim2（恒为0）
+        # his_speed: 兼容 (N,3) 和 (N,) 两种格式
+        raw_speed = np.asarray(all_data["his_speed"])
+        if raw_speed.ndim == 2:
+            speed_input = raw_speed[:, :2]  # (N,3) → 取前2维 (y,x)
+        else:
+            speed_input = raw_speed  # (N,) → 标量速度
         his_speed = self._ensure_2d(self._normalize_by_mode(
-            np.asarray(all_data["his_speed"])[:, :2], self.speed_01, self.speed_99, self.speed_min, self.speed_max
+            speed_input, self.speed_01, self.speed_99, self.speed_min, self.speed_max
         ))
         # his_acceleration: (N,3) -> 取前2维 (y,x)，丢弃 dim2
         his_acceleration = self._ensure_2d(self._normalize_by_mode(
@@ -210,6 +215,17 @@ class Normalize:
         #         self.fur_y_max,
         #     )
         #     parts.append(np.array([[target_far_x, target_far_y]], dtype=np.float32))
+
+        # 方案 B: HDMap 标量特征 → proprio
+        # hdmap_features 是 (8,) float32 数组，值域 [0, 1]
+        # 线性映射到 [-1, 1] 以与其他归一化特征保持一致
+        if use_hdmap_proprio and "hdmap_features" in all_data:
+            hf = np.asarray(all_data["hdmap_features"], dtype=np.float32)  # (8,)
+            hf_norm = 2.0 * hf - 1.0  # [0,1] → [-1,1]
+            # 扩展为 (cond_steps, hdmap_dim) —— 同一帧的 hdmap 对所有历史步相同
+            target_len = his_theta.shape[0]
+            hf_tiled = np.tile(hf_norm[np.newaxis, :], (target_len, 1))  # (cond_steps, 8)
+            parts.append(hf_tiled)
 
         state_np = np.concatenate(parts, axis=1)
         if state_frame_index is not None:

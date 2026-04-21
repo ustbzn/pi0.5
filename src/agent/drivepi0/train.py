@@ -450,6 +450,11 @@ class DrivePiZeroTrainAgent:
             print(f"Chat template test: {test_text[:100]}...")
         print('agent done')
 
+        # HDMap 开关
+        self.use_hdmap_image = cfg.data.train.get("use_hdmap_image", False)
+        if self.use_hdmap_image:
+            log.info("HDMap BEV image enabled (Plan A): will add BEV as an extra visual input")
+
     def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
         if self.flow_sampling == "uniform":  # uniform between 0 and 1
             """https://github.com/gle-bellier/flow-matching/blob/main/Flow_Matching.ipynb"""
@@ -541,7 +546,14 @@ class DrivePiZeroTrainAgent:
                 img = einops.rearrange(img, "B H W C -> B C H W")
                 image_list.append(img.unsqueeze(1))  # [B, 1, C, H, W]
 
-            images = torch.cat(image_list, dim=1)  # [B, 8, C, H, W]
+            # 方案 A: HDMap BEV 作为第 9 张图像
+            if self.use_hdmap_image and "image_hdmap_bev" in batch:
+                hdmap_img = batch["image_hdmap_bev"]  # [B, H, W, C]
+                hdmap_img = einops.rearrange(hdmap_img, "B H W C -> B C H W")
+                image_list.append(hdmap_img.unsqueeze(1))  # [B, 1, C, H, W]
+                cam_labels.append('HDMap BEV view')
+
+            images = torch.cat(image_list, dim=1)  # [B, 8 or 9, C, H, W]
             batch_size = images.shape[0]
             num_images_per_sample = images.shape[1]  # 8
 

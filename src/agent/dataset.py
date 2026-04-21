@@ -23,6 +23,10 @@ class Bench2DriveDataset:
             nav_onehot=config.get("nav_onehot", False),
             use_his_trajectory=config.get("use_his_trajectory", False),
             state_frame_index=config.get("state_frame_index", None),
+            use_hdmap_image=config.get("use_hdmap_image", False),
+            use_hdmap_proprio=config.get("use_hdmap_proprio", False),
+            cam_image_size=tuple(config.get("cam_image_size", [224, 224])),
+            hdmap_image_size=tuple(config.get("hdmap_image_size", [192, 352])),
         )
         self.dataset = dataset
 

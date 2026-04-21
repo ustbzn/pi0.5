@@ -1,0 +1,219 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi  # You need to set path
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_hdmap_1gpu
+log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
+
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct   # You need to set path
+load_pretrained_weights: True
+
+resume_checkpoint_path:
+finetune_checkpoint_path:
+
+train_vlm: False
+action_expert_adaptive_mode:
+use_torch_compile: True
+use_bf16: True
+use_amp: True
+quantize: False
+lora: False
+lora_r: 32
+lora_dropout: 0.05
+
+# ============================================================
+# HDMap 开关
+# ============================================================
+# 方案 A: HDMap BEV 图像作为额外视觉输入 (第 9 张图)
+#   - 打开后 max_seq_len 建议增大到 ~670 (多 1 张图 ≈ 64 tokens)
+#   - 需要使用 mogo_dataset_navi_hdmap 数据集
+use_hdmap_image: False
+
+# 方案 B: HDMap 标量特征 → proprio state
+#   - 打开后需要同步修改 proprio_dim += 8 (例如 13 → 21)
+#   - 需要使用 mogo_dataset_navi_hdmap 数据集
+use_hdmap_proprio: False
+# ============================================================
+
+# ============================================================
+# 图像尺寸配置 (H, W)
+# ============================================================
+# 原始相机图分辨率: 960x540 (16:9)
+# Qwen3-VL token 计算: tokens = ceil(H/32) * ceil(W/32)
+#
+# cam_image_size / hdmap_image_size 与 max_seq_len 对照表:
+# ┌──────────────┬────────────┬─────────┬───────────┬──────────────────┐
+# │ cam_size     │ hdmap_size │ cam_tok │ hdmap_tok │ max_seq_len 建议 │
+# ├──────────────┼────────────┼─────────┼───────────┼──────────────────┤
+# │ [224, 224]   │ 无         │   64    │    -      │ 640              │
+# │ [270, 480]   │ 无         │  120    │    -      │ 1088             │
+# │ [270, 480]   │ [352, 192] │  120    │   66      │ 1152             │
+# │ [288, 512]   │ [352, 192] │  144    │   66      │ 1344             │
+# │ [288, 512]   │ [480, 256] │  144    │  120      │ 1408             │
+# │ [384, 672]   │ [480, 256] │  252    │  120      │ 2240             │
+# └──────────────┴────────────┴─────────┴───────────┴──────────────────┘
+# 注意: 开启方案 A 时 hdmap 会增加 1 张图的 tokens
+#       不开方案 A 时无需 hdmap_image_size 配置
+cam_image_size: [270, 480]      # [H, W] 相机图像缩放尺寸, 16:9 等比 (原图 960x540 的 1/2)
+hdmap_image_size: [352, 192]    # [H, W] HDMap BEV 缩放尺寸 (原图 1792x960 的 ~1/5)
+# ============================================================
+
+data:
+  train:
+    statistics_path: ${data.train.dynamic_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap  # hdmap 数据集
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: True
+    use_hdmap_image: ${use_hdmap_image}
+    use_hdmap_proprio: ${use_hdmap_proprio}
+    cam_image_size: ${cam_image_size}
+    hdmap_image_size: ${hdmap_image_size}
+  val:
+    statistics_path: ${data.val.dynamic_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap  # hdmap 数据集
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: True
+    use_hdmap_image: ${use_hdmap_image}
+    use_hdmap_proprio: ${use_hdmap_proprio}
+    cam_image_size: ${cam_image_size}
+    hdmap_image_size: ${hdmap_image_size}
+
+swanlab:
+  enable: True
+  project: DriveMoE_Qwen3
+  experiment_name: ${run_name}
+  mode: cloud
+  description: null
+  entity: null
+
+log_freq: 16
+n_epochs: 40
+norm_mode: minmax
+n_train: 59778
+n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}
+save_model_freq: ${eval:'(${n_train} + ${global_batch_size} - 1) // ${global_batch_size}'}
+eval_freq: 1000
+eval_size: 1024
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+
+global_batch_size: 1024
+per_device_batch_size: 80
+num_workers: 8
+action_lr: 1e-5
+vlm_lr: 1e-5
+action_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+vlm_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+action_weight_decay: 0
+vlm_weight_decay: 0
+max_grad_norm: 1.0
+
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0
+
+cond_steps: 5
+horizon_steps: 6
+action_dim: 2
+
+# proprio_dim 说明 (hdmap 数据集 his_speed 为标量, v2 数据集 his_speed 为3D向量):
+#   hdmap 基础 8 维: speed(1) + acceleration(2) + angular_velocity(1) + theta(1) + his_traj(2) + nav_id(1)
+#   v2   基础 9 维: speed(2) + acceleration(2) + angular_velocity(1) + theta(1) + his_traj(2) + nav_id(1)
+#   方案 B 开启后 +8 维: hdmap 标量特征 → hdmap 数据集 proprio_dim = 16, v2 数据集 = 17
+proprio_dim: 8  # 方案 B 时改为 16
+state_dim: ${proprio_dim}
+
+# max_seq_len 说明:
+#   须与 cam_image_size + hdmap_image_size + text 对齐，参见上方对照表
+#   cam=[270,480] 无hdmap: 1088, 加hdmap [352,192]: 1152
+max_seq_len: 1152  # 与 cam_image_size=[270,480] + hdmap 方案 A 对应
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 6144
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256
+
+pad_token_id: 0
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    hidden_act: "gelu_pytorch_tanh"
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    rope_scaling:
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+      rope_type: "default"
+
+image_token_index: 151655
+video_token_id: 151656
+vision_start_token_id: 151652
+vision_end_token_id: 151653
+vocab_size: 151936
+bos_token_id: 151643
+eos_token_id: 151645

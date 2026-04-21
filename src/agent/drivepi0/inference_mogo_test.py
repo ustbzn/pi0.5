@@ -83,6 +83,13 @@ class DrivePiZeroInferenceAgent:
         self.nav_onehot = cfg.data.get("nav_onehot", False)
         self.use_his_trajectory = cfg.data.get("use_his_trajectory", False)
         self.state_frame_index = cfg.data.get("state_frame_index", None)
+
+        # HDMap 开关
+        self.use_hdmap_image = cfg.data.get("use_hdmap_image", False)
+        self.use_hdmap_proprio = cfg.data.get("use_hdmap_proprio", False)
+        # 图像尺寸
+        self.cam_image_size = tuple(cfg.data.get("cam_image_size", [224, 224]))
+        self.hdmap_image_size = tuple(cfg.data.get("hdmap_image_size", [192, 352]))
         print('Agent done')
     
     
@@ -140,7 +147,15 @@ class DrivePiZeroInferenceAgent:
             img = einops.rearrange(img, "B H W C -> B C H W")
             image_list.append(img.unsqueeze(1))  # [1, 1, C, H, W]
 
-        images = torch.cat(image_list, dim=1)  # [1, 8, C, H, W]
+        # 方案 A: HDMap BEV 作为额外图像
+        if self.use_hdmap_image and "image_hdmap_bev" in data_dict:
+            hdmap_img = data_dict["image_hdmap_bev"].unsqueeze(0)  # [1, H, W, C]
+            hdmap_img = einops.rearrange(hdmap_img, "B H W C -> B C H W")
+            image_list.append(hdmap_img.unsqueeze(1))
+            cam_labels.append('HDMap BEV view')
+
+        images = torch.cat(image_list, dim=1)  # [1, 8 or 9, C, H, W]
+        state = data_dict["state"].unsqueeze(0)
         texts = [data_dict["language_instruction"]]
 
         batch_size = images.shape[0]
@@ -254,6 +269,7 @@ class DrivePiZeroInferenceAgent:
         """
         from src.data.utils.normalization import Normalize
         from src.data.utils.image import image_normalization
+        from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, HDMAP_PROPRIO_DIM
         
         val_data_path = Path(val_data_dir)
         output_path = Path(output_dir)
@@ -382,11 +398,21 @@ class DrivePiZeroInferenceAgent:
                         target_len = np.asarray(all_data['his_theta']).shape[0]
                         all_data = dict(all_data)
                         all_data['navigation_id'] = build_navigation_id_sequence(all_data, target_len)
+
+                    # 方案 B: 提取 hdmap 特征
+                    if self.use_hdmap_proprio:
+                        hdmap_bev_path = all_data.get('hdmap_bev')
+                        if hdmap_bev_path is not None:
+                            all_data['hdmap_features'] = extract_hdmap_features(hdmap_bev_path)
+                        else:
+                            all_data['hdmap_features'] = np.zeros(HDMAP_PROPRIO_DIM, dtype=np.float32)
+
                     state = normalize.prepare_state(
                         all_data,
                         nav_onehot=self.nav_onehot,
-                        use_his_trajectory=getattr(self, 'use_his_trajectory', False),
                         state_frame_index=self.state_frame_index,
+                        use_his_trajectory=self.use_his_trajectory,
+                        use_hdmap_proprio=self.use_hdmap_proprio,
                     )
 
                     data_dict = {}
@@ -401,9 +427,24 @@ class DrivePiZeroInferenceAgent:
                     }
                     for cam_name, (cur_key, prev_key) in cam_key_map.items():
                         cam_path = extract_image_path(all_data[cur_key])
-                        data_dict[f'image_{cam_name}'] = image_normalization(cam_path, (224, 224))
+                        data_dict[f'image_{cam_name}'] = image_normalization(cam_path, self.cam_image_size)
                         cam_time_path = extract_image_path(all_data[prev_key])
-                        data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, (224, 224))
+                        data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, self.cam_image_size)
+
+                    # 方案 A: 加载 HDMap BEV 图像
+                    if self.use_hdmap_image:
+                        hdmap_bev_path = all_data.get('hdmap_bev')
+                        if hdmap_bev_path is not None:
+                            hdmap_img = load_hdmap_image(hdmap_bev_path, size=self.hdmap_image_size)
+                            if hdmap_img is not None:
+                                data_dict['image_hdmap_bev'] = torch.as_tensor(hdmap_img, dtype=torch.uint8)
+                            else:
+                                h, w = self.hdmap_image_size
+                                data_dict['image_hdmap_bev'] = torch.zeros((h, w, 3), dtype=torch.uint8)
+                        else:
+                            h, w = self.hdmap_image_size
+                            data_dict['image_hdmap_bev'] = torch.zeros((h, w, 3), dtype=torch.uint8)
+
                     nav_desc = all_data.get('navigation_command_descreption')
                     if nav_desc is not None:
                         nav_desc = np.asarray(nav_desc).reshape(-1)
@@ -575,6 +616,7 @@ if __name__ == '__main__':
     import pickle
     from src.data.utils.normalization import Normalize
     from src.data.utils.image import image_normalization
+    from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, HDMAP_PROPRIO_DIM
     
     parser = argparse.ArgumentParser(
         description="DrivePi-0 Inference Agent",
@@ -659,20 +701,60 @@ if __name__ == '__main__':
                 # 如果是 Python 3 生成的 pickle，不需要 encoding 参数
                 all_data = pickle.load(f)
             normalize = Normalize.get_instance(statistic_path, norm_mode=inference_agent.norm_mode)
+
+            # 与 dataset.py 保持一致
+            if 'navigation_id' not in all_data:
+                from src.data.dataset import build_navigation_id_sequence
+                target_len = np.asarray(all_data['his_theta']).shape[0]
+                all_data = dict(all_data)
+                all_data['navigation_id'] = build_navigation_id_sequence(all_data, target_len)
+
+            # 方案 B: 提取 hdmap 特征
+            if inference_agent.use_hdmap_proprio:
+                hdmap_bev_path = all_data.get('hdmap_bev')
+                if hdmap_bev_path is not None:
+                    all_data['hdmap_features'] = extract_hdmap_features(hdmap_bev_path)
+                else:
+                    all_data['hdmap_features'] = np.zeros(HDMAP_PROPRIO_DIM, dtype=np.float32)
+
             state = normalize.prepare_state(
                 all_data,
                 nav_onehot=inference_agent.nav_onehot,
-                use_his_trajectory=getattr(inference_agent, "use_his_trajectory", False),
+                use_his_trajectory=inference_agent.use_his_trajectory,
+                use_hdmap_proprio=inference_agent.use_hdmap_proprio,
                 state_frame_index=getattr(inference_agent, "state_frame_index", None),
             )
 
             data_dict = {}
             # 4 cameras x 2 time steps = 8 images（与训练一致）
-            for cam_name in ['front', 'right', 'left', 'back']:
-                cam_path = extract_image_path(all_data[f'his_cam_{cam_name}'])
-                data_dict[f'image_{cam_name}'] = image_normalization(cam_path, (224, 224))
-                cam_time_path = extract_image_path(all_data[f'his_cam_{cam_name}_time'])
-                data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, (224, 224))
+            cam_key_map = {
+                'front': ('cam_front', 'cam_front_prev_1'),
+                'right': ('cam_right', 'cam_right_prev_1'),
+                'left':  ('cam_left',  'cam_left_prev_1'),
+                'back':  ('cam_back',  'cam_back_prev_1'),
+            }
+            for cam_name, (cur_key, prev_key) in cam_key_map.items():
+                # 兼容新旧格式
+                cur_key_fallback = f'his_cam_{cam_name}'
+                prev_key_fallback = f'his_cam_{cam_name}_time'
+                cur = cur_key if cur_key in all_data else cur_key_fallback
+                prev = prev_key if prev_key in all_data else prev_key_fallback
+                cam_path = extract_image_path(all_data[cur])
+                data_dict[f'image_{cam_name}'] = image_normalization(cam_path, inference_agent.cam_image_size)
+                cam_time_path = extract_image_path(all_data[prev])
+                data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, inference_agent.cam_image_size)
+
+            # 方案 A: 加载 HDMap BEV 图像
+            if inference_agent.use_hdmap_image:
+                hdmap_bev_path = all_data.get('hdmap_bev')
+                if hdmap_bev_path is not None:
+                    hdmap_img = load_hdmap_image(hdmap_bev_path, size=inference_agent.hdmap_image_size)
+                    if hdmap_img is not None:
+                        data_dict['image_hdmap_bev'] = torch.as_tensor(hdmap_img, dtype=torch.uint8)
+                    else:
+                        h, w = inference_agent.hdmap_image_size
+                        data_dict['image_hdmap_bev'] = torch.zeros((h, w, 3), dtype=torch.uint8)
+
             data_dict["language_instruction"] = "predict trajectory"
             data_dict['state'] = state
             

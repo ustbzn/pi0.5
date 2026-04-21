@@ -11,6 +11,7 @@ from torch.utils.data import Dataset
 from src.data.camera_scenario_map import get_cam_id_by_label, get_cam_id_by_name, get_scenario_id
 from src.data.utils.image import image_normalization
 from src.data.utils.normalization import Normalize
+from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, HDMAP_PROPRIO_DIM
 
 
 
@@ -85,6 +86,10 @@ class TorchDataset(Dataset):
         nav_onehot: bool = False,
         use_his_trajectory: bool = False,
         state_frame_index: Optional[int] = None,
+        use_hdmap_image: bool = False, 
+        use_hdmap_proprio: bool = False, 
+        cam_image_size: tuple = (224, 224), 
+        hdmap_image_size: tuple = (192, 352)
     ):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
@@ -95,6 +100,10 @@ class TorchDataset(Dataset):
         self.nav_onehot = nav_onehot
         self.use_his_trajectory = use_his_trajectory
         self.state_frame_index = state_frame_index
+        self.use_hdmap_image = use_hdmap_image
+        self.use_hdmap_proprio = use_hdmap_proprio
+        self.cam_image_size = tuple(cam_image_size)      # (H, W) 相机图像缩放目标
+        self.hdmap_image_size = tuple(hdmap_image_size)   # (H, W) HDMap BEV 缩放目标
         self.list_data_dict = [f for f in os.listdir(self.data_path) if f.endswith('.pkl')]
 
     def __len__(self):
@@ -184,11 +193,21 @@ class TorchDataset(Dataset):
                 all_data = dict(all_data)
                 target_len = np.asarray(all_data['his_theta']).shape[0]
                 all_data['navigation_id'] = build_navigation_id_sequence(all_data, target_len)
+
+            # 方案 B: 从 hdmap NPZ 提取标量特征，放入 all_data 供 prepare_state 使用
+            if self.use_hdmap_proprio:
+                hdmap_bev_path = all_data.get('hdmap_bev')
+                if hdmap_bev_path is not None:
+                    all_data['hdmap_features'] = extract_hdmap_features(hdmap_bev_path)
+                else:
+                    all_data['hdmap_features'] = np.zeros(HDMAP_PROPRIO_DIM, dtype=np.float32)
+
             state = normalize.prepare_state(
                 all_data,
                 nav_onehot=self.nav_onehot,
                 use_his_trajectory=self.use_his_trajectory,
                 state_frame_index=self.state_frame_index,
+                use_hdmap_proprio=self.use_hdmap_proprio,
             )
             data_dict['state'] = state
 
@@ -204,8 +223,8 @@ class TorchDataset(Dataset):
                     path_time = self._pick_image_path(all_data, history_key)
                     if not path or not path_time:
                         return self.__getitem__((i + 1) % len(self))
-                    data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224))
-                    data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224))
+                    data_dict[f'image_{cam_name}'] = image_normalization(path, self.cam_image_size)
+                    data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, self.cam_image_size)
             elif 'cam_id' not in all_data.keys():
                 for cam_name in ['front', 'right', 'left', 'back']:
                     cam_key = f'his_cam_{cam_name}'
@@ -214,31 +233,31 @@ class TorchDataset(Dataset):
                     path_time = decode_path_value(all_data[cam_time_key])
                     if not path or not path.strip() or not path_time or not path_time.strip():
                         return self.__getitem__((i + 1) % len(self))
-                    data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224))
-                    data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224))
+                    data_dict[f'image_{cam_name}'] = image_normalization(path, self.cam_image_size)
+                    data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, self.cam_image_size)
             elif not self.use_fixed_images:
                 image_front_path = decode_path_value(all_data['his_cam_front'])
-                data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
+                data_dict['image_front'] = image_normalization(image_front_path, self.cam_image_size)
                 image_back_path = decode_path_value(all_data['his_cam_back'])
-                data_dict['image_back'] = image_normalization(image_back_path, (224, 224))
+                data_dict['image_back'] = image_normalization(image_back_path, self.cam_image_size)
                 image_front_time_path = decode_path_value(all_data['his_cam_front_time'])
-                data_dict['image_front_time'] = image_normalization(image_front_time_path, (224, 224))
+                data_dict['image_front_time'] = image_normalization(image_front_time_path, self.cam_image_size)
                 image_front_left_path = decode_path_value(all_data['his_cam_front_left'])
-                data_dict['image_front_left'] = image_normalization(image_front_left_path, (224, 224))
+                data_dict['image_front_left'] = image_normalization(image_front_left_path, self.cam_image_size)
                 image_front_right_path = decode_path_value(all_data['his_cam_front_right'])
-                data_dict['image_front_right'] = image_normalization(image_front_right_path, (224, 224))
+                data_dict['image_front_right'] = image_normalization(image_front_right_path, self.cam_image_size)
                 image_back_left_path = decode_path_value(all_data['his_cam_back_left'])
-                data_dict['image_back_left'] = image_normalization(image_back_left_path, (224, 224))
+                data_dict['image_back_left'] = image_normalization(image_back_left_path, self.cam_image_size)
                 image_back_right_path = decode_path_value(all_data['his_cam_back_right'])
-                data_dict['image_back_right'] = image_normalization(image_back_right_path, (224, 224))
+                data_dict['image_back_right'] = image_normalization(image_back_right_path, self.cam_image_size)
                 data_dict['cam_id'] = get_cam_id_by_label(decode_path_value(all_data['cam_id']))
             else:
                 image_front_path = decode_path_value(all_data['his_cam_front'])
-                data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
+                data_dict['image_front'] = image_normalization(image_front_path, self.cam_image_size)
                 image_front_time_path = decode_path_value(all_data['his_cam_front_time'])
-                data_dict['image_front_time'] = image_normalization(image_front_time_path, (224, 224))
+                data_dict['image_front_time'] = image_normalization(image_front_time_path, self.cam_image_size)
                 skill_cam_path = decode_path_value(all_data['skill_cam'])
-                data_dict['skill_cam'] = image_normalization(skill_cam_path, (224, 224))
+                data_dict['skill_cam'] = image_normalization(skill_cam_path, self.cam_image_size)
                 cam_id = pkl_data_path.split('/')[-1].split('_')[-1]
                 cam_id = cam_id.split('.')[0]
                 cam_id = get_cam_id_by_name(cam_id)
@@ -246,6 +265,20 @@ class TorchDataset(Dataset):
 
             trajectory = normalize.prepare_traj(all_data)
             data_dict['trajectory'] = trajectory
+
+            # 方案 A: 加载 HDMap BEV 图像作为额外视觉输入
+            if self.use_hdmap_image:
+                hdmap_bev_path = all_data.get('hdmap_bev')
+                if hdmap_bev_path is not None:
+                    hdmap_img = load_hdmap_image(hdmap_bev_path, size=self.hdmap_image_size)
+                    if hdmap_img is not None:
+                        data_dict['image_hdmap_bev'] = torch.as_tensor(hdmap_img, dtype=torch.uint8)
+                    else:
+                        h, w = self.hdmap_image_size
+                        data_dict['image_hdmap_bev'] = torch.zeros((h, w, 3), dtype=torch.uint8)
+                else:
+                    h, w = self.hdmap_image_size
+                    data_dict['image_hdmap_bev'] = torch.zeros((h, w, 3), dtype=torch.uint8)
 
             nav_desc = all_data.get('navigation_command_descreption')
             if nav_desc is not None:
@@ -269,42 +302,31 @@ def prepare_b2d_dataset(
     nav_onehot: bool = False,
     use_his_trajectory: bool = False,
     state_frame_index: Optional[int] = None,
+    use_hdmap_image: bool = False, 
+    use_hdmap_proprio: bool = False, 
+    cam_image_size: tuple = (224, 224), 
+    hdmap_image_size: tuple = (192, 352),
 ):
+    common_kwargs = dict(
+        statistics_path=statistics_path,
+        num_of_action_experts=num_of_action_experts,
+        norm_mode=norm_mode,
+        nav_onehot=nav_onehot,
+        use_his_trajectory=use_his_trajectory,
+        state_frame_index=state_frame_index,
+        use_hdmap_image=use_hdmap_image,
+        use_hdmap_proprio=use_hdmap_proprio,
+        cam_image_size=cam_image_size,
+        hdmap_image_size=hdmap_image_size,
+    )
     if use_fixed_images:
         data_path = os.path.join(work_dir, fixed_dir_name)
-        return TorchDataset(
-            data_path=data_path,
-            statistics_path=statistics_path,
-            use_fixed_images=True,
-            num_of_action_experts=num_of_action_experts,
-            norm_mode=norm_mode,
-            nav_onehot=nav_onehot,
-            use_his_trajectory=use_his_trajectory,
-            state_frame_index=state_frame_index,
-        )
+        return TorchDataset(data_path=data_path, use_fixed_images=True, **common_kwargs)
     data_path = os.path.join(work_dir, dynamic_dir_name)
     if split == 'train':
         train_data_path = os.path.join(data_path, 'train')
-        return TorchDataset(
-            data_path=train_data_path,
-            statistics_path=statistics_path,
-            use_fixed_images=False,
-            num_of_action_experts=num_of_action_experts,
-            norm_mode=norm_mode,
-            nav_onehot=nav_onehot,
-            use_his_trajectory=use_his_trajectory,
-            state_frame_index=state_frame_index,
-        )
+        return TorchDataset(data_path=os.path.join(data_path, 'train'), use_fixed_images=False, **common_kwargs)
     if split == 'val':
         val_data_path = os.path.join(data_path, 'val')
-        return TorchDataset(
-            data_path=val_data_path,
-            statistics_path=statistics_path,
-            use_fixed_images=False,
-            num_of_action_experts=num_of_action_experts,
-            norm_mode=norm_mode,
-            nav_onehot=nav_onehot,
-            use_his_trajectory=use_his_trajectory,
-            state_frame_index=state_frame_index,
-        )
+        return TorchDataset(data_path=os.path.join(data_path, 'val'), use_fixed_images=False, **common_kwargs)
     raise ValueError("split type must be 'train' or 'val'")
