@@ -7,6 +7,7 @@ import sys
 import os
 import pickle
 import json
+import ast
 import bisect
 import math
 import re
@@ -109,6 +110,78 @@ def calculate_header_timestamp(header):
     sec = float(header.stamp.sec)
     nsec = float(header.stamp.nsec) if hasattr(header.stamp, 'nsec') else 0.0
     return sec + nsec * 1.0e-9
+
+
+DEFAULT_VEHICLE_ID = "JLBJA20073D"
+
+
+def path_stem(path):
+    """提取图像路径的文件名 stem，兼容 bytes/str。"""
+    if isinstance(path, bytes):
+        try:
+            path = path.decode("utf-8")
+        except Exception:
+            path = path.decode("latin1", errors="ignore")
+    if not isinstance(path, str) or not path:
+        return ""
+    return os.path.splitext(os.path.basename(path))[0]
+
+
+def make_token(vehicle_id, image_path):
+    stem = path_stem(image_path)
+    if not stem:
+        return ""
+    return "{}_{}".format(vehicle_id, stem)
+
+
+def read_vehicle_id_from_metadata_json(bag_dir):
+    """优先从 clip 目录内元数据 JSON 读取 CAR_NUMBER。"""
+    for filename in sorted(os.listdir(bag_dir)):
+        if not filename.endswith(".json"):
+            continue
+
+        metadata_path = os.path.join(bag_dir, filename)
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+        except Exception:
+            continue
+
+        if isinstance(metadata, dict):
+            car_number = metadata.get("CAR_NUMBER")
+            if isinstance(car_number, str):
+                car_number = car_number.strip()
+                if car_number:
+                    return car_number
+
+    return None
+
+
+def infer_vehicle_id(bag_dir, master_bag_path):
+    vehicle_id = read_vehicle_id_from_metadata_json(bag_dir)
+    if vehicle_id:
+        return vehicle_id
+
+    master_bag_name = os.path.basename(master_bag_path or "")
+    if "-rosmaster-" in master_bag_name:
+        suffix = master_bag_name.split("-rosmaster-", 1)[1]
+        vehicle_id = suffix.rsplit(".bag", 1)[0].strip()
+        if vehicle_id:
+            return vehicle_id
+
+    return DEFAULT_VEHICLE_ID
+
+
+def build_scene_token(vehicle_id, clip_dir_path):
+    normalized_path = os.path.normpath(clip_dir_path)
+    parts = [part for part in normalized_path.split(os.sep) if part]
+    if len(parts) >= 2:
+        tail = os.path.join(parts[-2], parts[-1])
+    elif parts:
+        tail = parts[-1]
+    else:
+        tail = ""
+    return "{}_{}".format(vehicle_id, tail) if tail else vehicle_id
 
 def serialize_for_json(obj):
     """
@@ -293,6 +366,7 @@ class BagDataHandler:
                         raise
 
         self._check_and_find_bags()
+        self.vehicle_id = infer_vehicle_id(self.bag_dir, self.bags_file_master)
         self._open_bags()
 
         self._check_and_find_sequence_files()
@@ -352,12 +426,10 @@ class BagDataHandler:
         self.file_path_scenario_sequence = None
 
         if self.label_txt_path:
-            self.file_path_action_sequence = self.label_txt_path
-            print("[INFO] 标签动作文件路径：{}".format(self.file_path_action_sequence))
+            self.file_path_scenario_sequence = self.label_txt_path
+            print("[INFO] 标签场景文件路径：{}".format(self.file_path_scenario_sequence))
             if self.label_json_path:
                 print("[INFO] 标签JSON路径：{}".format(self.label_json_path))
-            print("[WARN] 未提供独立 scenario_sequence.txt，scenario_type 将使用默认值")
-            return
 
         if not os.path.isdir(self.bag_dir):
             raise IOError("目录{}无效".format(self.bag_dir))
@@ -367,7 +439,7 @@ class BagDataHandler:
             fp = os.path.join(self.bag_dir, filename)
             if filename == "action_sequence.txt":
                 self.file_path_action_sequence = fp
-            elif filename == "scenario_sequence.txt":
+            elif filename == "scenario_sequence.txt" and not self.file_path_scenario_sequence:
                 self.file_path_scenario_sequence = fp
 
         # 打印查找结果
@@ -380,6 +452,65 @@ class BagDataHandler:
             print("[INFO] scenario_sequence.txt 路径：{}".format(self.file_path_scenario_sequence))
         else:
             print("[WARN] 未找到 scenario_sequence.txt 文件")
+
+    def _parse_sequence_file(self, file_obj, file_desc):
+        """解析 sequence 文件，并合并同名标签的多个时间区间。"""
+        sequence_dict = {}
+
+        if file_obj is None:
+            print("[WARN] {} 文件未打开，无法解析".format(file_desc))
+            return sequence_dict
+
+        try:
+            file_obj.seek(0)
+            lines = file_obj.readlines()
+
+            for line_num, line in enumerate(lines, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                line = line.rstrip(',').strip()
+                if ':' not in line:
+                    print("[WARN] 第{}行格式错误，无冒号分隔: {}".format(line_num, line))
+                    continue
+
+                label_name, time_str = line.split(':', 1)
+                label_name = label_name.strip()
+                time_str = time_str.strip()
+
+                try:
+                    time_intervals = ast.literal_eval(time_str)
+                    valid_intervals = []
+                    if isinstance(time_intervals, list):
+                        for interval in time_intervals:
+                            if (
+                                isinstance(interval, list)
+                                and len(interval) == 2
+                                and all(isinstance(x, (int, float)) for x in interval)
+                            ):
+                                start, end = sorted(interval)
+                                valid_intervals.append([start, end])
+                            else:
+                                print(
+                                    "[WARN] 第{}行{}的时间段格式无效: {}".format(
+                                        line_num, label_name, interval
+                                    )
+                                )
+
+                    if valid_intervals:
+                        sequence_dict.setdefault(label_name, []).extend(valid_intervals)
+
+                except Exception as e:
+                    print("[WARN] 第{}行解析失败: {}, 错误: {}".format(line_num, line, str(e)))
+
+        except Exception as e:
+            print("[ERROR] 解析{}失败: {}".format(file_desc, str(e)))
+
+        for label_name in sequence_dict:
+            sequence_dict[label_name].sort(key=lambda interval: (interval[0], interval[1]))
+
+        return sequence_dict
 
     def _open_sequence_files(self):
         """打开 action_sequence.txt 和 scenario_sequence.txt 文件"""
@@ -999,68 +1130,7 @@ class BagDataHandler:
             - 文件未打开/不存在时返回空字典
             - 格式错误的行跳过并打印警告
         """
-        action_dict = {}
-        
-        # 检查文件是否已打开
-        if self.file_action_sequence is None:
-            print("[WARN] action_sequence.txt 文件未打开，无法解析")
-            return action_dict
-        
-        try:
-            # 重置文件指针到开头
-            self.file_action_sequence.seek(0)
-            # 读取所有行并处理
-            lines = self.file_action_sequence.readlines()
-            
-            for line_num, line in enumerate(lines, 1):
-                # 去除空白字符和换行符
-                line = line.strip()
-                # 跳过空行和注释行
-                if not line or line.startswith('#'):
-                    continue
-                
-                # 去除行尾的逗号（处理示例中的逗号分隔格式）
-                line = line.rstrip(',').strip()
-                
-                # 分割动作类型和时间段部分（按第一个冒号分割）
-                if ':' not in line:
-                    print("[WARN] 第{}行格式错误，无冒号分隔: {}".format(line_num, line))
-                    continue
-                
-                action_type, time_str = line.split(':', 1)
-                action_type = action_type.strip()
-                time_str = time_str.strip()
-                
-                # 解析时间段列表
-                try:
-                    # 使用eval解析列表（安全场景下使用，因为是已知格式的标注文件）
-                    time_intervals = eval(time_str)
-                    
-                    # 验证格式：必须是列表，且每个元素是包含2个数字的列表
-                    valid_intervals = []
-                    if isinstance(time_intervals, list):
-                        for interval in time_intervals:
-                            if (isinstance(interval, list) and len(interval) == 2 and
-                                    all(isinstance(x, (int, float)) for x in interval)):
-                                # 确保起始时间 <= 结束时间
-                                start, end = sorted(interval)
-                                valid_intervals.append([start, end])
-                            else:
-                                print("[WARN] 第{}行{}的时间段格式无效: {}".format(line_num, action_type, interval))
-                    
-                    # 核心调整：仅当有效时间段非空时，才加入字典
-                    if valid_intervals:
-                        action_dict[action_type] = valid_intervals
-                    # 空时间段则直接跳过，不加入字典
-                        
-                except Exception as e:
-                    print("[WARN] 第{}行解析失败: {}, 错误: {}".format(line_num, line, str(e)))
-                    # 解析失败也跳过该动作，不加入字典
-        
-        except Exception as e:
-            print("[ERROR] 解析action_sequence.txt失败: {}".format(str(e)))
-        
-        return action_dict
+        return self._parse_sequence_file(self.file_action_sequence, "action_sequence.txt")
 
     def match_action_by_timestamp(self, relative_ts, action_dict):
         """
@@ -1118,68 +1188,7 @@ class BagDataHandler:
             - 文件未打开/不存在时返回空字典
             - 格式错误的行跳过并打印警告
         """
-        scenario_dict = {}
-        
-        # 检查文件是否已打开
-        if self.file_scenario_sequence is None:
-            print("[WARN] scenario_sequence.txt 文件未打开，无法解析")
-            return scenario_dict
-        
-        try:
-            # 重置文件指针到开头
-            self.file_scenario_sequence.seek(0)
-            # 读取所有行并处理
-            lines = self.file_scenario_sequence.readlines()
-            
-            for line_num, line in enumerate(lines, 1):
-                # 去除空白字符和换行符
-                line = line.strip()
-                # 跳过空行和注释行
-                if not line or line.startswith('#'):
-                    continue
-                
-                # 去除行尾的逗号（处理示例中的逗号分隔格式）
-                line = line.rstrip(',').strip()
-                
-                # 分割场景类型和时间段部分（按第一个冒号分割）
-                if ':' not in line:
-                    print("[WARN] 第{}行格式错误，无冒号分隔: {}".format(line_num, line))
-                    continue
-                
-                scenario_type, time_str = line.split(':', 1)
-                scenario_type = scenario_type.strip()
-                time_str = time_str.strip()
-                
-                # 解析时间段列表
-                try:
-                    # 使用eval解析列表（安全场景下使用，因为是已知格式的标注文件）
-                    time_intervals = eval(time_str)
-                    
-                    # 验证格式：必须是列表，且每个元素是包含2个数字的列表
-                    valid_intervals = []
-                    if isinstance(time_intervals, list):
-                        for interval in time_intervals:
-                            if (isinstance(interval, list) and len(interval) == 2 and
-                                    all(isinstance(x, (int, float)) for x in interval)):
-                                # 确保起始时间 <= 结束时间
-                                start, end = sorted(interval)
-                                valid_intervals.append([start, end])
-                            else:
-                                print("[WARN] 第{}行{}的时间段格式无效: {}".format(line_num, scenario_type, interval))
-                    
-                    # 核心规则：仅当有效时间段非空时，才加入字典
-                    if valid_intervals:
-                        scenario_dict[scenario_type] = valid_intervals
-                    # 空时间段则直接跳过，不加入字典
-                        
-                except Exception as e:
-                    print("[WARN] 第{}行解析失败: {}, 错误: {}".format(line_num, line, str(e)))
-                    # 解析失败也跳过该场景，不加入字典
-        
-        except Exception as e:
-            print("[ERROR] 解析scenario_sequence.txt失败: {}".format(str(e)))
-        
-        return scenario_dict
+        return self._parse_sequence_file(self.file_scenario_sequence, "scenario_sequence.txt")
 
     def match_scenario_by_timestamp(self, relative_ts, scenario_dict):
         """
@@ -1222,7 +1231,7 @@ class BagDataHandler:
         
         return "lane_keep"
 
-    def align_camera_cache_by_front(self, max_delta=0.05):
+    def align_camera_cache_by_front(self, max_delta=0.2):
         """
         根据 front 时间戳对齐其他视角 camera 的图片路径。
 
@@ -1368,7 +1377,7 @@ class BagDataHandler:
             return best_idx, best_diff
         return None, best_diff
 
-    def _get_camera_path(self, cam_key, target_ts, max_delta=0.05):
+    def _get_camera_path(self, cam_key, target_ts, max_delta=0.2):
         """获取指定时间戳的相机图像路径"""
         if cam_key not in self.camera_cache:
             return None
@@ -1756,7 +1765,7 @@ class BagDataHandler:
             })
 
         rot_mat_global_to_ego = ego_rotation_matrix.T
-        his_speed = np.zeros(state_history_window, dtype=np.float32)
+        his_speed = np.zeros((state_history_window, 3), dtype=np.float32)
         his_acceleration = np.zeros((state_history_window, 3), dtype=np.float32)
         his_angular_velocity = np.zeros((state_history_window, 3), dtype=np.float32)
         his_theta = np.zeros(state_history_window, dtype=np.float32)
@@ -1765,7 +1774,10 @@ class BagDataHandler:
             frame = frame_data[i]
             vel_global = frame["vel_global"]
             vel_ego = np.dot(rot_mat_global_to_ego, vel_global)
-            his_speed[i] = np.linalg.norm(vel_ego[:2])
+            # his_speed[i] = np.linalg.norm(vel_ego[:2])
+            his_speed[i, 0] = np.linalg.norm(vel_ego[0])
+            his_speed[i, 1] = np.linalg.norm(vel_ego[1])
+            # his_speed[i, 2] = np.linalg.norm(vel_ego[2])
 
             if i + 1 < len(frame_data):
                 next_vel_global = frame_data[i + 1]["vel_global"]
@@ -1794,7 +1806,7 @@ class BagDataHandler:
         cam_keys = ["back", "front", "left", "left_back", "right", "right_back"]
         for key in cam_keys:
             # 当前帧（使用image_ts获取图像）
-            path = self._get_camera_path(key, image_ts, max_delta=0.05)
+            path = self._get_camera_path(key, image_ts, max_delta=0.2)
             if path:
                 cam_paths_current[key] = path
             
@@ -1810,7 +1822,8 @@ class BagDataHandler:
             if path_prev_2:
                 cam_paths_prev_2[key] = path_prev_2
 
-            next_ts = image_ts - 1.0
+            # 后1帧（0.5秒后，基于2Hz采样）
+            next_ts = image_ts + 0.5
             path_next = self._get_camera_path(key, next_ts, max_delta=0.25)
             if path_next:
                 cam_paths_next[key] = path_next
@@ -1855,6 +1868,10 @@ class BagDataHandler:
         sample_data['cam_right_back_prev_2'] = safe_encode(cam_paths_prev_2.get('right_back', ''))
 
         sample_data['cam_front_next'] = safe_encode(cam_paths_next.get('front', ''))
+        sample_data['token'] = make_token(self.vehicle_id, cam_paths_current.get('front', ''))
+        sample_data['prev'] = make_token(self.vehicle_id, cam_paths_prev_1.get('front', ''))
+        sample_data['next'] = make_token(self.vehicle_id, cam_paths_next.get('front', ''))
+        sample_data['scene_token'] = build_scene_token(self.vehicle_id, self.bag_dir)
 
         # 历史运动状态
         sample_data['his_speed'] = his_speed
