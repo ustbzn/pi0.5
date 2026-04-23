@@ -280,13 +280,24 @@ class TorchDataset(Dataset):
                     h, w = self.hdmap_image_size
                     data_dict['image_hdmap_bev'] = torch.zeros((h, w, 3), dtype=torch.uint8)
 
+            hdmap_context = ""
+            if self.use_hdmap_image:
+                hdmap_context += "An HD map bird's-eye view is provided showing lane layout, junctions, and road boundaries. "
+            if self.use_hdmap_proprio:
+                hdmap_context += "Road structure features (lane density, junction proximity, lane boundaries) are encoded in the vehicle state. "
+
             nav_desc = all_data.get('navigation_command_descreption')
             if nav_desc is not None:
                 nav_desc = np.asarray(nav_desc).reshape(-1)
-                # data_dict['language_instruction'] = str(nav_desc[0])
-                data_dict['language_instruction'] = f"Predict trajectory based on the navigation command: {str(nav_desc[0])}"
+                if hdmap_context:
+                    data_dict['language_instruction'] = f"{hdmap_context}Predict trajectory based on the HD map and navigation command: {str(nav_desc[0])}"
+                else:
+                    data_dict['language_instruction'] = f"Predict trajectory based on the navigation command: {str(nav_desc[0])}"
             else:
-                data_dict['language_instruction'] = 'predict trajectory'
+                if hdmap_context:
+                    data_dict['language_instruction'] = f"{hdmap_context}Predict trajectory considering the road structure."
+                else:
+                    data_dict['language_instruction'] = 'predict trajectory'
         return data_dict
 
 
