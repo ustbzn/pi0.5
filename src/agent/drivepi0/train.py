@@ -454,6 +454,9 @@ class DrivePiZeroTrainAgent:
         self.use_hdmap_image = cfg.data.train.get("use_hdmap_image", False)
         if self.use_hdmap_image:
             log.info("HDMap BEV image enabled (Plan A): will add BEV as an extra visual input")
+        self.use_hdmap_cnn = cfg.data.train.get("use_hdmap_cnn", False)
+        if self.use_hdmap_cnn:
+            log.info("HDMap CNN encoder enabled (Plan C): will encode raw BEV into proprio")
 
     def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
         if self.flow_sampling == "uniform":  # uniform between 0 and 1
@@ -553,16 +556,15 @@ class DrivePiZeroTrainAgent:
                 image_list.append(hdmap_img.unsqueeze(1))  # [B, 1, C, H, W]
                 cam_labels.append('HDMap BEV view')
 
-            images = torch.cat(image_list, dim=1)  # [B, 8 or 9, C, H, W]
-            batch_size = images.shape[0]
-            num_images_per_sample = images.shape[1]  # 8
+            batch_size = image_list[0].shape[0]
+            num_images_per_sample = len(image_list)
 
             # convert to PIL images for Qwen3VLProcessor
             pil_images = []
             for i in range(batch_size):
-                for j in range(num_images_per_sample):
+                for img_tensor in image_list:
                     img = Image.fromarray(
-                        images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
+                        img_tensor[i, 0].cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
                     )
                     pil_images.append(img)
 
@@ -614,6 +616,11 @@ class DrivePiZeroTrainAgent:
                 "proprios": state.to(self.dtype),
                 "actions": trajectory.to(self.dtype),
             }
+
+            # 方案 C: 传递原始 BEV 数据给模型 CNN 编码器
+            if self.use_hdmap_cnn and "hdmap_bev_raw" in batch:
+                inputs["hdmap_bev"] = batch["hdmap_bev_raw"].to(self.dtype)
+
             if split_mask:
                 image_text_proprio_mask, action_mask = (
                     model.split_full_mask_into_submasks(causal_mask)

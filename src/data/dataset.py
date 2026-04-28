@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from src.data.camera_scenario_map import get_cam_id_by_label, get_cam_id_by_name, get_scenario_id
 from src.data.utils.image import image_normalization
 from src.data.utils.normalization import Normalize
-from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, HDMAP_PROPRIO_DIM
+from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, load_hdmap_bev_downsampled, HDMAP_PROPRIO_DIM, HDMAP_BEV_CHANNELS
 
 
 
@@ -88,8 +88,10 @@ class TorchDataset(Dataset):
         state_frame_index: Optional[int] = None,
         use_hdmap_image: bool = False, 
         use_hdmap_proprio: bool = False, 
+        use_hdmap_cnn: bool = False, 
         cam_image_size: tuple = (224, 224), 
-        hdmap_image_size: tuple = (192, 352)
+        hdmap_image_size: tuple = (192, 352), 
+        hdmap_bev_downsample_size: tuple = (48, 90)
     ):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
@@ -102,8 +104,10 @@ class TorchDataset(Dataset):
         self.state_frame_index = state_frame_index
         self.use_hdmap_image = use_hdmap_image
         self.use_hdmap_proprio = use_hdmap_proprio
+        self.use_hdmap_cnn = use_hdmap_cnn
         self.cam_image_size = tuple(cam_image_size)      # (H, W) 相机图像缩放目标
         self.hdmap_image_size = tuple(hdmap_image_size)   # (H, W) HDMap BEV 缩放目标
+        self.hdmap_bev_downsample_size = tuple(hdmap_bev_downsample_size)  # (H, W) 方案 C BEV 下采样目标
         self.list_data_dict = [f for f in os.listdir(self.data_path) if f.endswith('.pkl')]
 
     def __len__(self):
@@ -280,10 +284,24 @@ class TorchDataset(Dataset):
                     h, w = self.hdmap_image_size
                     data_dict['image_hdmap_bev'] = torch.zeros((h, w, 3), dtype=torch.uint8)
 
+            # 方案 C: 加载下采样原始 BEV 数据，由模型 CNN 编码
+            if self.use_hdmap_cnn:
+                hdmap_bev_path = all_data.get('hdmap_bev')
+                if hdmap_bev_path is not None:
+                    bev_ds = load_hdmap_bev_downsampled(hdmap_bev_path, size=self.hdmap_bev_downsample_size)
+                    if bev_ds is not None:
+                        data_dict['hdmap_bev_raw'] = torch.as_tensor(bev_ds, dtype=torch.float32)
+                    else:
+                        h, w = self.hdmap_bev_downsample_size
+                        data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+                else:
+                    h, w = self.hdmap_bev_downsample_size
+                    data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+
             hdmap_context = ""
             if self.use_hdmap_image:
                 hdmap_context += "An HD map bird's-eye view is provided showing lane layout, junctions, and road boundaries. "
-            if self.use_hdmap_proprio:
+            if self.use_hdmap_proprio or self.use_hdmap_cnn:
                 hdmap_context += "Road structure features (lane density, junction proximity, lane boundaries) are encoded in the vehicle state. "
 
             nav_desc = all_data.get('navigation_command_descreption')
@@ -315,8 +333,10 @@ def prepare_b2d_dataset(
     state_frame_index: Optional[int] = None,
     use_hdmap_image: bool = False, 
     use_hdmap_proprio: bool = False, 
+    use_hdmap_cnn: bool = False, 
     cam_image_size: tuple = (224, 224), 
-    hdmap_image_size: tuple = (192, 352),
+    hdmap_image_size: tuple = (192, 352), 
+    hdmap_bev_downsample_size: tuple = (48, 90), 
 ):
     common_kwargs = dict(
         statistics_path=statistics_path,
@@ -327,8 +347,10 @@ def prepare_b2d_dataset(
         state_frame_index=state_frame_index,
         use_hdmap_image=use_hdmap_image,
         use_hdmap_proprio=use_hdmap_proprio,
+        use_hdmap_cnn=use_hdmap_cnn,
         cam_image_size=cam_image_size,
         hdmap_image_size=hdmap_image_size,
+        hdmap_bev_downsample_size=hdmap_bev_downsample_size,
     )
     if use_fixed_images:
         data_path = os.path.join(work_dir, fixed_dir_name)

@@ -25,8 +25,10 @@ class Bench2DriveDataset:
             state_frame_index=config.get("state_frame_index", None),
             use_hdmap_image=config.get("use_hdmap_image", False),
             use_hdmap_proprio=config.get("use_hdmap_proprio", False),
+            use_hdmap_cnn=config.get("use_hdmap_cnn", False),
             cam_image_size=tuple(config.get("cam_image_size", [224, 224])),
-            hdmap_image_size=tuple(config.get("hdmap_image_size", [192, 352])),
+            hdmap_image_size=tuple(config.get("hdmap_image_size", [352, 192])),
+            hdmap_bev_downsample_size=tuple(config.get("hdmap_bev_downsample_size", [48, 90])),
         )
         self.dataset = dataset
 

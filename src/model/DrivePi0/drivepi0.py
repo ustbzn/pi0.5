@@ -111,8 +111,23 @@ class DrivePiZero(nn.Module, NoSyncBase):
                 time_cond=True,
             )
             self.time_embedding = SinusoidalPosEmb(self.action_hidden_size)
+
+        # HDMap CNN encoder (方案 C)
+        self.use_hdmap_cnn = cfg.get("use_hdmap_cnn", False)
+        self.hdmap_cnn_dim = cfg.get("hdmap_cnn_dim", 32)
+        if self.use_hdmap_cnn:
+            from src.model.DrivePi0.hdmap_encoder import HDMapCNNEncoder
+            self.hdmap_encoder = HDMapCNNEncoder(
+                in_channels=4,
+                output_dim=self.hdmap_cnn_dim,
+            )
+            actual_proprio_dim = self.proprio_dim + self.hdmap_cnn_dim
+        else:
+            self.hdmap_encoder = None
+            actual_proprio_dim = self.proprio_dim
+
         self.proprio_encoder = nn.Linear(
-            self.proprio_dim,
+            actual_proprio_dim,
             self.proprio_hidden_size,
         )
 
@@ -160,12 +175,22 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
     @property
     def action_expert_parameters(self):
-        return (
+        params = (
             list(self.action_encoder.parameters())
             + list(self.action_decoder.parameters())
             + list(self.proprio_encoder.parameters())
             + list(self.joint_model.mixtures["action"].parameters())
-        )  # note: action and proprio share weights
+        )
+        if self.hdmap_encoder is not None:
+            params += list(self.hdmap_encoder.parameters())
+        return params  # note: action and proprio share weights
+
+    def _encode_proprio(self, proprios, hdmap_bev=None):
+        if hdmap_bev is not None and self.hdmap_encoder is not None:
+            hdmap_feat = self.hdmap_encoder(hdmap_bev)  # (B, hdmap_cnn_dim)
+            hdmap_feat = hdmap_feat.unsqueeze(1).expand(-1, proprios.shape[1], -1)
+            proprios = torch.cat([proprios, hdmap_feat], dim=-1)
+        return self.proprio_encoder(proprios)
 
     @property
     def trainable_vlm_parameters(self):
@@ -704,6 +729,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         proprio_position_ids: torch.LongTensor,
         action_position_ids: torch.LongTensor,
         proprios: torch.FloatTensor,
+        hdmap_bev: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         dtype, device = proprios.dtype, proprios.device
         bsz = proprios.size(0)
@@ -762,7 +788,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
         kv_caches = self.joint_model.build_mixture_caches()
         # print("pixel_values.shape:", pixel_values.shape)
-        # print("image_grid_thw.shape:", image_grid_thw.shape)  
+        # print("image_grid_thw.shape:", image_grid_thw.shape)
 
         # merge the text tokens and the image tokens
         inputs_embeds = self._forward_qwen3_vision_and_text_embedding(
@@ -770,7 +796,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         )
 
         # proprio
-        proprio_embeds = self.proprio_encoder(proprios)
+        proprio_embeds = self._encode_proprio(proprios, hdmap_bev)
 
         # forward pass thru the vlm and proprio, cache the kv
         _, kv_caches = self.joint_model(
@@ -839,6 +865,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         proprio_position_ids: torch.LongTensor,
         action_position_ids: torch.LongTensor,
         proprios: torch.FloatTensor,
+        hdmap_bev: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         dtype, device = pixel_values.dtype, pixel_values.device
         bsz = input_ids.size(0)
@@ -851,7 +878,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         )
 
         # encode proprio
-        proprio_embeds = self.proprio_encoder(proprios)
+        proprio_embeds = self._encode_proprio(proprios, hdmap_bev)
 
         # sample pure action noise
         action = torch.randn(
@@ -963,6 +990,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         proprios: torch.FloatTensor,
         actions: torch.FloatTensor,
         t: torch.FloatTensor,
+        hdmap_bev: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         """flow matching loss for action prediction, no use of kv cache"""
         # noisy action
@@ -972,7 +1000,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         psi_t = self.psi_t(x0, x1, t)
 
         # proprio
-        proprio_embeds = self.proprio_encoder(proprios)
+        proprio_embeds = self._encode_proprio(proprios, hdmap_bev)
 
         # inference with noisy action
         # [Batch_Size, Embed_Dim]
@@ -1076,6 +1104,7 @@ class DrivePiZeroInference(DrivePiZero):
         proprio_position_ids: torch.LongTensor,
         action_position_ids: torch.LongTensor,
         proprios: torch.FloatTensor,
+        hdmap_bev: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         return super().infer_action(
             input_ids,
@@ -1087,6 +1116,7 @@ class DrivePiZeroInference(DrivePiZero):
             proprio_position_ids,
             action_position_ids,
             proprios,
+            hdmap_bev=hdmap_bev,
         )
 
 

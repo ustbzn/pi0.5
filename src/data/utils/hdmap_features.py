@@ -110,6 +110,40 @@ def extract_hdmap_features(npz_path) -> np.ndarray:
 HDMAP_PROPRIO_DIM = 8  # 方案 B 新增的 proprio 维度数
 
 
+def load_hdmap_bev_downsampled(
+    npz_path,
+    size: Tuple[int, int] = (48, 90),
+) -> Optional[np.ndarray]:
+    """加载 HDMap BEV NPZ 并下采样为 (4, H, W) float32 (方案 C)。
+
+    Args:
+        npz_path: NPZ 文件路径 (str 或 bytes)
+        size: 目标尺寸 (H, W)
+
+    Returns:
+        bev: (4, H, W) float32 array, 值域 [0, 1]，或 None
+    """
+    if isinstance(npz_path, bytes):
+        npz_path = npz_path.decode("utf-8")
+    if not npz_path or not os.path.exists(npz_path):
+        return None
+
+    bev = np.load(npz_path)["hdmap_bev"].astype(np.float32)  # (4, 960, 1792)
+
+    from PIL import Image
+
+    target_h, target_w = size
+    channels = []
+    for ch in range(bev.shape[0]):
+        img = Image.fromarray(bev[ch])
+        img = img.resize((target_w, target_h), Image.BILINEAR)
+        channels.append(np.array(img, dtype=np.float32))
+    return np.stack(channels, axis=0)  # (4, H, W)
+
+
+HDMAP_BEV_CHANNELS = 4  # 方案 C BEV 通道数
+
+
 def load_hdmap_image(npz_path, size: Tuple[int, int] = (224, 224)) -> Optional[np.ndarray]:
     """加载 HDMap BEV PNG 图像并 resize (方案 A)。
 

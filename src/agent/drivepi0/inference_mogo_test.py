@@ -87,9 +87,11 @@ class DrivePiZeroInferenceAgent:
         # HDMap 开关
         self.use_hdmap_image = cfg.data.get("use_hdmap_image", False)
         self.use_hdmap_proprio = cfg.data.get("use_hdmap_proprio", False)
+        self.use_hdmap_cnn = cfg.data.get("use_hdmap_cnn", False)
         # 图像尺寸
         self.cam_image_size = tuple(cfg.data.get("cam_image_size", [224, 224]))
-        self.hdmap_image_size = tuple(cfg.data.get("hdmap_image_size", [192, 352]))
+        self.hdmap_image_size = tuple(cfg.data.get("hdmap_image_size", [352, 192]))
+        self.hdmap_bev_downsample_size = tuple(cfg.data.get("hdmap_bev_downsample_size", [48, 90]))
         print('Agent done')
     
     
@@ -154,21 +156,18 @@ class DrivePiZeroInferenceAgent:
             image_list.append(hdmap_img.unsqueeze(1))
             cam_labels.append('HDMap BEV view')
 
-        images = torch.cat(image_list, dim=1)  # [1, 8 or 9, C, H, W]
+        batch_size = 1
+        num_images_per_sample = len(image_list)
         state = data_dict["state"].unsqueeze(0)
         texts = [data_dict["language_instruction"]]
 
-        batch_size = images.shape[0]
-        num_images_per_sample = images.shape[1]  # 8
-
-        # 转换为 PIL Image 列表（Qwen3VLProcessor 需要）
+        # 转换为 PIL Image 列表（支持不同尺寸的图像）
         pil_images = []
-        for i in range(batch_size):
-            for j in range(num_images_per_sample):
-                img = Image.fromarray(
-                    images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
-                )
-                pil_images.append(img)
+        for img_tensor in image_list:
+            img = Image.fromarray(
+                img_tensor[0, 0].cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
+            )
+            pil_images.append(img)
 
         # 构建 Qwen3VL 聊天格式（与训练一致，每张图像带语义标签）
         chat_texts = []
@@ -209,7 +208,11 @@ class DrivePiZeroInferenceAgent:
             "action_position_ids": action_position_ids,
             "proprios": state.to(self.dtype),
         }
-                
+
+        # 方案 C: 传递原始 BEV 数据
+        if self.use_hdmap_cnn and "hdmap_bev_raw" in data_dict:
+            inputs["hdmap_bev"] = data_dict["hdmap_bev_raw"].unsqueeze(0).to(self.device, dtype=self.dtype)
+
         image_text_proprio_mask, action_mask = (
             self.model.split_full_mask_into_submasks(causal_mask)
         )
@@ -269,7 +272,7 @@ class DrivePiZeroInferenceAgent:
         """
         from src.data.utils.normalization import Normalize
         from src.data.utils.image import image_normalization
-        from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, HDMAP_PROPRIO_DIM
+        from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, load_hdmap_bev_downsampled, HDMAP_PROPRIO_DIM, HDMAP_BEV_CHANNELS
         
         val_data_path = Path(val_data_dir)
         output_path = Path(output_dir)
@@ -445,10 +448,24 @@ class DrivePiZeroInferenceAgent:
                             h, w = self.hdmap_image_size
                             data_dict['image_hdmap_bev'] = torch.zeros((h, w, 3), dtype=torch.uint8)
 
+                    # 方案 C: 加载下采样 BEV 数据
+                    if self.use_hdmap_cnn:
+                        hdmap_bev_path = all_data.get('hdmap_bev')
+                        if hdmap_bev_path is not None:
+                            bev_ds = load_hdmap_bev_downsampled(hdmap_bev_path, size=self.hdmap_bev_downsample_size)
+                            if bev_ds is not None:
+                                data_dict['hdmap_bev_raw'] = torch.as_tensor(bev_ds, dtype=torch.float32)
+                            else:
+                                h, w = self.hdmap_bev_downsample_size
+                                data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+                        else:
+                            h, w = self.hdmap_bev_downsample_size
+                            data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+
                     hdmap_context = ""
                     if self.use_hdmap_image:
                         hdmap_context += "An HD map bird's-eye view is provided showing lane layout, junctions, and road boundaries. "
-                    if self.use_hdmap_proprio:
+                    if self.use_hdmap_proprio or self.use_hdmap_cnn:
                         hdmap_context += "Road structure features (lane density, junction proximity, lane boundaries) are encoded in the vehicle state. "
 
                     nav_desc = all_data.get('navigation_command_descreption')
@@ -766,10 +783,24 @@ if __name__ == '__main__':
                         h, w = inference_agent.hdmap_image_size
                         data_dict['image_hdmap_bev'] = torch.zeros((h, w, 3), dtype=torch.uint8)
 
+            # 方案 C: 加载下采样 BEV 数据
+            if inference_agent.use_hdmap_cnn:
+                hdmap_bev_path = all_data.get('hdmap_bev')
+                if hdmap_bev_path is not None:
+                    bev_ds = load_hdmap_bev_downsampled(hdmap_bev_path, size=inference_agent.hdmap_bev_downsample_size)
+                    if bev_ds is not None:
+                        data_dict['hdmap_bev_raw'] = torch.as_tensor(bev_ds, dtype=torch.float32)
+                    else:
+                        h, w = inference_agent.hdmap_bev_downsample_size
+                        data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+                else:
+                    h, w = inference_agent.hdmap_bev_downsample_size
+                    data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+
             hdmap_context = ""
             if inference_agent.use_hdmap_image:
                 hdmap_context += "An HD map bird's-eye view is provided showing lane layout, junctions, and road boundaries. "
-            if inference_agent.use_hdmap_proprio:
+            if inference_agent.use_hdmap_proprio or inference_agent.use_hdmap_cnn:
                 hdmap_context += "Road structure features (lane density, junction proximity, lane boundaries) are encoded in the vehicle state. "
 
             if hdmap_context:
