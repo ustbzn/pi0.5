@@ -657,7 +657,7 @@ if __name__ == '__main__':
     import pickle
     from src.data.utils.normalization import Normalize
     from src.data.utils.image import image_normalization
-    from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, HDMAP_PROPRIO_DIM
+    from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, load_hdmap_bev_downsampled, HDMAP_PROPRIO_DIM, HDMAP_BEV_CHANNELS
     
     parser = argparse.ArgumentParser(
         description="DrivePi-0 Inference Agent",

@@ -391,6 +391,7 @@ class DrivePiZeroTrainAgent:
         self.action_expert_params = model.action_expert_parameters
         action_params = list(model.action_expert_parameters)
         hdmap_params = list(model.hdmap_trainable_parameters)
+        self.hdmap_params = hdmap_params
         self.use_separate_hdmap_optimizer_group = bool(
             cfg.get("separate_hdmap_optimizer_group", False) and len(hdmap_params) > 0
         )
@@ -807,11 +808,16 @@ class DrivePiZeroTrainAgent:
                     normalized_loss = loss_train / self.grad_accumulation_steps
                     normalized_loss.backward()  # gradients synced
 
-                    # step - 分别裁剪 action 和 VLM 参数的梯度
+                    # step - 分别裁剪 action、hdmap 和 VLM 参数的梯度
                     torch.nn.utils.clip_grad_norm_(
                         self.action_expert_params,
                         max_norm=self.max_grad_norm,
                     )
+                    if self.hdmap_params:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.hdmap_params,
+                            max_norm=self.max_grad_norm,
+                        )
                     if self.train_vlm:
                         torch.nn.utils.clip_grad_norm_(
                             self.vlm_trained_params,
