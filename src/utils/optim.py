@@ -72,6 +72,15 @@ class CosineAnnealingWarmupRestarts:
         # set learning rate min_lr
         self.init_lr()
 
+    def _expand_group_value(self, value):
+        if isinstance(value, (list, tuple)):
+            if len(value) != len(self.optimizer.param_groups):
+                raise ValueError(
+                    f"Expected {len(self.optimizer.param_groups)} lr values, got {len(value)}"
+                )
+            return [float(v) for v in value]
+        return [float(value)] * len(self.optimizer.param_groups)
+
     def state_dict(self):
         return {
             key: value for key, value in self.__dict__.items() if key != "optimizer"
@@ -82,23 +91,29 @@ class CosineAnnealingWarmupRestarts:
 
     def init_lr(self):
         self.base_lrs = []
-        for param_group in self.optimizer.param_groups:
-            param_group["lr"] = self.min_lr
-            self.base_lrs.append(self.min_lr)
+        for param_group, min_lr in zip(
+            self.optimizer.param_groups,
+            self._expand_group_value(self.min_lr),
+        ):
+            param_group["lr"] = min_lr
+            self.base_lrs.append(min_lr)
 
     def get_lr(self):
         if self.step_in_cycle == -1:
             return self.base_lrs
         elif self.step_in_cycle < self.warmup_steps:
             return [
-                (self.max_lr - base_lr) * self.step_in_cycle / self.warmup_steps
+                (max_lr - base_lr) * self.step_in_cycle / self.warmup_steps
                 + base_lr
-                for base_lr in self.base_lrs
+                for base_lr, max_lr in zip(
+                    self.base_lrs,
+                    self._expand_group_value(self.max_lr),
+                )
             ]
         else:
             return [
                 base_lr
-                + (self.max_lr - base_lr)
+                + (max_lr - base_lr)
                 * (
                     1
                     + math.cos(
@@ -108,7 +123,10 @@ class CosineAnnealingWarmupRestarts:
                     )
                 )
                 / 2
-                for base_lr in self.base_lrs
+                for base_lr, max_lr in zip(
+                    self.base_lrs,
+                    self._expand_group_value(self.max_lr),
+                )
             ]
 
     def step(self, epoch=None):
@@ -150,7 +168,13 @@ class CosineAnnealingWarmupRestarts:
                 self.cur_cycle_steps = self.first_cycle_steps
                 self.step_in_cycle = epoch
 
-        self.max_lr = self.base_max_lr * (self.gamma**self.cycle)
+        if isinstance(self.base_max_lr, (list, tuple)):
+            self.max_lr = [
+                float(base_lr) * (self.gamma**self.cycle)
+                for base_lr in self.base_max_lr
+            ]
+        else:
+            self.max_lr = self.base_max_lr * (self.gamma**self.cycle)
         self.last_epoch = math.floor(epoch)
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             if isinstance(param_group["lr"], torch.Tensor):

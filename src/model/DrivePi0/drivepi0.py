@@ -115,15 +115,35 @@ class DrivePiZero(nn.Module, NoSyncBase):
         # HDMap CNN encoder (方案 C)
         self.use_hdmap_cnn = cfg.get("use_hdmap_cnn", False)
         self.hdmap_cnn_dim = cfg.get("hdmap_cnn_dim", 32)
+        self.hdmap_fusion_mode = cfg.get("hdmap_fusion_mode", "concat")
+        if self.hdmap_fusion_mode not in {"concat", "gated_residual"}:
+            raise ValueError(
+                f"Unsupported hdmap_fusion_mode: {self.hdmap_fusion_mode}"
+            )
         if self.use_hdmap_cnn:
             from src.model.DrivePi0.hdmap_encoder import HDMapCNNEncoder
             self.hdmap_encoder = HDMapCNNEncoder(
                 in_channels=4,
                 output_dim=self.hdmap_cnn_dim,
             )
+            if self.hdmap_fusion_mode == "gated_residual":
+                self.hdmap_feat_norm = nn.LayerNorm(self.hdmap_cnn_dim)
+                self.hdmap_map_proj = nn.Linear(self.hdmap_cnn_dim, self.hdmap_cnn_dim)
+                self.hdmap_gate = nn.Sequential(
+                    nn.Linear(self.proprio_dim + self.hdmap_cnn_dim + 1, self.hdmap_cnn_dim),
+                    nn.GELU(),
+                    nn.Linear(self.hdmap_cnn_dim, self.hdmap_cnn_dim),
+                )
+            else:
+                self.hdmap_feat_norm = None
+                self.hdmap_map_proj = None
+                self.hdmap_gate = None
             actual_proprio_dim = self.proprio_dim + self.hdmap_cnn_dim
         else:
             self.hdmap_encoder = None
+            self.hdmap_feat_norm = None
+            self.hdmap_map_proj = None
+            self.hdmap_gate = None
             actual_proprio_dim = self.proprio_dim
 
         self.proprio_encoder = nn.Linear(
@@ -175,19 +195,64 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
     @property
     def action_expert_parameters(self):
-        params = (
+        return (
             list(self.action_encoder.parameters())
             + list(self.action_decoder.parameters())
             + list(self.proprio_encoder.parameters())
             + list(self.joint_model.mixtures["action"].parameters())
         )
+    
+    @property
+    def hdmap_trainable_parameters(self):
+        params = []
         if self.hdmap_encoder is not None:
-            params += list(self.hdmap_encoder.parameters())
-        return params  # note: action and proprio share weights
+            params.extend(list(self.hdmap_encoder.parameters()))
+        if self.hdmap_feat_norm is not None:
+            params.extend(list(self.hdmap_feat_norm.parameters()))
+        if self.hdmap_map_proj is not None:
+            params.extend(list(self.hdmap_map_proj.parameters()))
+        if self.hdmap_gate is not None:
+            params.extend(list(self.hdmap_gate.parameters()))
+        return params
 
-    def _encode_proprio(self, proprios, hdmap_bev=None):
+    def _fuse_hdmap_feat(
+        self,
+        proprios: torch.Tensor,
+        hdmap_feat: torch.Tensor,
+        hdmap_valid_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if hdmap_valid_mask is None:
+            hdmap_valid_mask = torch.ones(
+                hdmap_feat.shape[0],
+                1,
+                device=hdmap_feat.device,
+                dtype=hdmap_feat.dtype,
+            )
+        else:
+            hdmap_valid_mask = hdmap_valid_mask.reshape(-1, 1).to(
+                device=hdmap_feat.device,
+                dtype=hdmap_feat.dtype,
+            )
+
+        hdmap_feat = hdmap_feat * hdmap_valid_mask
+        if self.hdmap_fusion_mode == "concat":
+            return hdmap_feat
+
+        state_last = proprios[:, -1, :]
+        hdmap_feat_norm = self.hdmap_feat_norm(hdmap_feat)
+        map_residual = hdmap_feat_norm + self.hdmap_map_proj(hdmap_feat_norm)
+        gate_input = torch.cat([state_last, hdmap_feat_norm, hdmap_valid_mask], dim=-1)
+        gate = torch.sigmoid(self.hdmap_gate(gate_input))
+        return gate * map_residual * hdmap_valid_mask
+
+    def _encode_proprio(self, proprios, hdmap_bev=None, hdmap_valid_mask=None):
         if hdmap_bev is not None and self.hdmap_encoder is not None:
             hdmap_feat = self.hdmap_encoder(hdmap_bev)  # (B, hdmap_cnn_dim)
+            hdmap_feat = self._fuse_hdmap_feat(
+                proprios,
+                hdmap_feat,
+                hdmap_valid_mask=hdmap_valid_mask,
+            )
             hdmap_feat = hdmap_feat.unsqueeze(1).expand(-1, proprios.shape[1], -1)
             proprios = torch.cat([proprios, hdmap_feat], dim=-1)
         return self.proprio_encoder(proprios)
@@ -730,6 +795,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         action_position_ids: torch.LongTensor,
         proprios: torch.FloatTensor,
         hdmap_bev: Optional[torch.FloatTensor] = None,
+        hdmap_valid_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         dtype, device = proprios.dtype, proprios.device
         bsz = proprios.size(0)
@@ -796,7 +862,11 @@ class DrivePiZero(nn.Module, NoSyncBase):
         )
 
         # proprio
-        proprio_embeds = self._encode_proprio(proprios, hdmap_bev)
+        proprio_embeds = self._encode_proprio(
+            proprios,
+            hdmap_bev,
+            hdmap_valid_mask=hdmap_valid_mask,
+        )
 
         # forward pass thru the vlm and proprio, cache the kv
         _, kv_caches = self.joint_model(
@@ -866,6 +936,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         action_position_ids: torch.LongTensor,
         proprios: torch.FloatTensor,
         hdmap_bev: Optional[torch.FloatTensor] = None,
+        hdmap_valid_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         dtype, device = pixel_values.dtype, pixel_values.device
         bsz = input_ids.size(0)
@@ -878,7 +949,11 @@ class DrivePiZero(nn.Module, NoSyncBase):
         )
 
         # encode proprio
-        proprio_embeds = self._encode_proprio(proprios, hdmap_bev)
+        proprio_embeds = self._encode_proprio(
+            proprios,
+            hdmap_bev,
+            hdmap_valid_mask=hdmap_valid_mask,
+        )
 
         # sample pure action noise
         action = torch.randn(
@@ -991,6 +1066,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         actions: torch.FloatTensor,
         t: torch.FloatTensor,
         hdmap_bev: Optional[torch.FloatTensor] = None,
+        hdmap_valid_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         """flow matching loss for action prediction, no use of kv cache"""
         # noisy action
@@ -1000,7 +1076,11 @@ class DrivePiZero(nn.Module, NoSyncBase):
         psi_t = self.psi_t(x0, x1, t)
 
         # proprio
-        proprio_embeds = self._encode_proprio(proprios, hdmap_bev)
+        proprio_embeds = self._encode_proprio(
+            proprios,
+            hdmap_bev,
+            hdmap_valid_mask=hdmap_valid_mask,
+        )
 
         # inference with noisy action
         # [Batch_Size, Embed_Dim]
@@ -1105,6 +1185,7 @@ class DrivePiZeroInference(DrivePiZero):
         action_position_ids: torch.LongTensor,
         proprios: torch.FloatTensor,
         hdmap_bev: Optional[torch.FloatTensor] = None,
+        hdmap_valid_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         return super().infer_action(
             input_ids,
@@ -1117,6 +1198,7 @@ class DrivePiZeroInference(DrivePiZero):
             action_position_ids,
             proprios,
             hdmap_bev=hdmap_bev,
+            hdmap_valid_mask=hdmap_valid_mask,
         )
 
 

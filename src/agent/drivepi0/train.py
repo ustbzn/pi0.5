@@ -344,11 +344,40 @@ class DrivePiZeroTrainAgent:
             )
             self.eval_thresholds = cfg.eval_thresholds
             self.eval_freq = cfg.eval_freq
-            max_eval_batches = cfg.eval_size // cfg.per_device_batch_size // world_size
-            # cap by available val batches to avoid exhausting the iterator
-            self.per_device_num_eval_batch = min(
-                max_eval_batches,
-                len(self.val_dataloader) if len(self.val_dataloader) > 0 else 1,
+            self.eval_seed = int(cfg.get("eval_seed", self.seed))
+            self.eval_repeats = max(int(cfg.get("eval_repeats", 1)), 1)
+            self.eval_full_val = bool(cfg.get("eval_full_val", False))
+            eval_map_modes = cfg.get("eval_map_modes", ["normal"])
+            if isinstance(eval_map_modes, str):
+                eval_map_modes = [eval_map_modes]
+            self.eval_map_modes = list(eval_map_modes)
+            valid_eval_map_modes = {"normal", "zero", "shuffle"}
+            invalid_eval_map_modes = [
+                mode for mode in self.eval_map_modes
+                if mode not in valid_eval_map_modes
+            ]
+            if invalid_eval_map_modes:
+                raise ValueError(f"Invalid eval_map_modes: {invalid_eval_map_modes}")
+
+            if self.eval_full_val:
+                self.per_device_num_eval_batch = (
+                    len(self.val_dataloader) if len(self.val_dataloader) > 0 else 1
+                )
+            else:
+                max_eval_batches = max(
+                    int(cfg.eval_size) // cfg.per_device_batch_size // world_size,
+                    1,
+                )
+                # cap by available val batches to avoid exhausting the iterator
+                self.per_device_num_eval_batch = min(
+                    max_eval_batches,
+                    len(self.val_dataloader) if len(self.val_dataloader) > 0 else 1,
+                )
+            log.info(
+                "Eval config: "
+                f"batches_per_device={self.per_device_num_eval_batch}, "
+                f"repeats={self.eval_repeats}, seed={self.eval_seed}, "
+                f"full_val={self.eval_full_val}, map_modes={self.eval_map_modes}"
             )
         log.info(f"Total number of gradient updates: {self.n_updates}")
         log.info(f"Global batch size: {actual_global_batch_size}")
@@ -360,9 +389,42 @@ class DrivePiZeroTrainAgent:
         self.train_vlm = cfg.train_vlm
         self.state_only_for_action = cfg.get("state_only_for_action", False)
         self.action_expert_params = model.action_expert_parameters
-        self.trained_parameters = list(self.action_expert_params)
+        action_params = list(model.action_expert_parameters)
+        hdmap_params = list(model.hdmap_trainable_parameters)
+        self.use_separate_hdmap_optimizer_group = bool(
+            cfg.get("separate_hdmap_optimizer_group", False) and len(hdmap_params) > 0
+        )
+        self.trained_parameters = action_params + hdmap_params
+
+        if self.use_separate_hdmap_optimizer_group:
+            self.hdmap_lr = float(cfg.get("hdmap_lr", cfg.action_lr))
+            self.hdmap_weight_decay = float(
+                cfg.get("hdmap_weight_decay", cfg.action_weight_decay)
+            )
+            hdmap_lr_scheduler_cfg = cfg.get("hdmap_lr_scheduler", {})
+            self.hdmap_min_lr = float(
+                hdmap_lr_scheduler_cfg.get("min_lr", cfg.action_lr_scheduler.min_lr)
+            )
+            action_optimizer_params = [
+                {
+                    "params": action_params,
+                    "lr": cfg.action_lr,
+                    "weight_decay": cfg.action_weight_decay,
+                },
+                {
+                    "params": hdmap_params,
+                    "lr": self.hdmap_lr,
+                    "weight_decay": self.hdmap_weight_decay,
+                },
+            ]
+        else:
+            self.hdmap_lr = None
+            self.hdmap_weight_decay = None
+            self.hdmap_min_lr = None
+            action_optimizer_params = self.trained_parameters
+
         self.action_optimizer = bnb.optim.AdamW8bit(
-            model.action_expert_parameters,
+            action_optimizer_params,
             lr=cfg.action_lr,
             weight_decay=cfg.action_weight_decay,
         )
@@ -370,8 +432,16 @@ class DrivePiZeroTrainAgent:
             self.action_optimizer,
             first_cycle_steps=cfg.action_lr_scheduler.first_cycle_steps,
             cycle_mult=1.0,
-            max_lr=cfg.action_lr,
-            min_lr=cfg.action_lr_scheduler.min_lr,
+            max_lr=(
+                [cfg.action_lr, self.hdmap_lr]
+                if self.use_separate_hdmap_optimizer_group
+                else cfg.action_lr
+            ),
+            min_lr=(
+                [cfg.action_lr_scheduler.min_lr, self.hdmap_min_lr]
+                if self.use_separate_hdmap_optimizer_group
+                else cfg.action_lr_scheduler.min_lr
+            ),
             warmup_steps=cfg.action_lr_scheduler.warmup_steps,
             gamma=1.0,
         )
@@ -379,6 +449,13 @@ class DrivePiZeroTrainAgent:
             f"Number of trained parameters (Trajectory): {get_num_params_in_billions(self.action_optimizer):.3f}B"
         )
         self.vlm_trained_params = []
+        if self.use_separate_hdmap_optimizer_group:
+            log.info(
+                "HDMap optimizer group enabled: "
+                f"hdmap_lr={self.hdmap_lr:.2e}, "
+                f"hdmap_weight_decay={self.hdmap_weight_decay:.2e}, "
+                f"hdmap_min_lr={self.hdmap_min_lr:.2e}"
+            )
         if self.train_vlm:
             if cfg.lora:
                 vlm_trained_parameters = model.lora_trainable_vlm_parameters
@@ -468,6 +545,60 @@ class DrivePiZeroTrainAgent:
             t = self.flow_t_max * (1 - z)  # flip and shift
         return t
 
+    @staticmethod
+    def _snapshot_rng_state():
+        state = {
+            "torch": torch.random.get_rng_state(),
+            "numpy": np.random.get_state(),
+            "python": random.getstate(),
+        }
+        if torch.cuda.is_available():
+            state["cuda"] = torch.cuda.get_rng_state_all()
+        return state
+
+    @staticmethod
+    def _restore_rng_state(state):
+        torch.random.set_rng_state(state["torch"])
+        np.random.set_state(state["numpy"])
+        random.setstate(state["python"])
+        if "cuda" in state:
+            torch.cuda.set_rng_state_all(state["cuda"])
+
+    @staticmethod
+    def _set_eval_seed(seed: int):
+        seed = int(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+    @staticmethod
+    def _apply_eval_map_mode(inputs: dict, mode: str, seed: int):
+        if mode == "normal" or "hdmap_bev" not in inputs:
+            return inputs
+
+        inputs = dict(inputs)
+        hdmap = inputs["hdmap_bev"]
+        if mode == "zero":
+            inputs["hdmap_bev"] = torch.zeros_like(hdmap)
+            return inputs
+
+        if mode == "shuffle":
+            if hdmap.shape[0] <= 1:
+                return inputs
+            generator = torch.Generator(device=hdmap.device)
+            generator.manual_seed(int(seed))
+            perm = torch.randperm(
+                hdmap.shape[0],
+                device=hdmap.device,
+                generator=generator,
+            )
+            inputs["hdmap_bev"] = hdmap[perm]
+            if "hdmap_valid_mask" in inputs:
+                inputs["hdmap_valid_mask"] = inputs["hdmap_valid_mask"][perm]
+            return inputs
+
+        raise ValueError(f"Unknown eval_map_mode: {mode}")
+
     def run(self):
         timer = Timer()
         train_start_time = time.time()
@@ -478,6 +609,7 @@ class DrivePiZeroTrainAgent:
         cnt_update_start = cnt_update  # record start update for ETA calculation
         loss_train_deque = deque(maxlen=self.grad_accumulation_steps)
         new_eval_from_last_log = False
+        eval_metrics_for_log = {}
         if self.multi_gpu:
             import torch.distributed as dist
 
@@ -620,6 +752,8 @@ class DrivePiZeroTrainAgent:
             # 方案 C: 传递原始 BEV 数据给模型 CNN 编码器
             if self.use_hdmap_cnn and "hdmap_bev_raw" in batch:
                 inputs["hdmap_bev"] = batch["hdmap_bev_raw"].to(self.dtype)
+            if self.use_hdmap_cnn and "hdmap_valid_mask" in batch:
+                inputs["hdmap_valid_mask"] = batch["hdmap_valid_mask"].to(self.dtype)
 
             if split_mask:
                 image_text_proprio_mask, action_mask = (
@@ -710,57 +844,164 @@ class DrivePiZeroTrainAgent:
                 # validation with action accuracy
                 if self.run_eval and (cnt_batch + 1) % self.eval_freq == 0:
                     new_eval_from_last_log = True
+                    eval_metrics_for_log = {}
                     self.model.eval()
-                    eval_accuracy = torch.zeros(
-                        len(self.eval_thresholds), device=self.device
-                    )
-                    eval_l1_loss = torch.tensor(0.0, device=self.device)
                     if self.main_rank:
                         log.info(
-                            f"Running evaluation for {self.per_device_num_eval_batch} batches..."
+                            f"Running evaluation for {self.per_device_num_eval_batch} batches, "
+                            f"repeats={self.eval_repeats}, map_modes={self.eval_map_modes}..."
                         )
-                    with torch.no_grad():
-                        val_iterator = iter(self.val_dataloader)
-                        actual_eval_batches = 0
-                        for _ in range(self.per_device_num_eval_batch):
-                            try:
-                                batch_eval = next(val_iterator)
-                            except StopIteration:
-                                break
-                            actual_eval_batches += 1
-                            inputs = preprocess_batch(
-                                    batch_eval, split_mask=True, sample_fm_time=False
-                                )
-                            gt_trajectory = inputs.pop("actions")
-                            preds = model.infer_action(**inputs)
-                            eval_accuracy += get_action_accuracy(
-                                gt_trajectory, preds, self.eval_thresholds
-                            )
-                            eval_l1_loss += torch.nn.functional.l1_loss(
-                                preds, gt_trajectory
-                            )
-                    actual_eval_batches = max(actual_eval_batches, 1)
-                    eval_accuracy = eval_accuracy / actual_eval_batches
-                    eval_l1_loss = eval_l1_loss / actual_eval_batches
-                    self.model.train()
-                    if self.multi_gpu:
-                        dist.barrier()
-                        dist.all_reduce(eval_accuracy, op=dist.ReduceOp.SUM)
-                        dist.all_reduce(eval_l1_loss, op=dist.ReduceOp.SUM)
-                        eval_accuracy /= dist.get_world_size()
-                        eval_l1_loss /= dist.get_world_size()
-                        eval_accuracy = torch.clamp(eval_accuracy, 0.0, 1.0)
+                    rng_state = self._snapshot_rng_state()
+                    eval_results = {}
+                    try:
+                        with torch.no_grad():
+                            for map_mode in self.eval_map_modes:
+                                repeat_accuracies = []
+                                repeat_l1_losses = []
+                                for repeat_idx in range(self.eval_repeats):
+                                    eval_accuracy = torch.zeros(
+                                        len(self.eval_thresholds),
+                                        device=self.device,
+                                    )
+                                    eval_l1_loss = torch.tensor(
+                                        0.0,
+                                        device=self.device,
+                                    )
+                                    val_iterator = iter(self.val_dataloader)
+                                    actual_eval_batches = 0
+                                    for eval_batch_idx in range(
+                                        self.per_device_num_eval_batch
+                                    ):
+                                        try:
+                                            batch_eval = next(val_iterator)
+                                        except StopIteration:
+                                            break
+                                        actual_eval_batches += 1
+                                        inputs = preprocess_batch(
+                                            batch_eval,
+                                            split_mask=True,
+                                            sample_fm_time=False,
+                                        )
+                                        gt_trajectory = inputs.pop("actions")
+                                        eval_seed = (
+                                            self.eval_seed
+                                            + repeat_idx * 100000
+                                            + eval_batch_idx
+                                        )
+                                        map_inputs = self._apply_eval_map_mode(
+                                            inputs,
+                                            map_mode,
+                                            eval_seed + 10000000,
+                                        )
+                                        self._set_eval_seed(eval_seed)
+                                        preds = model.infer_action(**map_inputs)
+                                        eval_accuracy += get_action_accuracy(
+                                            gt_trajectory,
+                                            preds,
+                                            self.eval_thresholds,
+                                        )
+                                        eval_l1_loss += torch.nn.functional.l1_loss(
+                                            preds,
+                                            gt_trajectory,
+                                        )
+                                    actual_eval_batches = max(actual_eval_batches, 1)
+                                    eval_accuracy = eval_accuracy / actual_eval_batches
+                                    eval_l1_loss = eval_l1_loss / actual_eval_batches
+
+                                    if self.multi_gpu:
+                                        dist.barrier()
+                                        dist.all_reduce(
+                                            eval_accuracy,
+                                            op=dist.ReduceOp.SUM,
+                                        )
+                                        dist.all_reduce(
+                                            eval_l1_loss,
+                                            op=dist.ReduceOp.SUM,
+                                        )
+                                        eval_accuracy /= dist.get_world_size()
+                                        eval_l1_loss /= dist.get_world_size()
+                                        eval_accuracy = torch.clamp(
+                                            eval_accuracy,
+                                            0.0,
+                                            1.0,
+                                        )
+
+                                    repeat_accuracies.append(eval_accuracy.detach())
+                                    repeat_l1_losses.append(eval_l1_loss.detach())
+
+                                acc_stack = torch.stack(repeat_accuracies, dim=0)
+                                l1_stack = torch.stack(repeat_l1_losses, dim=0)
+                                eval_results[map_mode] = {
+                                    "acc_mean": acc_stack.mean(dim=0),
+                                    "acc_std": (
+                                        acc_stack.std(dim=0, unbiased=False)
+                                        if acc_stack.shape[0] > 1
+                                        else torch.zeros_like(acc_stack[0])
+                                    ),
+                                    "l1_mean": l1_stack.mean(),
+                                    "l1_std": (
+                                        l1_stack.std(unbiased=False)
+                                        if l1_stack.shape[0] > 1
+                                        else torch.zeros_like(l1_stack[0])
+                                    ),
+                                }
+                    finally:
+                        self._restore_rng_state(rng_state)
+                        self.model.train()
+
                     if self.main_rank:
-                        log_msg = f"Eval | l1 Loss: {eval_l1_loss.item():.3f} | "
-                        log_msg += " | ".join(
-                            [
-                                f"acc thres {threshold}: {accuracy.item():.3f}"
-                                for threshold, accuracy in zip(
-                                    self.eval_thresholds, eval_accuracy
-                                )
-                            ]
-                        )
-                        log.info(log_msg)
+                        show_eval_std = self.eval_repeats > 1
+                        for map_mode, result in eval_results.items():
+                            l1_msg = f"{result['l1_mean'].item():.3f}"
+                            if show_eval_std:
+                                l1_msg += f"±{result['l1_std'].item():.3f}"
+
+                            acc_msgs = []
+                            for threshold, accuracy, std in zip(
+                                self.eval_thresholds,
+                                result["acc_mean"],
+                                result["acc_std"],
+                            ):
+                                acc_msg = f"acc thres {threshold}: {accuracy.item():.3f}"
+                                if show_eval_std:
+                                    acc_msg += f"±{std.item():.3f}"
+                                acc_msgs.append(acc_msg)
+
+                            log_msg = f"Eval [{map_mode}] | l1 Loss: {l1_msg} | "
+                            log_msg += " | ".join(acc_msgs)
+                            log.info(log_msg)
+                            eval_metrics_for_log[f"eval/{map_mode}/l1_mean"] = (
+                                result["l1_mean"].item()
+                            )
+                            eval_metrics_for_log[f"eval/{map_mode}/l1_std"] = (
+                                result["l1_std"].item()
+                            )
+                            for threshold, accuracy, std in zip(
+                                self.eval_thresholds,
+                                result["acc_mean"],
+                                result["acc_std"],
+                            ):
+                                eval_metrics_for_log[
+                                    f"eval/{map_mode}/acc_{threshold}_mean"
+                                ] = accuracy.item()
+                                eval_metrics_for_log[
+                                    f"eval/{map_mode}/acc_{threshold}_std"
+                                ] = std.item()
+
+                        if "normal" in eval_results:
+                            normal_result = eval_results["normal"]
+                            eval_metrics_for_log["eval l1 loss"] = normal_result[
+                                "l1_mean"
+                            ].item()
+                            eval_metrics_for_log.update(
+                                {
+                                    f"eval acc - thres {threshold}": accuracy.item()
+                                    for threshold, accuracy in zip(
+                                        self.eval_thresholds,
+                                        normal_result["acc_mean"],
+                                    )
+                                }
+                            )
                         self.save_training(cnt_update, cnt_batch)
 
                 # log loss
@@ -780,6 +1021,8 @@ class DrivePiZeroTrainAgent:
                     else:
                         eta_str = "N/A"
                     log_msg = f"Batch {cnt_batch} Update {cnt_update}: t {timer():8.4f} | vram {peak_vram:6.3f} | train loss {loss_train_metric:6.4f} | action lr {self.action_optimizer.param_groups[0]['lr']:10.8f} | eta {eta_str}"
+                    if self.use_separate_hdmap_optimizer_group:
+                        log_msg += f" | hdmap lr {self.action_optimizer.param_groups[1]['lr']:10.8f}"
                     log.info(log_msg)
                     # 构建 metrics 字典
                     metrics = {
@@ -787,19 +1030,13 @@ class DrivePiZeroTrainAgent:
                         "train/gradient_steps": cnt_update,
                         "train/action_lr": self.action_optimizer.param_groups[0]["lr"],
                     }
+                    if self.use_separate_hdmap_optimizer_group:
+                        metrics["train/hdmap_lr"] = self.action_optimizer.param_groups[1]["lr"]
                     if self.train_vlm:
                         metrics["vlm lr"] = self.vlm_optimizer.param_groups[0]["lr"]
                     
                     if new_eval_from_last_log:
-                        metrics.update(
-                            {
-                                f"eval acc - thres {threshold}": accuracy.item()
-                                for threshold, accuracy in zip(
-                                    self.eval_thresholds, eval_accuracy
-                                )
-                            }
-                        )
-                        metrics["eval l1 loss"] = eval_l1_loss.item()
+                        metrics.update(eval_metrics_for_log)
                         new_eval_from_last_log = False
                     # if self.use_wandb:
                     #     # 保持原有的 wandb

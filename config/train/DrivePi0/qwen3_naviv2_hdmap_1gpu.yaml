@@ -63,7 +63,7 @@ use_hdmap_proprio: False
 # 注意: 开启方案 A 时 hdmap 会增加 1 张图的 tokens
 #       不开方案 A 时无需 hdmap_image_size 配置
 cam_image_size: [270, 480]      # [H, W] 相机图像缩放尺寸, 16:9 等比 (原图 960x540 的 1/2)
-hdmap_image_size: [352, 192]    # [H, W] HDMap BEV 缩放尺寸 (原图 1792x960 的 ~1/5)
+hdmap_image_size: [1792, 960]    # [H, W] HDMap BEV 缩放尺寸 (原图 1792x960 的 ~1/5)
 # ============================================================
 
 data:

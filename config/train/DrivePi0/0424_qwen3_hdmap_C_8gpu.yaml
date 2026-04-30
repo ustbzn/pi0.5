@@ -59,6 +59,18 @@ use_hdmap_proprio: False
 use_hdmap_cnn: True
 hdmap_cnn_dim: 32              # CNN 输出特征维度
 hdmap_bev_downsample_size: [48, 90]  # BEV 下采样尺寸 (H, W)
+hdmap_downsample_mode:
+  lanes: bilinear
+  lane_links: bilinear
+  lane_boundaries: bilinear
+  junctions: bilinear
+hdmap_channel_scale: [1.0, 1.0, 1.0, 1.0]
+hdmap_fusion_mode: concat      # concat / gated_residual
+separate_hdmap_optimizer_group: False
+hdmap_lr: 1e-4
+hdmap_weight_decay: 1e-4
+hdmap_lr_scheduler:
+  min_lr: 1e-6
 
 data:
   train:
@@ -76,6 +88,8 @@ data:
     use_hdmap_proprio: ${use_hdmap_proprio}
     use_hdmap_cnn: ${use_hdmap_cnn}
     hdmap_bev_downsample_size: ${hdmap_bev_downsample_size}
+    hdmap_downsample_mode: ${hdmap_downsample_mode}
+    hdmap_channel_scale: ${hdmap_channel_scale}
   val:
     statistics_path: ${data.val.dynamic_dir}/statistics.json
     use_fixed_images: False
@@ -91,6 +105,8 @@ data:
     use_hdmap_proprio: ${use_hdmap_proprio}
     use_hdmap_cnn: ${use_hdmap_cnn}
     hdmap_bev_downsample_size: ${hdmap_bev_downsample_size}
+    hdmap_downsample_mode: ${hdmap_downsample_mode}
+    hdmap_channel_scale: ${hdmap_channel_scale}
 
 swanlab:
   enable: True
@@ -123,7 +139,11 @@ global_batch_size: ${eval:'${per_device_batch_size} * ${num_gpus}'}
 n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}
 save_model_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
 eval_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
-eval_size: 1024
+eval_size: 8192
+eval_full_val: False        # True 时忽略 eval_size，评估完整 val split
+eval_seed: 20260428         # 固定评估采样噪声，保证不同 map mode 可比较
+eval_repeats: 3             # 重复评估次数，日志输出 mean/std
+eval_map_modes: [normal, zero, shuffle]  # HDMap 消融：正常/置零/batch 内打乱
 eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
 num_workers: 8
 # 学习率 — LoRA 可用更高的 VLM 学习率

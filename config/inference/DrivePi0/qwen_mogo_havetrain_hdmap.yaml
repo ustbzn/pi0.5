@@ -14,15 +14,42 @@ n_nodes: 1
 seed: 42
 action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
 quantize: False
-lora: False
+lora: True
 lora_r: 32
+lora_alpha: 32
 lora_dropout: 0.0
+# --- 按组件启用 LoRA（必须与训练时一致） ---
+lora_vlm: False
+lora_vlm_mlp: False
+lora_vision: True
+lora_vision_mlp: False
+lora_vision_merger: True  # Vision-text merger；当前 forward 会使用
+lora_vision_deepstack_merger: False  # 当前 forward 不消费 deepstack 输出，开启会触发 DDP unused 参数
 pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct  # You need to set path
-checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU/logs/train/drive-pi0/2026-04-22_15-34_mogo_hdmap_B_8gpu/checkpoint/step10920.pt # You need to set path
+checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU/logs/train/drive-pi0/2026-04-29_13-53_mogo_hdmap_A_8gpu_lora_vision/checkpoint/step24920.pt # You need to set path
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: minmax
-use_hdmap_image: False
-use_hdmap_proprio: True
+
+use_hdmap_image: True
+hdmap_image_size: [352, 192]
+
+use_hdmap_proprio: False
+
+use_hdmap_cnn: False
+hdmap_cnn_dim: 32              # CNN 输出特征维度
+hdmap_bev_downsample_size: [96, 180]  # BEV 下采样尺寸 (H, W)
+hdmap_downsample_mode:
+  lanes: max
+  lane_links: max
+  lane_boundaries: max
+  junctions: area
+hdmap_channel_scale: [0.08, 0.12, 0.10, 1.0]
+hdmap_fusion_mode: concat
+separate_hdmap_optimizer_group: False
+hdmap_lr: 1e-4
+hdmap_weight_decay: 1e-4
+hdmap_lr_scheduler:
+  min_lr: 1e-6
 
 data:
   # statistics_path: ${current_dir}/datasets/mogo-test/statistics.json
@@ -36,6 +63,11 @@ data:
   use_his_trajectory: True
   use_hdmap_image: ${use_hdmap_image}
   use_hdmap_proprio: ${use_hdmap_proprio}
+  hdmap_image_size: ${hdmap_image_size}
+  use_hdmap_cnn: ${use_hdmap_cnn}
+  hdmap_bev_downsample_size: ${hdmap_bev_downsample_size}
+  hdmap_downsample_mode: ${hdmap_downsample_mode}
+  hdmap_channel_scale: ${hdmap_channel_scale}
   nav_onehot: False
 
 
@@ -54,10 +86,10 @@ cond_steps: 5
 horizon_steps: 6
 
 action_dim: 2 # EEF_POS
-proprio_dim: 17  # his_speed(2) + his_acceleration(2) + his_angular_velocity(1) + his_theta(1) + his_trajectory(2) + navigation_id(1) + hdmap(8) = 17
+proprio_dim: 9  # his_speed(2) + his_acceleration(2) + his_angular_velocity(1) + his_theta(1) + his_trajectory(2) + navigation_id(1) = 9
 state_dim: ${proprio_dim}
 # 参数更改
-max_seq_len: 600  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600
+max_seq_len: 700  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600
 tokenizer_padding: max_length # instead of truncating to longest
 max_image_text_tokens: ${max_seq_len}
 

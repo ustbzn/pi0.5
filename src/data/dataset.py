@@ -91,7 +91,9 @@ class TorchDataset(Dataset):
         use_hdmap_cnn: bool = False, 
         cam_image_size: tuple = (224, 224), 
         hdmap_image_size: tuple = (192, 352), 
-        hdmap_bev_downsample_size: tuple = (48, 90)
+        hdmap_bev_downsample_size: tuple = (48, 90), 
+        hdmap_downsample_mode=None, 
+        hdmap_channel_scale=None, 
     ):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
@@ -108,6 +110,8 @@ class TorchDataset(Dataset):
         self.cam_image_size = tuple(cam_image_size)      # (H, W) 相机图像缩放目标
         self.hdmap_image_size = tuple(hdmap_image_size)   # (H, W) HDMap BEV 缩放目标
         self.hdmap_bev_downsample_size = tuple(hdmap_bev_downsample_size)  # (H, W) 方案 C BEV 下采样目标
+        self.hdmap_downsample_mode = hdmap_downsample_mode
+        self.hdmap_channel_scale = hdmap_channel_scale
         self.list_data_dict = [f for f in os.listdir(self.data_path) if f.endswith('.pkl')]
 
     def __len__(self):
@@ -286,16 +290,23 @@ class TorchDataset(Dataset):
 
             # 方案 C: 加载下采样原始 BEV 数据，由模型 CNN 编码
             if self.use_hdmap_cnn:
+                h, w = self.hdmap_bev_downsample_size
+                data_dict['hdmap_valid_mask'] = torch.tensor(0.0, dtype=torch.float32)
                 hdmap_bev_path = all_data.get('hdmap_bev')
                 if hdmap_bev_path is not None:
-                    bev_ds = load_hdmap_bev_downsampled(hdmap_bev_path, size=self.hdmap_bev_downsample_size)
+                    bev_ds, valid_mask = load_hdmap_bev_downsampled(
+                        hdmap_bev_path,
+                        size=self.hdmap_bev_downsample_size,
+                        downsample_mode=self.hdmap_downsample_mode,
+                        channel_scale=self.hdmap_channel_scale,
+                        return_valid_mask=True,
+                    )
                     if bev_ds is not None:
                         data_dict['hdmap_bev_raw'] = torch.as_tensor(bev_ds, dtype=torch.float32)
+                        data_dict['hdmap_valid_mask'] = torch.tensor(valid_mask, dtype=torch.float32)
                     else:
-                        h, w = self.hdmap_bev_downsample_size
                         data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
                 else:
-                    h, w = self.hdmap_bev_downsample_size
                     data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
 
             hdmap_context = ""
@@ -337,6 +348,8 @@ def prepare_b2d_dataset(
     cam_image_size: tuple = (224, 224), 
     hdmap_image_size: tuple = (192, 352), 
     hdmap_bev_downsample_size: tuple = (48, 90), 
+    hdmap_downsample_mode=None, 
+    hdmap_channel_scale=None, 
 ):
     common_kwargs = dict(
         statistics_path=statistics_path,
@@ -351,6 +364,8 @@ def prepare_b2d_dataset(
         cam_image_size=cam_image_size,
         hdmap_image_size=hdmap_image_size,
         hdmap_bev_downsample_size=hdmap_bev_downsample_size,
+        hdmap_downsample_mode=hdmap_downsample_mode,
+        hdmap_channel_scale=hdmap_channel_scale,
     )
     if use_fixed_images:
         data_path = os.path.join(work_dir, fixed_dir_name)

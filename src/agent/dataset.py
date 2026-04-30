@@ -29,6 +29,8 @@ class Bench2DriveDataset:
             cam_image_size=tuple(config.get("cam_image_size", [224, 224])),
             hdmap_image_size=tuple(config.get("hdmap_image_size", [352, 192])),
             hdmap_bev_downsample_size=tuple(config.get("hdmap_bev_downsample_size", [48, 90])),
+            hdmap_downsample_mode=config.get("hdmap_downsample_mode", None),
+            hdmap_channel_scale=config.get("hdmap_channel_scale", None),
         )
         self.dataset = dataset
 

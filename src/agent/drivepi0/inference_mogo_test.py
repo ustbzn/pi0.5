@@ -92,6 +92,8 @@ class DrivePiZeroInferenceAgent:
         self.cam_image_size = tuple(cfg.data.get("cam_image_size", [224, 224]))
         self.hdmap_image_size = tuple(cfg.data.get("hdmap_image_size", [352, 192]))
         self.hdmap_bev_downsample_size = tuple(cfg.data.get("hdmap_bev_downsample_size", [48, 90]))
+        self.hdmap_downsample_mode = cfg.data.get("hdmap_downsample_mode", None)
+        self.hdmap_channel_scale = cfg.data.get("hdmap_channel_scale", None)
         print('Agent done')
     
     
@@ -212,6 +214,8 @@ class DrivePiZeroInferenceAgent:
         # 方案 C: 传递原始 BEV 数据
         if self.use_hdmap_cnn and "hdmap_bev_raw" in data_dict:
             inputs["hdmap_bev"] = data_dict["hdmap_bev_raw"].unsqueeze(0).to(self.device, dtype=self.dtype)
+        if self.use_hdmap_cnn and "hdmap_valid_mask" in data_dict:
+            inputs["hdmap_valid_mask"] = data_dict["hdmap_valid_mask"].reshape(1).to(self.device, dtype=self.dtype)
 
         image_text_proprio_mask, action_mask = (
             self.model.split_full_mask_into_submasks(causal_mask)
@@ -452,15 +456,24 @@ class DrivePiZeroInferenceAgent:
                     if self.use_hdmap_cnn:
                         hdmap_bev_path = all_data.get('hdmap_bev')
                         if hdmap_bev_path is not None:
-                            bev_ds = load_hdmap_bev_downsampled(hdmap_bev_path, size=self.hdmap_bev_downsample_size)
+                            bev_ds, valid_mask = load_hdmap_bev_downsampled(
+                                hdmap_bev_path,
+                                size=self.hdmap_bev_downsample_size,
+                                downsample_mode=self.hdmap_downsample_mode,
+                                channel_scale=self.hdmap_channel_scale,
+                                return_valid_mask=True,
+                            )
                             if bev_ds is not None:
                                 data_dict['hdmap_bev_raw'] = torch.as_tensor(bev_ds, dtype=torch.float32)
+                                data_dict['hdmap_valid_mask'] = torch.tensor(valid_mask, dtype=torch.float32)
                             else:
                                 h, w = self.hdmap_bev_downsample_size
                                 data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+                                data_dict['hdmap_valid_mask'] = torch.tensor(0.0, dtype=torch.float32)
                         else:
                             h, w = self.hdmap_bev_downsample_size
                             data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+                            data_dict['hdmap_valid_mask'] = torch.tensor(0.0, dtype=torch.float32)
 
                     hdmap_context = ""
                     if self.use_hdmap_image:
@@ -787,15 +800,24 @@ if __name__ == '__main__':
             if inference_agent.use_hdmap_cnn:
                 hdmap_bev_path = all_data.get('hdmap_bev')
                 if hdmap_bev_path is not None:
-                    bev_ds = load_hdmap_bev_downsampled(hdmap_bev_path, size=inference_agent.hdmap_bev_downsample_size)
+                    bev_ds, valid_mask = load_hdmap_bev_downsampled(
+                        hdmap_bev_path,
+                        size=inference_agent.hdmap_bev_downsample_size,
+                        downsample_mode=inference_agent.hdmap_downsample_mode,
+                        channel_scale=inference_agent.hdmap_channel_scale,
+                        return_valid_mask=True,
+                    )
                     if bev_ds is not None:
                         data_dict['hdmap_bev_raw'] = torch.as_tensor(bev_ds, dtype=torch.float32)
+                        data_dict['hdmap_valid_mask'] = torch.tensor(valid_mask, dtype=torch.float32)
                     else:
                         h, w = inference_agent.hdmap_bev_downsample_size
                         data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+                        data_dict['hdmap_valid_mask'] = torch.tensor(0.0, dtype=torch.float32)
                 else:
                     h, w = inference_agent.hdmap_bev_downsample_size
                     data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
+                    data_dict['hdmap_valid_mask'] = torch.tensor(0.0, dtype=torch.float32)
 
             hdmap_context = ""
             if inference_agent.use_hdmap_image:

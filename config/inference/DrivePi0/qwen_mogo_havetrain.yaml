@@ -5,7 +5,7 @@ hydra:
     dir: ${log_dir}
 _target_: src.agent.drivepi0.eval.DrivePiZeroEvalAgent
 
-current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo  # You need to set path
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU  # You need to set path
 log_dir: ${oc.env:LOG_DIR}/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
 name: drive-pi0
 device: cuda
@@ -18,7 +18,7 @@ lora: False
 lora_r: 32
 lora_dropout: 0.0
 pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct  # You need to set path
-checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo/logs/train/drive-pi0/2026-04-22_16-14_mogo_naviv2_9dim_smoothLoss_noHisTraj_4gpu/checkpoint/step24920.pt # You need to set path
+checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU/logs/train/drive-pi0/2026-04-20_16-00_mogo_naviv2_9dim_smoothLoss_8gpu/checkpoint/step12480.pt # You need to set path
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: minmax
 

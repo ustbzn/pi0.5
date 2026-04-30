@@ -7,9 +7,11 @@ HDMap BEV 工具模块：
 """
 
 import os
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Sequence, Tuple
 
 import numpy as np
+import torch
+import torch.nn.functional as F
 
 # ---- BEV 坐标系常量 ----
 # shape: (4, 960, 1792)
@@ -23,6 +25,13 @@ _CH_LANES = 0
 _CH_LANE_LINKS = 1
 _CH_LANE_BOUNDARIES = 2
 _CH_JUNCTIONS = 3
+
+HDMAP_CHANNEL_NAMES = (
+    "lanes",
+    "lane_links",
+    "lane_boundaries",
+    "junctions",
+)
 
 # ---- 特征提取区域定义 (单位: pixel, 1px = 0.1m) ----
 # 近前方: ego 前方 0~30m, 左右 ±10m
@@ -110,35 +119,107 @@ def extract_hdmap_features(npz_path) -> np.ndarray:
 HDMAP_PROPRIO_DIM = 8  # 方案 B 新增的 proprio 维度数
 
 
+def _normalize_channel_config(
+    config,
+    default_value,
+    cast_fn=None,
+):
+    if config is None:
+        return {name: default_value for name in HDMAP_CHANNEL_NAMES}
+
+    if isinstance(config, Mapping):
+        normalized = {}
+        for name in HDMAP_CHANNEL_NAMES:
+            value = config.get(name, default_value)
+            normalized[name] = cast_fn(value) if cast_fn is not None else value
+        return normalized
+
+    if isinstance(config, Sequence) and not isinstance(config, (str, bytes)):
+        if len(config) != len(HDMAP_CHANNEL_NAMES):
+            raise ValueError(
+                f"Expected {len(HDMAP_CHANNEL_NAMES)} values, got {len(config)}"
+            )
+        return {
+            name: cast_fn(value) if cast_fn is not None else value
+            for name, value in zip(HDMAP_CHANNEL_NAMES, config)
+        }
+
+    raise TypeError(f"Unsupported channel config type: {type(config)}")
+
+
+def _resize_bev_channel(
+    channel: torch.Tensor,
+    size: Tuple[int, int],
+    mode: str,
+) -> torch.Tensor:
+    if mode == "max":
+        return F.adaptive_max_pool2d(channel, size)
+    if mode in {"area", "avg"}:
+        return F.adaptive_avg_pool2d(channel, size)
+    if mode == "nearest":
+        return F.interpolate(channel, size=size, mode="nearest")
+    if mode == "bilinear":
+        return F.interpolate(channel, size=size, mode="bilinear", align_corners=False)
+    raise ValueError(f"Unsupported hdmap downsample mode: {mode}")
+
+
 def load_hdmap_bev_downsampled(
     npz_path,
     size: Tuple[int, int] = (48, 90),
+    downsample_mode=None,
+    channel_scale=None,
+    return_valid_mask: bool = False,
 ) -> Optional[np.ndarray]:
     """加载 HDMap BEV NPZ 并下采样为 (4, H, W) float32 (方案 C)。
 
     Args:
         npz_path: NPZ 文件路径 (str 或 bytes)
         size: 目标尺寸 (H, W)
+        downsample_mode: 每个通道的下采样模式，支持 dict/list:
+            lanes / lane_links / lane_boundaries / junctions
+            可选值: max / area / avg / nearest / bilinear
+        channel_scale: 每个通道的归一化尺度，输出会执行 clip(x / scale, 0, 1)
+        return_valid_mask: True 时额外返回地图是否存在的 mask
 
     Returns:
         bev: (4, H, W) float32 array, 值域 [0, 1]，或 None
+        valid_mask: float，1.0 表示地图有效，0.0 表示缺失
     """
     if isinstance(npz_path, bytes):
         npz_path = npz_path.decode("utf-8")
     if not npz_path or not os.path.exists(npz_path):
+        if return_valid_mask:
+            return None, 0.0
         return None
 
     bev = np.load(npz_path)["hdmap_bev"].astype(np.float32)  # (4, 960, 1792)
+    downsample_mode = _normalize_channel_config(
+        downsample_mode,
+        default_value="bilinear",
+        cast_fn=lambda value: str(value).lower(),
+    )
+    channel_scale = _normalize_channel_config(
+        channel_scale,
+        default_value=1.0,
+        cast_fn=float,
+    )
 
-    from PIL import Image
+    bev_tensor = torch.from_numpy(bev).unsqueeze(0)  # (1, 4, H, W)
+    resized_channels = []
+    for ch_idx, ch_name in enumerate(HDMAP_CHANNEL_NAMES):
+        resized = _resize_bev_channel(
+            bev_tensor[:, ch_idx:ch_idx + 1],
+            size=size,
+            mode=downsample_mode[ch_name],
+        )
+        scale = max(channel_scale[ch_name], 1e-6)
+        resized = torch.clamp(resized / scale, 0.0, 1.0)
+        resized_channels.append(resized.squeeze(0).squeeze(0).numpy().astype(np.float32))
 
-    target_h, target_w = size
-    channels = []
-    for ch in range(bev.shape[0]):
-        img = Image.fromarray(bev[ch])
-        img = img.resize((target_w, target_h), Image.BILINEAR)
-        channels.append(np.array(img, dtype=np.float32))
-    return np.stack(channels, axis=0)  # (4, H, W)
+    bev_out = np.stack(resized_channels, axis=0)
+    if return_valid_mask:
+        return bev_out, 1.0
+    return bev_out
 
 
 HDMAP_BEV_CHANNELS = 4  # 方案 C BEV 通道数
