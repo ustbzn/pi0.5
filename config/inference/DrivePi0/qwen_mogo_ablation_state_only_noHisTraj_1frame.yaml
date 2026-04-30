@@ -1,0 +1,119 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivepi0.eval.DrivePiZeroEvalAgent
+
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo
+log_dir: ${oc.env:LOG_DIR}/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
+name: drive-pi0
+device: cuda
+gpu_id: 0
+n_nodes: 1
+seed: 42
+action_expert_adaptive_mode:
+quantize: False
+lora: False
+lora_r: 32
+lora_dropout: 0.0
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo/logs/train/drive-pi0/2026-04-29_19-45_mogo_naviv2_7dim_noHisTraj_1frame_4gpu/checkpoint/step18690.pt
+norm_mode: minmax
+
+state_only_for_action: False
+mask_vlm_for_action: False
+
+data:
+  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/statistics_9dim.json
+  use_fixed_images: False
+  work_dir: ${current_dir}
+  split: val
+  num_of_action_experts: 13
+  shuffle_buffer_size: 200000
+  norm_mode: ${norm_mode}
+  use_his_trajectory: False
+  nav_onehot: False
+  state_frame_index: 0
+
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+device_batch_size: 32
+
+num_workers: 6
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value:
+debug: False
+save_trajectories: True
+cond_steps: 1
+horizon_steps: 6
+
+action_dim: 2
+proprio_dim: 7
+state_dim: ${proprio_dim}
+max_seq_len: 600
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 6144
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: False
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256
+
+pad_token_id: 0
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    hidden_act: "gelu_pytorch_tanh"
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    rope_scaling:
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+      rope_type: "default"
+
+image_token_index: 151655
+video_token_id: 151656
+vision_start_token_id: 151652
+vision_end_token_id: 151653
+vocab_size: 151936
+bos_token_id: 151643
+eos_token_id: 151645

@@ -1,0 +1,203 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_naviv2_7dim_noHisTraj_1frame_4gpu
+log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
+
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+load_pretrained_weights: True
+
+finetune_checkpoint_path:
+resume_checkpoint_path:
+
+train_vlm: False
+action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
+use_torch_compile: True
+use_bf16: True
+use_amp: True
+quantize: False
+
+state_only_for_action: False
+mask_vlm_for_action: False
+
+# ===== LoRA 配置 =====
+lora: False
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.05
+# --- 按组件启用 LoRA（每项可独立配置） ---
+lora_vlm: False            # VLM language model attention (q/k/v/o_proj)
+lora_vlm_mlp: False        # VLM language model MLP (gate/up/down_proj)
+lora_vision: False         # Vision tower attention (qkv, proj)
+lora_vision_mlp: False     # Vision tower MLP (linear_fc1/fc2)
+lora_vision_merger: False  # Vision-text merger & deepstack merger
+# 可选: 自定义 VLM attention 目标层
+# lora_vlm_targets: [q_proj, k_proj, v_proj, o_proj]
+
+data:
+  train:
+    statistics_path: ${data.train.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+    state_frame_index: 0
+  val:
+    statistics_path: ${data.val.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+    state_frame_index: 0
+
+swanlab:
+  enable: True
+  project: DriveMoE_Qwen3
+  experiment_name: ${run_name}
+  mode: cloud
+  description: null
+  entity: null
+
+log_freq: 16
+# 归一化方法: percentile_clip, percentile, minmax
+norm_mode: minmax
+# 轨迹类型加权采样：对转弯/静止样本过采样，缓解数据不平衡
+trajectory_weighted_sampling:
+  enable: True
+  static_threshold: 1.0     # 末端位移 < 1m 判定为静止
+  turn_threshold: 2.0       # 末端横向偏移 > 2m 判定为转弯
+  static_weight: 2.0        # 静止样本采样权重
+  turn_weight: 3.0          # 转弯样本采样权重
+  straight_weight: 1.0      # 直行样本采样权重
+
+# ===== 只需设置以下 3 个参数，其余自动计算 =====
+n_epochs: 40
+n_train: 59778
+per_device_batch_size: 24
+# ================================================
+
+num_gpus: 4
+global_batch_size: ${eval:'${per_device_batch_size} * ${num_gpus}'}
+n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}
+save_model_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
+eval_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 10'}
+eval_size: 1024
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+num_workers: 8
+
+action_lr: 1e-5
+vlm_lr: 1e-5
+action_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+vlm_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+action_weight_decay: 0
+vlm_weight_decay: 0
+max_grad_norm: 1.0
+
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0
+
+# 轨迹辅助loss配置
+trajectory_loss:
+  lambda_smooth: 0.05       # 速度场平滑loss权重：约束相邻点速度场一致性
+  lambda_accel: 0.02       # 加速度loss权重：约束速度场二阶差分，抑制锯齿
+  endpoint_weight_mode: linear  # 远端点加权模式: none / linear
+  endpoint_weight_max: 2.0     # 远端点最大权重（Point0=1.0, Point5=3.0）
+
+cond_steps: 1
+horizon_steps: 6
+action_dim: 2
+proprio_dim: 7
+state_dim: ${proprio_dim}
+
+max_seq_len: 600
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 6144
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: False
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256
+
+pad_token_id: 0
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    hidden_act: "gelu_pytorch_tanh"
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    rope_scaling:
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+      rope_type: "default"
+
+image_token_index: 151655
+video_token_id: 151656
+vision_start_token_id: 151652
+vision_end_token_id: 151653
+vocab_size: 151936
+bos_token_id: 151643
+eos_token_id: 151645

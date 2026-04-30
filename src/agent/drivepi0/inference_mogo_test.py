@@ -59,25 +59,68 @@ class DrivePiZeroInferenceAgent:
         self.model.eval()
         print(f"Using cuda device: {self.device} dtype: {self.dtype}")
         log_allocated_gpu_memory(log, "loading model")
-        
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            cfg.pretrained_model_path, padding_side="right"
-        )
-        self.processor = Qwen3VLProcessor.from_pretrained(
-            cfg.pretrained_model_path,
-            trust_remote_code=True,
-        )
-        # 保存 padding 参数，确保推理时 input_ids 长度与 mask 一致
-        self.max_seq_len = cfg.max_seq_len
-        self.tokenizer_padding = cfg.get("tokenizer_padding", "max_length")
+
+        self.state_only_for_action = cfg.get("state_only_for_action", False)
+        if self.state_only_for_action:
+            self.tokenizer = None
+            self.processor = None
+            self.max_seq_len = None
+            self.tokenizer_padding = None
+            log.info("Strict state-only enabled for inference; skipping Qwen3VLProcessor initialization.")
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                cfg.pretrained_model_path, padding_side="right"
+            )
+            self.processor = Qwen3VLProcessor.from_pretrained(
+                cfg.pretrained_model_path,
+                trust_remote_code=True,
+            )
+            # 保存 padding 参数，确保推理时 input_ids 长度与 mask 一致
+            self.max_seq_len = cfg.max_seq_len
+            self.tokenizer_padding = cfg.get("tokenizer_padding", "max_length")
         # 保存归一化模式（优先从 data 中读取）
         self.norm_mode = cfg.get("norm_mode") or cfg.data.get("norm_mode", "percentile")
         self.nav_onehot = cfg.data.get("nav_onehot", False)
         self.use_his_trajectory = cfg.data.get("use_his_trajectory", False)
+        self.state_frame_index = cfg.data.get("state_frame_index", None)
         print('Agent done')
     
     
     def run(self, data_dict):
+        state = data_dict["state"].unsqueeze(0)
+        batch_size = state.shape[0]
+
+        if self.state_only_for_action:
+            (
+                causal_mask,
+                vlm_position_ids,
+                state_position_ids,
+                action_position_ids,
+            ) = self.model.build_state_only_causal_mask_and_position_ids(
+                batch_size=batch_size,
+                device=state.device,
+                dtype=self.dtype,
+            )
+
+            image_text_proprio_mask, action_mask = (
+                self.model.split_full_mask_into_submasks(causal_mask)
+            )
+
+            inputs = {
+                "input_ids": torch.empty((batch_size, 0), dtype=torch.long),
+                "pixel_values": torch.empty((0,), dtype=self.dtype),
+                "image_grid_thw": torch.empty((0, 3), dtype=torch.long),
+                "vlm_position_ids": vlm_position_ids,
+                "proprio_position_ids": state_position_ids,
+                "action_position_ids": action_position_ids,
+                "proprios": state.to(self.dtype),
+                "image_text_proprio_mask": image_text_proprio_mask,
+                "action_mask": action_mask,
+            }
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            trajectory = self.model.infer_action(**inputs)
+            return trajectory
+
         # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
         cam_names = ['front', 'right', 'left', 'back']
         cam_labels = [
@@ -98,7 +141,6 @@ class DrivePiZeroInferenceAgent:
             image_list.append(img.unsqueeze(1))  # [1, 1, C, H, W]
 
         images = torch.cat(image_list, dim=1)  # [1, 8, C, H, W]
-        state = data_dict["state"].unsqueeze(0)
         texts = [data_dict["language_instruction"]]
 
         batch_size = images.shape[0]
@@ -344,6 +386,7 @@ class DrivePiZeroInferenceAgent:
                         all_data,
                         nav_onehot=self.nav_onehot,
                         use_his_trajectory=getattr(self, 'use_his_trajectory', False),
+                        state_frame_index=self.state_frame_index,
                     )
 
                     data_dict = {}
@@ -616,7 +659,12 @@ if __name__ == '__main__':
                 # 如果是 Python 3 生成的 pickle，不需要 encoding 参数
                 all_data = pickle.load(f)
             normalize = Normalize.get_instance(statistic_path, norm_mode=inference_agent.norm_mode)
-            state = normalize.prepare_state(all_data, nav_onehot=inference_agent.nav_onehot)
+            state = normalize.prepare_state(
+                all_data,
+                nav_onehot=inference_agent.nav_onehot,
+                use_his_trajectory=getattr(inference_agent, "use_his_trajectory", False),
+                state_frame_index=getattr(inference_agent, "state_frame_index", None),
+            )
 
             data_dict = {}
             # 4 cameras x 2 time steps = 8 images（与训练一致）

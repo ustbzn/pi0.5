@@ -1,4 +1,5 @@
 import json
+from typing import Optional
 
 import numpy as np
 import torch
@@ -124,7 +125,13 @@ class Normalize:
             return x[:, np.newaxis]
         return x
 
-    def prepare_state(self, all_data, nav_onehot: bool = False, use_his_trajectory: bool = False):
+    def prepare_state(
+        self,
+        all_data,
+        nav_onehot: bool = False,
+        use_his_trajectory: bool = False,
+        state_frame_index: Optional[int] = None,
+    ):
         # his_speed: (N,3) -> 取前2维 (y,x)，丢弃 dim2（恒为0）
         his_speed = self._ensure_2d(self._normalize_by_mode(
             np.asarray(all_data["his_speed"])[:, :2], self.speed_01, self.speed_99, self.speed_min, self.speed_max
@@ -204,7 +211,18 @@ class Normalize:
         #     )
         #     parts.append(np.array([[target_far_x, target_far_y]], dtype=np.float32))
 
-        state = torch.tensor(np.concatenate(parts, axis=1), dtype=torch.float32)
+        state_np = np.concatenate(parts, axis=1)
+        if state_frame_index is not None:
+            frame_idx = int(state_frame_index)
+            if frame_idx < 0:
+                frame_idx = state_np.shape[0] + frame_idx
+            if frame_idx < 0 or frame_idx >= state_np.shape[0]:
+                raise IndexError(
+                    f"state_frame_index={state_frame_index} out of range for state length {state_np.shape[0]}"
+                )
+            state_np = state_np[frame_idx : frame_idx + 1]
+
+        state = torch.tensor(state_np, dtype=torch.float32)
         return state
 
     def prepare_traj(self, all_data):

@@ -22,6 +22,7 @@ class Bench2DriveDataset:
             norm_mode=config.get("norm_mode", "percentile"),
             nav_onehot=config.get("nav_onehot", False),
             use_his_trajectory=config.get("use_his_trajectory", False),
+            state_frame_index=config.get("state_frame_index", None),
         )
         self.dataset = dataset
 

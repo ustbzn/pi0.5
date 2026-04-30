@@ -474,13 +474,16 @@ class MOGOTrajectoryAnalyzer:
             "accuracies": accuracies,
         }
     
-    def _load_images_from_pkl(self, sample_idx: int) -> Optional[Tuple[dict, Optional[str]]]:
-        """从pkl加载4路摄像头图像（当前帧）和导航指令文本
+    def _load_images_from_pkl(
+        self, sample_idx: int
+    ) -> Optional[Tuple[dict, Optional[str], Optional[np.ndarray]]]:
+        """从pkl加载4路摄像头图像（当前帧）、导航指令文本和历史轨迹
 
         Returns:
             (imgs, nav_text)，其中 imgs 是 {'front': ndarray, 'right': ndarray,
             'left': ndarray, 'back': ndarray}（RGB格式，缺失的摄像头为 None），
-            nav_text 为映射前的导航指令文本（如 "straight"）。
+            nav_text 为映射前的导航指令文本（如 "straight"），his_traj 为
+            历史轨迹，坐标格式与 gt/pred 保持一致，均为 [x, y]。
             加载完全失败时返回 None。
         """
         if self.pkl_root_dir is None:
@@ -562,7 +565,15 @@ class MOGOTrajectoryAnalyzer:
                     nav_id_val = 0
             nav_text = NAVIGATION_ID_TO_TEXT.get(nav_id_val, f"unknown({nav_id_val})")
 
-            return imgs, nav_text
+            his_traj = None
+            his_traj_raw = data.get("his_trajectory")
+            if his_traj_raw is not None:
+                his_traj_arr = np.asarray(his_traj_raw, dtype=np.float32)
+                if his_traj_arr.ndim == 2 and his_traj_arr.shape[-1] == 2:
+                    # 与当前训练 / 统计脚本保持一致：将存储中的 [y, x] 转为 [x, y]
+                    his_traj = np.stack([his_traj_arr[:, 1], his_traj_arr[:, 0]], axis=-1)
+
+            return imgs, nav_text, his_traj
         except Exception as e:
             print(f"加载pkl失败 {pkl_path}: {e}")
             import traceback
@@ -574,7 +585,7 @@ class MOGOTrajectoryAnalyzer:
         result = self._load_images_from_pkl(sample_idx)
         if result is None:
             return None
-        imgs, nav_text = result
+        imgs, nav_text, _ = result
         return imgs['front'], nav_text
     
     def get_scene_info(self, sample_idx: int) -> Optional[Tuple[str, int]]:
@@ -612,7 +623,7 @@ class MOGOTrajectoryAnalyzer:
         result = self._load_images_from_pkl(sample_idx)
         if result is None:
             return
-        imgs, nav_text = result
+        imgs, nav_text, his_traj = result
 
         # 获取场景信息
         scene_info = self.get_scene_info(sample_idx)
@@ -694,34 +705,62 @@ class MOGOTrajectoryAnalyzer:
         origin = np.array([[0.0, 0.0]])
         gt_traj_with_origin = np.concatenate([origin, gt_traj], axis=0)
         pred_traj_with_origin = np.concatenate([origin, pred_traj], axis=0)
+        history_traj_with_origin = None
+        if his_traj is not None and len(his_traj) > 0:
+            history_traj_with_origin = np.concatenate([his_traj, origin], axis=0)
 
         ax_bev.plot(gt_traj_with_origin[:, 1], gt_traj_with_origin[:, 0], "g-", linewidth=2, label="GT")
         ax_bev.plot(pred_traj_with_origin[:, 1], pred_traj_with_origin[:, 0], "r-", linewidth=2, label="Pred")
+        if history_traj_with_origin is not None:
+            ax_bev.plot(
+                history_traj_with_origin[:, 1],
+                history_traj_with_origin[:, 0],
+                color="tab:blue",
+                linestyle="--",
+                linewidth=2,
+                label="History",
+            )
         ax_bev.scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
         ax_bev.scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
+        if his_traj is not None and len(his_traj) > 0:
+            ax_bev.scatter(
+                his_traj[:, 1],
+                his_traj[:, 0],
+                c='tab:blue',
+                s=24,
+                alpha=0.75,
+                label='History Points',
+            )
         ax_bev.scatter(0, 0, color='blue', s=100, marker='s', label='Start Point', zorder=5)
 
         ax_bev.set_xlabel("Y (right positive)")
         ax_bev.set_ylabel("X (up positive)")
 
-        all_pts = np.concatenate([gt_traj, pred_traj, origin], axis=0)
+        all_pts_list = [gt_traj, pred_traj, origin]
+        if his_traj is not None and len(his_traj) > 0:
+            all_pts_list.append(his_traj)
+        all_pts = np.concatenate(all_pts_list, axis=0)
         x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()
         y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()
         margin_x = max(1.0, 0.1 * (x_max - x_min + 1e-6))
         margin_y = max(1.0, 0.1 * (y_max - y_min + 1e-6))
 
-        def _in_range(lim, data_min, data_max):
-            return not ((data_max < lim[0]) or (data_min > lim[1]))
+        auto_xlim = (y_min - margin_y, y_max + margin_y)
+        auto_ylim = (x_min - margin_x, x_max + margin_x)
 
-        if bev_ylim and _in_range(bev_ylim, y_min, y_max):
-            ax_bev.set_xlim(bev_ylim)
+        # 如果用户传了可视化范围，优先保留该视野，但必要时自动向外扩展，
+        # 避免历史轨迹落在原点后方时被固定窗口裁掉。
+        if bev_ylim:
+            xlim = (min(bev_ylim[0], auto_xlim[0]), max(bev_ylim[1], auto_xlim[1]))
+            ax_bev.set_xlim(xlim)
         else:
-            ax_bev.set_xlim(y_min - margin_y, y_max + margin_y)
+            ax_bev.set_xlim(auto_xlim)
 
-        if bev_xlim and _in_range(bev_xlim, x_min, x_max):
-            ax_bev.set_ylim(bev_xlim)
+        if bev_xlim:
+            ylim = (min(bev_xlim[0], auto_ylim[0]), max(bev_xlim[1], auto_ylim[1]))
+            ax_bev.set_ylim(ylim)
         else:
-            ax_bev.set_ylim(x_min - margin_x, x_max + margin_x)
+            ax_bev.set_ylim(auto_ylim)
 
         ax_bev.set_aspect("equal")
         ax_bev.grid(True, alpha=0.3)
@@ -729,9 +768,20 @@ class MOGOTrajectoryAnalyzer:
         ax_bev.set_title("BEV Trajectory")
 
         # 在 BEV 图右侧展示轨迹坐标数值（文本注释）
+        history_lines = []
+        if his_traj is not None and len(his_traj) > 0:
+            history_lines = [
+                f"{i}: ({his_traj[i, 0]:.2f}, {his_traj[i, 1]:.2f})"
+                for i in range(len(his_traj))
+            ]
         gt_lines = [f"{i}: ({gt_traj[i, 0]:.2f}, {gt_traj[i, 1]:.2f})" for i in range(len(gt_traj))]
         pred_lines = [f"{i}: ({pred_traj[i, 0]:.2f}, {pred_traj[i, 1]:.2f})" for i in range(len(pred_traj))]
-        coords_text = "GT:\n" + "\n".join(gt_lines) + "\n\nPred:\n" + "\n".join(pred_lines)
+        coords_sections = []
+        if history_lines:
+            coords_sections.append("History:\n" + "\n".join(history_lines))
+        coords_sections.append("GT:\n" + "\n".join(gt_lines))
+        coords_sections.append("Pred:\n" + "\n".join(pred_lines))
+        coords_text = "\n\n".join(coords_sections)
         ax_bev.text(1.02, 1.0, coords_text, ha='left', va='top',
                     transform=ax_bev.transAxes, fontsize=6,
                     bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
@@ -1021,4 +1071,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

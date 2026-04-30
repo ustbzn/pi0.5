@@ -75,7 +75,17 @@ def decode_path_value(value):
 
 
 class TorchDataset(Dataset):
-    def __init__(self, data_path: str, statistics_path: str, use_fixed_images: bool, num_of_action_experts: int, norm_mode: str = "percentile", nav_onehot: bool = False, use_his_trajectory: bool = False):
+    def __init__(
+        self,
+        data_path: str,
+        statistics_path: str,
+        use_fixed_images: bool,
+        num_of_action_experts: int,
+        norm_mode: str = "percentile",
+        nav_onehot: bool = False,
+        use_his_trajectory: bool = False,
+        state_frame_index: Optional[int] = None,
+    ):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
         self.statistics_path = statistics_path
@@ -84,6 +94,7 @@ class TorchDataset(Dataset):
         self.norm_mode = norm_mode
         self.nav_onehot = nav_onehot
         self.use_his_trajectory = use_his_trajectory
+        self.state_frame_index = state_frame_index
         self.list_data_dict = [f for f in os.listdir(self.data_path) if f.endswith('.pkl')]
 
     def __len__(self):
@@ -177,6 +188,7 @@ class TorchDataset(Dataset):
                 all_data,
                 nav_onehot=self.nav_onehot,
                 use_his_trajectory=self.use_his_trajectory,
+                state_frame_index=self.state_frame_index,
             )
             data_dict['state'] = state
 
@@ -245,7 +257,19 @@ class TorchDataset(Dataset):
         return data_dict
 
 
-def prepare_b2d_dataset(work_dir: str, statistics_path: str, use_fixed_images: bool, num_of_action_experts: int, split: Optional[str] = None, dynamic_dir_name: str = 'b2d_dynamic_camera', fixed_dir_name: str = 'b2d_fixed_camera', norm_mode: str = "percentile", nav_onehot: bool = False, use_his_trajectory: bool = False):
+def prepare_b2d_dataset(
+    work_dir: str,
+    statistics_path: str,
+    use_fixed_images: bool,
+    num_of_action_experts: int,
+    split: Optional[str] = None,
+    dynamic_dir_name: str = 'b2d_dynamic_camera',
+    fixed_dir_name: str = 'b2d_fixed_camera',
+    norm_mode: str = "percentile",
+    nav_onehot: bool = False,
+    use_his_trajectory: bool = False,
+    state_frame_index: Optional[int] = None,
+):
     if use_fixed_images:
         data_path = os.path.join(work_dir, fixed_dir_name)
         return TorchDataset(
@@ -256,6 +280,7 @@ def prepare_b2d_dataset(work_dir: str, statistics_path: str, use_fixed_images: b
             norm_mode=norm_mode,
             nav_onehot=nav_onehot,
             use_his_trajectory=use_his_trajectory,
+            state_frame_index=state_frame_index,
         )
     data_path = os.path.join(work_dir, dynamic_dir_name)
     if split == 'train':
@@ -268,6 +293,7 @@ def prepare_b2d_dataset(work_dir: str, statistics_path: str, use_fixed_images: b
             norm_mode=norm_mode,
             nav_onehot=nav_onehot,
             use_his_trajectory=use_his_trajectory,
+            state_frame_index=state_frame_index,
         )
     if split == 'val':
         val_data_path = os.path.join(data_path, 'val')
@@ -279,5 +305,6 @@ def prepare_b2d_dataset(work_dir: str, statistics_path: str, use_fixed_images: b
             norm_mode=norm_mode,
             nav_onehot=nav_onehot,
             use_his_trajectory=use_his_trajectory,
+            state_frame_index=state_frame_index,
         )
     raise ValueError("split type must be 'train' or 'val'")

@@ -192,7 +192,8 @@ class DrivePiZeroTrainAgent:
         # optimizer - trajectory only: 0.315B (0.333B with adaLN and time_dim=256),
         # rest: 2.291B (0.109B with lora rank 64, 0.055B with rank 32)
         self.train_vlm = cfg.train_vlm
-        self.trained_parameters = model.action_expert_parameters
+        self.action_expert_params = model.action_expert_parameters
+        self.trained_parameters = list(self.action_expert_params)
         self.action_optimizer = bnb.optim.AdamW8bit(
             model.action_expert_parameters,
             lr=cfg.action_lr,
@@ -210,11 +211,13 @@ class DrivePiZeroTrainAgent:
         log.info(
             f"Number of trained parameters (Trajectory): {get_num_params_in_billions(self.action_optimizer):.3f}B"
         )
+        self.vlm_trained_params = []
         if self.train_vlm:
             if cfg.lora:
                 vlm_trained_parameters = model.lora_trainable_vlm_parameters
             else:
                 vlm_trained_parameters = model.trainable_vlm_parameters
+            self.vlm_trained_params = vlm_trained_parameters
             self.trained_parameters += vlm_trained_parameters
             self.vlm_optimizer = bnb.optim.AdamW8bit(
                 vlm_trained_parameters,
@@ -373,11 +376,16 @@ class DrivePiZeroTrainAgent:
                     normalized_loss = loss_train / self.grad_accumulation_steps
                     normalized_loss.backward()  # gradients synced
 
-                    # step
+                    # step - 分别裁剪 action 和 VLM 参数的梯度
                     torch.nn.utils.clip_grad_norm_(
-                        self.trained_parameters,
+                        self.action_expert_params,
                         max_norm=self.max_grad_norm,
                     )
+                    if self.train_vlm:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.vlm_trained_params,
+                            max_norm=self.max_grad_norm,
+                        )
                     self.action_optimizer.step()
                     self.action_lr_scheduler.step()
                     if self.train_vlm:

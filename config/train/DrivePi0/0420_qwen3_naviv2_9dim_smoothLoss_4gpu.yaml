@@ -103,7 +103,7 @@ eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
 num_workers: 8
 # 学习率 — LoRA 可用更高的 VLM 学习率
 action_lr: 1e-5
-vlm_lr: 2e-4
+vlm_lr: 1e-5
 action_lr_scheduler:
   first_cycle_steps: ${n_updates} # n_updates
   min_lr: 1e-8

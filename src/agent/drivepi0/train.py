@@ -358,7 +358,9 @@ class DrivePiZeroTrainAgent:
         # optimizer - trajectory only: 0.315B (0.333B with adaLN and time_dim=256),
         # rest: 2.291B (0.109B with lora rank 64, 0.055B with rank 32)
         self.train_vlm = cfg.train_vlm
-        self.trained_parameters = model.action_expert_parameters
+        self.state_only_for_action = cfg.get("state_only_for_action", False)
+        self.action_expert_params = model.action_expert_parameters
+        self.trained_parameters = list(self.action_expert_params)
         self.action_optimizer = bnb.optim.AdamW8bit(
             model.action_expert_parameters,
             lr=cfg.action_lr,
@@ -376,11 +378,13 @@ class DrivePiZeroTrainAgent:
         log.info(
             f"Number of trained parameters (Trajectory): {get_num_params_in_billions(self.action_optimizer):.3f}B"
         )
+        self.vlm_trained_params = []
         if self.train_vlm:
             if cfg.lora:
                 vlm_trained_parameters = model.lora_trainable_vlm_parameters
             else:
                 vlm_trained_parameters = model.trainable_vlm_parameters
+            self.vlm_trained_params = vlm_trained_parameters
             self.trained_parameters += vlm_trained_parameters
             self.vlm_optimizer = bnb.optim.AdamW8bit(
                 vlm_trained_parameters,
@@ -417,26 +421,33 @@ class DrivePiZeroTrainAgent:
             self.flow_t_max = 1 - cfg.get("flow_sig_min", 0.001)
             self.flow_beta_dist = torch.distributions.Beta(flow_alpha, flow_beta)
 
-        # processor --- assume paligemma for now
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            cfg.pretrained_model_path, 
-            trust_remote_code=True,
-            padding_side="right"
-        )
+        if self.state_only_for_action:
+            self.tokenizer = None
+            self.processor = None
+            self.processor_padding = None
+            self.processor_max_length = None
+            self.image_token_id = None
+            log.info("Strict state-only enabled; skipping Qwen3VLProcessor initialization.")
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                cfg.pretrained_model_path,
+                trust_remote_code=True,
+                padding_side="right",
+            )
 
-        self.processor = Qwen3VLProcessor.from_pretrained(
-            cfg.pretrained_model_path,
-            trust_remote_code=True,
-        )
-        # 单独保存，供调用时使用
-        self.processor_padding = cfg.tokenizer_padding
-        self.processor_max_length = cfg.max_seq_len
-        self.image_token_id = self.processor.image_token_id
-        print(f"image_token_id: {self.image_token_id}")
-        # 验证聊天模板正常
-        test_msg = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "test"}]}]
-        test_text = self.processor.apply_chat_template(test_msg, tokenize=False, add_generation_prompt=True)
-        print(f"Chat template test: {test_text[:100]}...")
+            self.processor = Qwen3VLProcessor.from_pretrained(
+                cfg.pretrained_model_path,
+                trust_remote_code=True,
+            )
+            # 单独保存，供调用时使用
+            self.processor_padding = cfg.tokenizer_padding
+            self.processor_max_length = cfg.max_seq_len
+            self.image_token_id = self.processor.image_token_id
+            print(f"image_token_id: {self.image_token_id}")
+            # 验证聊天模板正常
+            test_msg = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "test"}]}]
+            test_text = self.processor.apply_chat_template(test_msg, tokenize=False, add_generation_prompt=True)
+            print(f"Chat template test: {test_text[:100]}...")
         print('agent done')
 
     def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
@@ -468,6 +479,49 @@ class DrivePiZeroTrainAgent:
         self.model.train()
 
         def preprocess_batch(batch, split_mask: bool, sample_fm_time: bool):
+            state = batch["state"]
+            trajectory = batch["trajectory"].squeeze(1)
+            texts = batch["language_instruction"]
+
+            if self.state_only_for_action:
+                batch_size = state.shape[0]
+                (
+                    causal_mask,
+                    vlm_position_ids,
+                    state_position_ids,
+                    action_position_ids,
+                ) = model.build_state_only_causal_mask_and_position_ids(
+                    batch_size=batch_size,
+                    device=state.device,
+                    dtype=self.dtype,
+                )
+
+                inputs = {
+                    "input_ids": torch.empty((batch_size, 0), dtype=torch.long),
+                    "pixel_values": torch.empty((0,), dtype=self.dtype),
+                    "image_grid_thw": torch.empty((0, 3), dtype=torch.long),
+                    "vlm_position_ids": vlm_position_ids,
+                    "proprio_position_ids": state_position_ids,
+                    "action_position_ids": action_position_ids,
+                    "proprios": state.to(self.dtype),
+                    "actions": trajectory.to(self.dtype),
+                }
+
+                if split_mask:
+                    state_mask, action_mask = model.split_full_mask_into_submasks(
+                        causal_mask
+                    )
+                    inputs["image_text_proprio_mask"] = state_mask
+                    inputs["action_mask"] = action_mask
+                else:
+                    inputs["causal_mask"] = causal_mask
+
+                if sample_fm_time:
+                    inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
+
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                return inputs
+
             # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
             cam_names = ['front', 'right', 'left', 'back']
             # 图像语义标签：与 image_list 顺序严格对应
@@ -490,10 +544,6 @@ class DrivePiZeroTrainAgent:
             images = torch.cat(image_list, dim=1)  # [B, 8, C, H, W]
             batch_size = images.shape[0]
             num_images_per_sample = images.shape[1]  # 8
-
-            state = batch["state"]  # [B, 5, 10]
-            trajectory = batch["trajectory"].squeeze(1)  # [B, 7, 2]
-            texts = batch["language_instruction"]
 
             # convert to PIL images for Qwen3VLProcessor
             pil_images = []
@@ -567,7 +617,7 @@ class DrivePiZeroTrainAgent:
 
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             return inputs
-    
+
         epoch = 0
         while 1:
             # ---- 每个 epoch 开始时更新 sampler 的 epoch ----
@@ -604,11 +654,16 @@ class DrivePiZeroTrainAgent:
                     normalized_loss = loss_train / self.grad_accumulation_steps
                     normalized_loss.backward()  # gradients synced
 
-                    # step
+                    # step - 分别裁剪 action 和 VLM 参数的梯度
                     torch.nn.utils.clip_grad_norm_(
-                        self.trained_parameters,
+                        self.action_expert_params,
                         max_norm=self.max_grad_norm,
                     )
+                    if self.train_vlm:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.vlm_trained_params,
+                            max_norm=self.max_grad_norm,
+                        )
                     self.action_optimizer.step()
                     self.action_lr_scheduler.step()
                     if self.train_vlm:

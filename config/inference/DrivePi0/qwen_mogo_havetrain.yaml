@@ -18,7 +18,7 @@ lora: False
 lora_r: 32
 lora_dropout: 0.0
 pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct  # You need to set path
-checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo/logs/train/drive-pi0/2026-04-15_16-37_mogo_naviv2_9dim_databalanced/checkpoint/step2360.pt # You need to set path
+checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo/logs/train/drive-pi0/2026-04-22_16-14_mogo_naviv2_9dim_smoothLoss_noHisTraj_4gpu/checkpoint/step24920.pt # You need to set path
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: minmax
 
@@ -31,7 +31,7 @@ data:
   num_of_action_experts: 13 # useless in drive-pi0
   shuffle_buffer_size: 200000
   norm_mode: ${norm_mode}
-  use_his_trajectory: True
+  use_his_trajectory: False
   nav_onehot: False
 
 
@@ -50,7 +50,7 @@ cond_steps: 5
 horizon_steps: 6
 
 action_dim: 2 # EEF_POS
-proprio_dim: 9  # his_speed(2) + his_acceleration(2) + his_angular_velocity(1) + his_theta(1) + his_trajectory(2) + navigation_id(1) = 9
+proprio_dim: 7  # his_speed(2) + his_acceleration(2) + his_angular_velocity(1) + his_theta(1) + his_trajectory(2) + navigation_id(1) = 9
 state_dim: ${proprio_dim}
 # 参数更改
 max_seq_len: 600  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600
@@ -64,7 +64,7 @@ mixture:
     use_final_norm: False
     cache: True
     use_quantize: ${quantize}
-    use_lora: ${lora}
+    use_lora: False  # VLM LoRA 通过 inject_lora 注入，此处保持 False
     adaptive_mode:  # not applicable for qwen3-vl
   proprio:
     hidden_size: 1024

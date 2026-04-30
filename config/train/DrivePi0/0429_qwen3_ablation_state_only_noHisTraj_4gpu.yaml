@@ -1,0 +1,199 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo  # You need to set path
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_naviv2_9dim_ablation_state_only_noHisTraj_4gpu
+log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
+
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct   # You need to set path
+load_pretrained_weights: True
+
+# 模式 3: 从已训练的 checkpoint 进行 LoRA 微调
+# resume_checkpoint_path:
+finetune_checkpoint_path: 
+resume_checkpoint_path:
+
+train_vlm: False
+action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
+use_torch_compile: True
+use_bf16: True
+use_amp: True
+quantize: False
+
+# ===== 严格 state-only 消融 =====
+# 说明：此配置依赖 docs/strict_state_only_ablation_implementation.md 中的代码修改
+state_only_for_action: True
+mask_vlm_for_action: False
+
+# ===== LoRA 配置 =====
+lora: False
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.05
+lora_vlm: False
+lora_vlm_mlp: False
+lora_vision: False
+lora_vision_mlp: False
+lora_vision_merger: False
+
+data:
+  train:
+    statistics_path: ${data.train.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+  val:
+    statistics_path: ${data.val.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+
+swanlab:
+  enable: True
+  project: DriveMoE_Qwen3
+  experiment_name: ${run_name}
+  mode: cloud
+  description: null
+  entity: null
+
+log_freq: 16
+norm_mode: minmax
+
+trajectory_weighted_sampling:
+  enable: True
+  static_threshold: 1.0
+  turn_threshold: 2.0
+  static_weight: 2.0
+  turn_weight: 3.0
+  straight_weight: 1.0
+
+n_epochs: 40
+n_train: 59778
+per_device_batch_size: 24
+
+num_gpus: 4
+global_batch_size: ${eval:'${per_device_batch_size} * ${num_gpus}'}
+n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}
+save_model_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
+eval_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 10'}
+eval_size: 1024
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+num_workers: 8
+
+action_lr: 1e-5
+vlm_lr: 1e-5
+action_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+vlm_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+action_weight_decay: 0
+vlm_weight_decay: 0
+max_grad_norm: 1.0
+
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0
+
+trajectory_loss:
+  lambda_smooth: 0.05
+  lambda_accel: 0.02
+  endpoint_weight_mode: linear
+  endpoint_weight_max: 2.0
+
+cond_steps: 5
+horizon_steps: 6
+action_dim: 2
+proprio_dim: 7  # his_speed(2) + his_acceleration(2) + his_angular_velocity(1) + his_theta(1) + navigation_id(1) = 7
+state_dim: ${proprio_dim}
+
+# 严格 state-only 模式下，这些字段会被保留但在训练前向中不再实际使用
+max_seq_len: 600
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 6144
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: False
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256
+
+pad_token_id: 0
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    hidden_act: "gelu_pytorch_tanh"
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    rope_scaling:
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+      rope_type: "default"
+
+image_token_index: 151655
+video_token_id: 151656
+vision_start_token_id: 151652
+vision_end_token_id: 151653
+vocab_size: 151936
+bos_token_id: 151643
+eos_token_id: 151645
