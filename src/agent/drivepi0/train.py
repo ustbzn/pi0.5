@@ -20,7 +20,7 @@ import swanlab
 from src.agent.dataset import Bench2DriveDataset
 from src.model.DrivePi0.drivepi0 import DrivePiZero
 from src.model.DrivePi0.processing import VLAProcessor
-from src.utils.metric import get_action_accuracy
+from src.utils.metric import get_action_accuracy, get_bucketed_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
 from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_billions
 
@@ -277,6 +277,9 @@ class DrivePiZeroTrainAgent:
                 static_weight=traj_sampling_cfg.get("static_weight", 2.0),
                 turn_weight=traj_sampling_cfg.get("turn_weight", 3.0),
                 straight_weight=traj_sampling_cfg.get("straight_weight", 1.0),
+                # 方案 D: hard case 加权
+                hard_case_weight_path=traj_sampling_cfg.get("hard_case_weight_path", None),
+                hard_case_alpha=traj_sampling_cfg.get("hard_case_alpha", 1.0),
             )
             log.info(f"Trajectory type distribution: {stats}")
             log.info(
@@ -770,6 +773,23 @@ class DrivePiZeroTrainAgent:
                 inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
 
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            # --- 方案 A: 辅助标签通过 model._aux_labels 传递 ---
+            # 不放入 inputs，不修改 forward 签名，避免与 DDP/torch.compile 冲突
+            if (
+                sample_fm_time
+                and hasattr(model, 'enable_aux_loss')
+                and model.enable_aux_loss
+                and "maneuver_cls" in batch
+            ):
+                model._aux_labels = {
+                    "maneuver_cls": batch["maneuver_cls"].long().to(self.device),
+                    "stop_cls": batch["stop_cls"].long().to(self.device),
+                    "endpoint": batch["endpoint"].to(self.device).to(self.dtype),
+                    "progress": batch["progress"].to(self.device).to(self.dtype),
+                    "curvature": batch["curvature"].to(self.device).to(self.dtype),
+                }
+
             return inputs
 
         epoch = 0
@@ -862,8 +882,13 @@ class DrivePiZeroTrainAgent:
                     try:
                         with torch.no_grad():
                             for map_mode in self.eval_map_modes:
+                                from collections import defaultdict
+
                                 repeat_accuracies = []
                                 repeat_l1_losses = []
+                                bucket_l1_sums = defaultdict(float)
+                                bucket_acc_sums = defaultdict(lambda: defaultdict(float))
+                                bucket_counts = defaultdict(int)
                                 for repeat_idx in range(self.eval_repeats):
                                     eval_accuracy = torch.zeros(
                                         len(self.eval_thresholds),
@@ -889,6 +914,14 @@ class DrivePiZeroTrainAgent:
                                             sample_fm_time=False,
                                         )
                                         gt_trajectory = inputs.pop("actions")
+                                        trajectory_bucket = batch_eval.get(
+                                            "trajectory_bucket",
+                                            None,
+                                        )
+                                        if trajectory_bucket is not None:
+                                            trajectory_bucket = trajectory_bucket.long().to(
+                                                self.device,
+                                            )
                                         eval_seed = (
                                             self.eval_seed
                                             + repeat_idx * 100000
@@ -910,6 +943,26 @@ class DrivePiZeroTrainAgent:
                                             preds,
                                             gt_trajectory,
                                         )
+                                        if trajectory_bucket is not None:
+                                            bucket_results = get_bucketed_action_accuracy(
+                                                gt_trajectory,
+                                                preds,
+                                                trajectory_bucket,
+                                                thresholds=[0.05, 0.1],
+                                            )
+                                            for bname, bmetrics in bucket_results.items():
+                                                count = bmetrics["count"]
+                                                if count <= 0:
+                                                    continue
+                                                bucket_l1_sums[bname] += (
+                                                    bmetrics["l1"] * count
+                                                )
+                                                bucket_counts[bname] += count
+                                                for key, value in bmetrics.items():
+                                                    if key.startswith("acc@"):
+                                                        bucket_acc_sums[bname][key] += (
+                                                            value * count
+                                                        )
                                     actual_eval_batches = max(actual_eval_batches, 1)
                                     eval_accuracy = eval_accuracy / actual_eval_batches
                                     eval_l1_loss = eval_l1_loss / actual_eval_batches
@@ -950,7 +1003,23 @@ class DrivePiZeroTrainAgent:
                                         if l1_stack.shape[0] > 1
                                         else torch.zeros_like(l1_stack[0])
                                     ),
+                                    "bucket": {},
                                 }
+                                for bname in ["straight", "turn", "static", "high_curvature"]:
+                                    count = bucket_counts.get(bname, 0)
+                                    if count <= 0:
+                                        continue
+                                    bucket_metrics = {
+                                        "l1": bucket_l1_sums[bname] / count,
+                                        "count": count,
+                                    }
+                                    for acc_key in sorted(
+                                        bucket_acc_sums.get(bname, {}).keys()
+                                    ):
+                                        bucket_metrics[acc_key] = (
+                                            bucket_acc_sums[bname][acc_key] / count
+                                        )
+                                    eval_results[map_mode]["bucket"][bname] = bucket_metrics
                     finally:
                         self._restore_rng_state(rng_state)
                         self.model.train()
@@ -975,6 +1044,17 @@ class DrivePiZeroTrainAgent:
 
                             log_msg = f"Eval [{map_mode}] | l1 Loss: {l1_msg} | "
                             log_msg += " | ".join(acc_msgs)
+                            for bname, bucket_metrics in result["bucket"].items():
+                                log_msg += (
+                                    f" | {bname}_l1: {bucket_metrics['l1']:.3f}"
+                                )
+                                for acc_key in sorted(bucket_metrics.keys()):
+                                    if not acc_key.startswith("acc@"):
+                                        continue
+                                    log_msg += (
+                                        f" | {bname}_{acc_key}: "
+                                        f"{bucket_metrics[acc_key]:.3f}"
+                                    )
                             log.info(log_msg)
                             eval_metrics_for_log[f"eval/{map_mode}/l1_mean"] = (
                                 result["l1_mean"].item()
@@ -993,6 +1073,18 @@ class DrivePiZeroTrainAgent:
                                 eval_metrics_for_log[
                                     f"eval/{map_mode}/acc_{threshold}_std"
                                 ] = std.item()
+                            for bname, bucket_metrics in result["bucket"].items():
+                                eval_metrics_for_log[f"eval/{map_mode}/{bname}_l1"] = (
+                                    bucket_metrics["l1"]
+                                )
+                                eval_metrics_for_log[f"eval/{map_mode}/{bname}_count"] = (
+                                    bucket_metrics["count"]
+                                )
+                                for acc_key in sorted(bucket_metrics.keys()):
+                                    if acc_key.startswith("acc@"):
+                                        eval_metrics_for_log[
+                                            f"eval/{map_mode}/{bname}_{acc_key}"
+                                        ] = bucket_metrics[acc_key]
 
                         if "normal" in eval_results:
                             normal_result = eval_results["normal"]

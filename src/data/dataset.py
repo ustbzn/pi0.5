@@ -75,6 +75,65 @@ def decode_path_value(value):
     return str(value)
 
 
+def build_aux_targets(all_data):
+    """从 fur_trajectory 自动构造 action-grounded 辅助监督标签。
+
+    生成 5 个辅助目标（方案 A）：
+      1. maneuver_cls:  straight(0) / left(1) / right(2) / stop(3) / u_turn_like(4)
+      2. stop_cls:      non-stop(0) / stop(1)
+      3. endpoint:      future trajectory 末端 (x_end, y_end)
+      4. progress:      总位移 ||fur[-1]||
+      5. curvature:     平均二阶差分范数（转弯程度）
+
+    同时输出用于方案 D 分桶评估的 trajectory_bucket:
+      straight(0) / turn(1) / static(2) / high_curvature(3)
+
+    Args:
+        all_data: 包含 'fur_trajectory' 字段的样本字典，
+                  fur_trajectory shape = [H, 2]，列顺序 [y, x]
+    Returns:
+        dict: 包含上述 5 个辅助标签和 trajectory_bucket
+    """
+    fur = np.asarray(all_data["fur_trajectory"], dtype=np.float32)  # [H, 2], [y, x]
+    final_y, final_x = float(fur[-1, 0]), float(fur[-1, 1])
+    displacement = float(np.sqrt(final_x ** 2 + final_y ** 2))
+
+    # --- curvature: 平均二阶差分范数 ---
+    diffs = fur[1:] - fur[:-1]
+    curvature = float(np.mean(np.linalg.norm(diffs[1:] - diffs[:-1], axis=-1))) if len(fur) >= 3 else 0.0
+
+    # --- maneuver / stop 分类 ---
+    stop = displacement < 1.0
+    if stop:
+        maneuver = 3  # stop
+    elif abs(final_y) > 2.0 and final_y > 0:
+        maneuver = 1  # left
+    elif abs(final_y) > 2.0 and final_y < 0:
+        maneuver = 2  # right
+    else:
+        maneuver = 0  # straight
+
+    # --- trajectory_bucket: 用于方案 D 分桶 eval ---
+    # 0=straight, 1=turn, 2=static, 3=high_curvature
+    if stop:
+        bucket = 2  # static
+    elif abs(final_y) > 2.0:
+        bucket = 1  # turn
+    elif curvature > 0.3:
+        bucket = 3  # high_curvature
+    else:
+        bucket = 0  # straight
+
+    return {
+        "maneuver_cls": maneuver,
+        "stop_cls": int(stop),
+        "endpoint": np.array([final_x, final_y], dtype=np.float32),
+        "progress": np.array([displacement], dtype=np.float32),
+        "curvature": np.array([curvature], dtype=np.float32),
+        "trajectory_bucket": bucket,
+    }
+
+
 class TorchDataset(Dataset):
     def __init__(
         self,
@@ -136,6 +195,8 @@ class TorchDataset(Dataset):
         static_weight: float = 2.0,
         turn_weight: float = 3.0,
         straight_weight: float = 1.0,
+        hard_case_weight_path: str = None,
+        hard_case_alpha: float = 1.0,
     ):
         """根据轨迹运动模式为每个样本计算采样权重。
 
@@ -144,17 +205,36 @@ class TorchDataset(Dataset):
           2. 静止: fur_trajectory 末端总位移 < static_threshold
           3. 直行: 其余
 
+        方案 D 扩展: 如果提供了 hard_case_weight_path（state-only 模型
+        离线推理得到的逐样本 L1 error），则额外乘以
+        (1 + hard_case_alpha * normalized_error)，让 VLM 训练更聚焦
+        state-only 模型做不好的样本。
+
         Args:
             static_threshold: 判定静止的位移阈值 (米)
             turn_threshold:   判定转弯的横向偏移阈值 (米)
             static_weight:    静止样本的采样权重
             turn_weight:      转弯样本的采样权重
             straight_weight:  直行样本的采样权重
+            hard_case_weight_path: 可选，state-only 逐样本 error 的 json 路径
+            hard_case_alpha:  hard case 权重缩放系数
 
         Returns:
             weights: list[float], 与 self.list_data_dict 等长的权重列表
             stats:   dict, 各类别的样本计数
         """
+        # --- 可选: 加载 state-only hard case scores ---
+        hard_scores = {}
+        if hard_case_weight_path and os.path.exists(hard_case_weight_path):
+            with open(hard_case_weight_path, 'r') as f:
+                hard_scores = json.load(f)
+            # 归一化到 [0, 1]
+            if hard_scores:
+                max_score = max(hard_scores.values())
+                min_score = min(hard_scores.values())
+                score_range = max_score - min_score if max_score > min_score else 1.0
+                hard_scores = {k: (v - min_score) / score_range for k, v in hard_scores.items()}
+
         weights = []
         stats = {"straight": 0, "turn": 0, "static": 0}
         for fname in self.list_data_dict:
@@ -169,14 +249,19 @@ class TorchDataset(Dataset):
 
                 # 转弯优先判定（转弯样本位移一般也 > static_threshold）
                 if lateral > turn_threshold:
-                    weights.append(turn_weight)
+                    w = turn_weight
                     stats["turn"] += 1
                 elif displacement < static_threshold:
-                    weights.append(static_weight)
+                    w = static_weight
                     stats["static"] += 1
                 else:
-                    weights.append(straight_weight)
+                    w = straight_weight
                     stats["straight"] += 1
+
+                # 方案 D: 乘以 hard case 加权
+                if fname in hard_scores:
+                    w *= (1.0 + hard_case_alpha * hard_scores[fname])
+                weights.append(w)
             except Exception:
                 weights.append(straight_weight)
                 stats["straight"] += 1
@@ -314,6 +399,11 @@ class TorchDataset(Dataset):
                 hdmap_context += "An HD map bird's-eye view is provided showing lane layout, junctions, and road boundaries. "
             if self.use_hdmap_proprio or self.use_hdmap_cnn:
                 hdmap_context += "Road structure features (lane density, junction proximity, lane boundaries) are encoded in the vehicle state. "
+
+            # --- 方案 A & D: 自动构造辅助监督标签 ---
+            aux = build_aux_targets(all_data)
+            for k, v in aux.items():
+                data_dict[k] = torch.tensor(v)
 
             nav_desc = all_data.get('navigation_command_descreption')
             if nav_desc is not None:
