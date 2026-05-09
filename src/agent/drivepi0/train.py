@@ -20,7 +20,7 @@ import swanlab
 from src.agent.dataset import Bench2DriveDataset
 from src.model.DrivePi0.drivepi0 import DrivePiZero
 from src.model.DrivePi0.processing import VLAProcessor
-from src.utils.metric import get_action_accuracy
+from src.utils.metric import get_action_accuracy, get_bucketed_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
 from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_billions
 
@@ -277,6 +277,9 @@ class DrivePiZeroTrainAgent:
                 static_weight=traj_sampling_cfg.get("static_weight", 2.0),
                 turn_weight=traj_sampling_cfg.get("turn_weight", 3.0),
                 straight_weight=traj_sampling_cfg.get("straight_weight", 1.0),
+                # 方案 D: hard case 加权
+                hard_case_weight_path=traj_sampling_cfg.get("hard_case_weight_path", None),
+                hard_case_alpha=traj_sampling_cfg.get("hard_case_alpha", 1.0),
             )
             log.info(f"Trajectory type distribution: {stats}")
             log.info(
@@ -616,6 +619,18 @@ class DrivePiZeroTrainAgent:
                 inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
 
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            # --- 方案 A: 辅助标签通过 model._aux_labels 传递 ---
+            # 不放入 inputs，不修改 forward 签名，避免与 DDP/torch.compile 冲突
+            if hasattr(model, 'enable_aux_loss') and model.enable_aux_loss and "maneuver_cls" in batch:
+                model._aux_labels = {
+                    "maneuver_cls": batch["maneuver_cls"].long().to(self.device),
+                    "stop_cls": batch["stop_cls"].long().to(self.device),
+                    "endpoint": batch["endpoint"].to(self.device).to(self.dtype),
+                    "progress": batch["progress"].to(self.device).to(self.dtype),
+                    "curvature": batch["curvature"].to(self.device).to(self.dtype),
+                }
+
             return inputs
 
         epoch = 0
@@ -696,6 +711,11 @@ class DrivePiZeroTrainAgent:
                         len(self.eval_thresholds), device=self.device
                     )
                     eval_l1_loss = torch.tensor(0.0, device=self.device)
+                    # --- 方案 D: 分桶 eval 累积器 ---
+                    from collections import defaultdict
+                    bucket_l1_sums = defaultdict(float)
+                    bucket_acc_sums = defaultdict(lambda: defaultdict(float))
+                    bucket_counts = defaultdict(int)
                     if self.main_rank:
                         log.info(
                             f"Running evaluation for {self.per_device_num_eval_batch} batches..."
@@ -713,6 +733,13 @@ class DrivePiZeroTrainAgent:
                                     batch_eval, split_mask=True, sample_fm_time=False
                                 )
                             gt_trajectory = inputs.pop("actions")
+                            # 取出分桶 id 用于 bucketed eval（直接从 batch 取，不经过 inputs）
+                            trajectory_bucket = batch_eval.get("trajectory_bucket", None)
+                            if trajectory_bucket is not None:
+                                trajectory_bucket = trajectory_bucket.long().to(self.device)
+                            # 移除辅助标签（infer_action 不需要）
+                            for aux_key in ["maneuver_cls", "stop_cls", "endpoint", "progress", "curvature", "trajectory_bucket"]:
+                                inputs.pop(aux_key, None)
                             preds = model.infer_action(**inputs)
                             eval_accuracy += get_action_accuracy(
                                 gt_trajectory, preds, self.eval_thresholds
@@ -720,6 +747,19 @@ class DrivePiZeroTrainAgent:
                             eval_l1_loss += torch.nn.functional.l1_loss(
                                 preds, gt_trajectory
                             )
+                            # --- 方案 D: 分桶统计 ---
+                            if trajectory_bucket is not None:
+                                bucket_results = get_bucketed_action_accuracy(
+                                    gt_trajectory, preds, trajectory_bucket,
+                                    thresholds=[0.05, 0.1],
+                                )
+                                for bname, bmetrics in bucket_results.items():
+                                    if bmetrics["count"] > 0:
+                                        bucket_l1_sums[bname] += bmetrics["l1"] * bmetrics["count"]
+                                        bucket_counts[bname] += bmetrics["count"]
+                                        for k, v in bmetrics.items():
+                                            if k.startswith("acc@"):
+                                                bucket_acc_sums[bname][k] += v * bmetrics["count"]
                     actual_eval_batches = max(actual_eval_batches, 1)
                     eval_accuracy = eval_accuracy / actual_eval_batches
                     eval_l1_loss = eval_l1_loss / actual_eval_batches
@@ -741,6 +781,14 @@ class DrivePiZeroTrainAgent:
                                 )
                             ]
                         )
+                        # --- 方案 D: 输出分桶指标 ---
+                        for bname in ["straight", "turn", "static", "high_curvature"]:
+                            if bucket_counts.get(bname, 0) > 0:
+                                bl1 = bucket_l1_sums[bname] / bucket_counts[bname]
+                                log_msg += f" | {bname}_l1: {bl1:.3f}"
+                                for acc_key in sorted(bucket_acc_sums.get(bname, {}).keys()):
+                                    bacc = bucket_acc_sums[bname][acc_key] / bucket_counts[bname]
+                                    log_msg += f" | {bname}_{acc_key}: {bacc:.3f}"
                         log.info(log_msg)
                         self.save_training(cnt_update, cnt_batch)
 
@@ -781,6 +829,12 @@ class DrivePiZeroTrainAgent:
                             }
                         )
                         metrics["eval l1 loss"] = eval_l1_loss.item()
+                        # --- 方案 D: 分桶指标写入 SwanLab ---
+                        for bname in ["straight", "turn", "static", "high_curvature"]:
+                            if bucket_counts.get(bname, 0) > 0:
+                                metrics[f"eval/{bname}_l1"] = bucket_l1_sums[bname] / bucket_counts[bname]
+                                for acc_key in sorted(bucket_acc_sums.get(bname, {}).keys()):
+                                    metrics[f"eval/{bname}_{acc_key}"] = bucket_acc_sums[bname][acc_key] / bucket_counts[bname]
                         new_eval_from_last_log = False
                     # if self.use_wandb:
                     #     # 保持原有的 wandb

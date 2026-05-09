@@ -74,6 +74,42 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self.endpoint_weight_mode = traj_loss_cfg.get("endpoint_weight_mode", "none")
         self.endpoint_weight_max = traj_loss_cfg.get("endpoint_weight_max", 3.0)
 
+        # ===== 方案 A: Action-grounded 辅助监督 heads =====
+        aux_loss_cfg = cfg.get("aux_loss", {})
+        self.enable_aux_loss = aux_loss_cfg.get("enable", False)
+        if self.enable_aux_loss:
+            self.lambda_maneuver = aux_loss_cfg.get("lambda_maneuver", 0.2)
+            self.lambda_stop = aux_loss_cfg.get("lambda_stop", 0.1)
+            self.lambda_endpoint = aux_loss_cfg.get("lambda_endpoint", 0.2)
+            self.lambda_progress = aux_loss_cfg.get("lambda_progress", 0.05)
+            self.lambda_curvature = aux_loss_cfg.get("lambda_curvature", 0.05)
+            # 5 个 head：从 pooled action embedding 预测辅助目标
+            # maneuver: 5 类 (straight/left/right/stop/u_turn_like)
+            self.maneuver_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 5),
+            )
+            # stop: 2 类 (non-stop/stop)
+            self.stop_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 2),
+            )
+            # endpoint: 回归 (x_end, y_end)
+            self.endpoint_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 2),
+            )
+            # progress: 回归总位移
+            self.progress_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 1),
+            )
+            # curvature: 回归转弯程度
+            self.curvature_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 1),
+            )
+
         # text input only
         self.embed_tokens = nn.Embedding(
             cfg.vocab_size,
@@ -160,12 +196,20 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
     @property
     def action_expert_parameters(self):
-        return (
+        params = (
             list(self.action_encoder.parameters())
             + list(self.action_decoder.parameters())
             + list(self.proprio_encoder.parameters())
             + list(self.joint_model.mixtures["action"].parameters())
         )  # note: action and proprio share weights
+        # 方案 A: 辅助 heads 也归入 action expert（跟随 action_lr 训练）
+        if self.enable_aux_loss:
+            params += list(self.maneuver_head.parameters())
+            params += list(self.stop_head.parameters())
+            params += list(self.endpoint_head.parameters())
+            params += list(self.progress_head.parameters())
+            params += list(self.curvature_head.parameters())
+        return params
 
     @property
     def trainable_vlm_parameters(self):
@@ -1060,6 +1104,25 @@ class DrivePiZero(nn.Module, NoSyncBase):
             gt_accel = x1[:, 2:, :] - 2 * x1[:, 1:-1, :] + x1[:, :-2, :]
             accel_loss = torch.mean((traj_accel - gt_accel) ** 2)
             loss = loss + self.lambda_accel * accel_loss
+
+        # ===== 方案 A: Action-grounded 辅助监督 =====
+        # 从 action_embeds 池化后接 5 个辅助 head，给 VLM/action 分支
+        # 提供更直接的规划语义梯度（maneuver/stop/endpoint/progress/curvature）
+        # 辅助标签通过 self._aux_labels 传递（由 train.py 在调用 forward 前设置），
+        # 不修改 forward 签名，避免与 DDP / torch.compile 冲突。
+        if self.enable_aux_loss and hasattr(self, '_aux_labels') and self._aux_labels is not None:
+            import torch.nn.functional as F
+            aux = self._aux_labels
+            pooled_action = action_embeds.mean(dim=1)  # [B, action_hidden_size]
+            aux_loss = (
+                self.lambda_maneuver * F.cross_entropy(self.maneuver_head(pooled_action), aux["maneuver_cls"])
+                + self.lambda_stop * F.cross_entropy(self.stop_head(pooled_action), aux["stop_cls"])
+                + self.lambda_endpoint * F.smooth_l1_loss(self.endpoint_head(pooled_action), aux["endpoint"])
+                + self.lambda_progress * F.smooth_l1_loss(self.progress_head(pooled_action), aux["progress"])
+                + self.lambda_curvature * F.smooth_l1_loss(self.curvature_head(pooled_action), aux["curvature"])
+            )
+            loss = loss + aux_loss
+            self._aux_labels = None  # 用完清除
 
         return loss.to(v_psi.dtype)
 
