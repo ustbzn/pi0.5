@@ -1,6 +1,8 @@
+import json
+from typing import Optional
+
 import numpy as np
 import torch
-import json
 
 
 class Normalize:
@@ -27,59 +29,92 @@ class Normalize:
         return cls._instance
 
     def __init__(self, percentile_path, norm_mode: str = "percentile"):
-        """
-        Args:
-            percentile_path: 统计文件路径（通常是 statistics.json）
-            norm_mode: 归一化模式
-                - 'percentile'
-                - 'percentile_clip'
-                - 'minmax'
-        """
         if hasattr(self, "_initialized") and self._initialized:
             return
 
         self.percentile_path = percentile_path
         self.norm_mode = norm_mode or "percentile"
 
-        # load statistics
         with open(self.percentile_path, "r") as f:
             loaded_data = json.load(f)
 
-        # 分位数参数（原始实现）
-        self.speed_01 = loaded_data["speed"][0]
-        self.speed_99 = loaded_data["speed"][1]
-        self.acceleration_01 = loaded_data["acceleration"][0]
-        self.acceleration_99 = loaded_data["acceleration"][1]
-        self.angular_velocity_01 = loaded_data["angular_velocity"][0]
-        self.angular_velocity_99 = loaded_data["angular_velocity"][1]
-        self.theta_01 = loaded_data["theta"][0]
-        self.theta_99 = loaded_data["theta"][1]
-        self.fur_x_01 = loaded_data["fur_x"][0]
-        self.fur_x_99 = loaded_data["fur_x"][1]
-        self.fur_y_01 = loaded_data["fur_y"][0]
-        self.fur_y_99 = loaded_data["fur_y"][1]
-        self.target_far_x_01 = loaded_data["command_far_x"][0]
-        self.target_far_x_99 = loaded_data["command_far_x"][1]
-        self.target_far_y_01 = loaded_data["command_far_y"][0]
-        self.target_far_y_99 = loaded_data["command_far_y"][1]
+        # 支持新旧两种 statistics.json 格式
+        if "percentile" in loaded_data:
+            pct = loaded_data["percentile"]
+            mm = loaded_data.get("minmax", {})
+        else:
+            pct = loaded_data
+            mm = {}
 
-        # min-max 参数（可选）：若不存在则回退到分位数
-        self.speed_min = loaded_data.get("speed_min", self.speed_01)
-        self.speed_max = loaded_data.get("speed_max", self.speed_99)
-        self.acceleration_min = loaded_data.get("acceleration_min", self.acceleration_01)
-        self.acceleration_max = loaded_data.get("acceleration_max", self.acceleration_99)
-        self.angular_velocity_min = loaded_data.get("angular_velocity_min", self.angular_velocity_01)
-        self.angular_velocity_max = loaded_data.get("angular_velocity_max", self.angular_velocity_99)
-        self.theta_min = loaded_data.get("theta_min", self.theta_01)
-        self.theta_max = loaded_data.get("theta_max", self.theta_99)
-        self.fur_x_min = loaded_data.get("fur_x_min", self.fur_x_01)
-        self.fur_x_max = loaded_data.get("fur_x_max", self.fur_x_99)
-        self.fur_y_min = loaded_data.get("fur_y_min", self.fur_y_01)
-        self.fur_y_max = loaded_data.get("fur_y_max", self.fur_y_99)
-        self.target_far_x_min = loaded_data.get("command_far_x_min", self.target_far_x_01)
-        self.target_far_x_max = loaded_data.get("command_far_x_max", self.target_far_x_99)
-        self.target_far_y_min = loaded_data.get("command_far_y_min", self.target_far_y_01)
-        self.target_far_y_max = loaded_data.get("command_far_y_max", self.target_far_y_99)
+        # 分位数参数（原始实现）
+        self.speed_01 = pct["speed"][0]
+        self.speed_99 = pct["speed"][1]
+        self.acceleration_01 = pct["acceleration"][0]
+        self.acceleration_99 = pct["acceleration"][1]
+        self.angular_velocity_01 = pct["angular_velocity"][0]
+        self.angular_velocity_99 = pct["angular_velocity"][1]
+        self.theta_01 = pct["theta"][0]
+        self.theta_99 = pct["theta"][1]
+        self.fur_x_01 = pct["fur_x"][0]
+        self.fur_x_99 = pct["fur_x"][1]
+        self.fur_y_01 = pct["fur_y"][0]
+        self.fur_y_99 = pct["fur_y"][1]
+
+        # 历史轨迹参数（可选）
+        his_x = pct.get("his_x")
+        his_y = pct.get("his_y")
+        self.his_x_01 = his_x[0] if his_x else 0.0
+        self.his_x_99 = his_x[1] if his_x else 1.0
+        self.his_y_01 = his_y[0] if his_y else 0.0
+        self.his_y_99 = his_y[1] if his_y else 1.0
+
+        # navigation_id 参数（可选）
+        nav = pct.get("navigation_id")
+        self.nav_id_01 = nav[0] if nav else 0.0
+        self.nav_id_99 = nav[1] if nav else 2.0
+
+        # command_far 参数（兼容旧格式）
+        if "command_far_x" in pct:
+            self.target_far_x_01 = pct["command_far_x"][0]
+            self.target_far_x_99 = pct["command_far_x"][1]
+            self.target_far_y_01 = pct["command_far_y"][0]
+            self.target_far_y_99 = pct["command_far_y"][1]
+        else:
+            self.target_far_x_01 = 0.0
+            self.target_far_x_99 = 1.0
+            self.target_far_y_01 = 0.0
+            self.target_far_y_99 = 1.0
+
+        # min-max 参数（可选）：支持新旧两种格式
+        def _get_mm(field, idx, fallback_key, fallback_val):
+            v = mm.get(field)
+            if v is not None and len(v) > idx:
+                return v[idx]
+            v2 = loaded_data.get(fallback_key)
+            return v2 if v2 is not None else fallback_val
+
+        self.speed_min = _get_mm("speed", 0, "speed_min", self.speed_01)
+        self.speed_max = _get_mm("speed", 1, "speed_max", self.speed_99)
+        self.acceleration_min = _get_mm("acceleration", 0, "acceleration_min", self.acceleration_01)
+        self.acceleration_max = _get_mm("acceleration", 1, "acceleration_max", self.acceleration_99)
+        self.angular_velocity_min = _get_mm("angular_velocity", 0, "angular_velocity_min", self.angular_velocity_01)
+        self.angular_velocity_max = _get_mm("angular_velocity", 1, "angular_velocity_max", self.angular_velocity_99)
+        self.theta_min = _get_mm("theta", 0, "theta_min", self.theta_01)
+        self.theta_max = _get_mm("theta", 1, "theta_max", self.theta_99)
+        self.fur_x_min = _get_mm("fur_x", 0, "fur_x_min", self.fur_x_01)
+        self.fur_x_max = _get_mm("fur_x", 1, "fur_x_max", self.fur_x_99)
+        self.fur_y_min = _get_mm("fur_y", 0, "fur_y_min", self.fur_y_01)
+        self.fur_y_max = _get_mm("fur_y", 1, "fur_y_max", self.fur_y_99)
+        self.his_x_min = _get_mm("his_x", 0, "his_x_min", self.his_x_01)
+        self.his_x_max = _get_mm("his_x", 1, "his_x_max", self.his_x_99)
+        self.his_y_min = _get_mm("his_y", 0, "his_y_min", self.his_y_01)
+        self.his_y_max = _get_mm("his_y", 1, "his_y_max", self.his_y_99)
+        self.nav_id_min = _get_mm("navigation_id", 0, "navigation_id_min", self.nav_id_01)
+        self.nav_id_max = _get_mm("navigation_id", 1, "navigation_id_max", self.nav_id_99)
+        self.target_far_x_min = _get_mm("command_far_x", 0, "command_far_x_min", self.target_far_x_01)
+        self.target_far_x_max = _get_mm("command_far_x", 1, "command_far_x_max", self.target_far_x_99)
+        self.target_far_y_min = _get_mm("command_far_y", 0, "command_far_y_min", self.target_far_y_01)
+        self.target_far_y_max = _get_mm("command_far_y", 1, "command_far_y_max", self.target_far_y_99)
 
         self._initialized = True
 
@@ -92,96 +127,150 @@ class Normalize:
 
     # -------- 内部工具：按模式选择归一化 / 反归一化 --------
     def _normalize_by_mode(self, x, p01, p99, vmin, vmax):
-        """根据 norm_mode 对单个标量序列做归一化"""
         if self.norm_mode == "percentile":
             return self.standard_normalize(x, p01, p99)
-        elif self.norm_mode == "percentile_clip":
+        if self.norm_mode == "percentile_clip":
             y = self.standard_normalize(x, p01, p99)
             return np.clip(y, -1.0, 1.0)
-        elif self.norm_mode == "minmax":
-            # 如果 min/max 无效（相等），回退到分位数
+        if self.norm_mode == "minmax":
             if np.allclose(vmin, vmax):
                 return self.standard_normalize(x, p01, p99)
             y = 2 * (x - vmin) / (vmax - vmin) - 1
             return np.clip(y, -1.0, 1.0)
-        else:
-            # 未知模式时回退到原始实现
-            return self.standard_normalize(x, p01, p99)
+        return self.standard_normalize(x, p01, p99)
 
     def _denormalize_by_mode(self, x_norm, p01, p99, vmin, vmax):
-        """根据 norm_mode 对单个标量序列做反归一化"""
         if self.norm_mode in ("percentile", "percentile_clip"):
             return self.recover_trajectory(x_norm, p01, p99)
-        elif self.norm_mode == "minmax":
+        if self.norm_mode == "minmax":
             if np.allclose(vmin, vmax):
                 return self.recover_trajectory(x_norm, p01, p99)
             return self.recover_trajectory(x_norm, vmin, vmax)
-        else:
-            return self.recover_trajectory(x_norm, p01, p99)
+        return self.recover_trajectory(x_norm, p01, p99)
+
+    NUM_NAV_CLASSES = 5
+
+    def _nav_id_to_onehot(self, nav_id_array):
+        ids = np.round(nav_id_array).astype(int)
+        ids = np.clip(ids, 0, self.NUM_NAV_CLASSES - 1)
+        onehot = np.zeros((len(ids), self.NUM_NAV_CLASSES), dtype=np.float32)
+        onehot[np.arange(len(ids)), ids] = 1.0
+        return onehot
+
+    @staticmethod
+    def _ensure_2d(x):
+        x = np.asarray(x)
+        if x.ndim == 1:
+            return x[:, np.newaxis]
+        return x
 
     # -------- 对外接口：state / traj / infer_traj --------
-    def prepare_state(self, all_data):
-        """根据当前模式对状态进行归一化"""
-        his_speed = self._normalize_by_mode(
-            all_data["his_speed"], self.speed_01, self.speed_99, self.speed_min, self.speed_max
-        )
-        his_acceleration = self._normalize_by_mode(
-            all_data["his_acceleration"],
+    def prepare_state(
+        self,
+        all_data,
+        nav_onehot: bool = False,
+        use_his_trajectory: bool = False,
+        state_frame_index: Optional[int] = None,
+    ):
+        """根据当前模式对状态进行归一化，支持 nav_onehot / use_his_trajectory / state_frame_index"""
+        # his_speed: (N,3) -> 取前2维 (y,x)，丢弃 dim2（恒为0）
+        his_speed = self._ensure_2d(self._normalize_by_mode(
+            np.asarray(all_data["his_speed"])[:, :2], self.speed_01, self.speed_99, self.speed_min, self.speed_max
+        ))
+        # his_acceleration: (N,3) -> 取前2维 (y,x)，丢弃 dim2
+        his_acceleration = self._ensure_2d(self._normalize_by_mode(
+            np.asarray(all_data["his_acceleration"])[:, :2],
             self.acceleration_01,
             self.acceleration_99,
             self.acceleration_min,
             self.acceleration_max,
-        )
-        his_angular_velocity = self._normalize_by_mode(
-            all_data["his_angular_velocity"],
+        ))
+        # his_angular_velocity: (N,3) -> 仅取 dim2 (yaw)，dim0/dim1 恒为0
+        his_angular_velocity = self._ensure_2d(self._normalize_by_mode(
+            np.asarray(all_data["his_angular_velocity"])[:, 2:3],
             self.angular_velocity_01,
             self.angular_velocity_99,
             self.angular_velocity_min,
             self.angular_velocity_max,
-        )
-        his_theta = self._normalize_by_mode(
-            all_data["his_theta"], self.theta_01, self.theta_99, self.theta_min, self.theta_max
-        )
-        target_far_x = self._normalize_by_mode(
-            all_data["x_command_far"],
-            self.target_far_x_01,
-            self.target_far_x_99,
-            self.target_far_x_min,
-            self.target_far_x_max,
-        )
-        target_far_y = self._normalize_by_mode(
-            all_data["y_command_far"],
-            self.target_far_y_01,
-            self.target_far_y_99,
-            self.target_far_y_min,
-            self.target_far_y_max,
-        )
+        ))
+        his_theta = self._ensure_2d(self._normalize_by_mode(
+            np.asarray(all_data["his_theta"]), self.theta_01, self.theta_99, self.theta_min, self.theta_max
+        ))
 
-        state = torch.tensor(
-            np.concatenate(
-                (
-                    his_speed[:, np.newaxis],
-                    his_acceleration,
-                    his_angular_velocity,
-                    his_theta[:, np.newaxis],
-                    target_far_x[:, np.newaxis],
-                    target_far_y[:, np.newaxis],
-                ),
-                axis=1,
+        parts = [his_speed, his_acceleration, his_angular_velocity, his_theta]
+
+        # 历史轨迹（可选）
+        if use_his_trajectory:
+            his_traj = all_data.get("his_trajectory")
+            # 当前帧原点 (0, 0) 在归一化空间中的值，用于补齐
+            origin_x_norm = float(self._normalize_by_mode(
+                np.array(0.0), self.his_x_01, self.his_x_99, self.his_x_min, self.his_x_max))
+            origin_y_norm = float(self._normalize_by_mode(
+                np.array(0.0), self.his_y_01, self.his_y_99, self.his_y_min, self.his_y_max))
+            if his_traj is not None:
+                his_traj = np.asarray(his_traj, dtype=np.float32)
+                # his_trajectory 存储顺序为 [y, x]，所以 [:,0]=y, [:,1]=x
+                his_y = self._normalize_by_mode(his_traj[:, 0], self.his_y_01, self.his_y_99, self.his_y_min, self.his_y_max)
+                his_x = self._normalize_by_mode(his_traj[:, 1], self.his_x_01, self.his_x_99, self.his_x_min, self.his_x_max)
+                his_traj = np.stack([his_x, his_y], axis=1)
+                target_len = his_theta.shape[0]
+                if his_traj.shape[0] < target_len:
+                    pad_len = target_len - his_traj.shape[0]
+                    pad = np.full((pad_len, 2), [origin_x_norm, origin_y_norm], dtype=np.float32)
+                    his_traj = np.concatenate([his_traj, pad], axis=0)
+                elif his_traj.shape[0] > target_len:
+                    his_traj = his_traj[-target_len:]
+                parts.append(his_traj)
+            else:
+                parts.append(np.full((his_theta.shape[0], 2), [origin_x_norm, origin_y_norm], dtype=np.float32))
+
+        # navigation_id（可选）
+        if nav_onehot and "navigation_id" in all_data:
+            parts.append(self._nav_id_to_onehot(np.asarray(all_data["navigation_id"])))
+        elif "navigation_id" in all_data:
+            navigation_id = self._normalize_by_mode(
+                np.asarray(all_data["navigation_id"]),
+                self.nav_id_01,
+                self.nav_id_99,
+                self.nav_id_min,
+                self.nav_id_max,
             )
-        )
+            parts.append(self._ensure_2d(navigation_id))
+
+        state_np = np.concatenate(parts, axis=1)
+
+        # state_frame_index: 只取单帧
+        if state_frame_index is not None:
+            frame_idx = int(state_frame_index)
+            if frame_idx < 0:
+                frame_idx = state_np.shape[0] + frame_idx
+            if frame_idx < 0 or frame_idx >= state_np.shape[0]:
+                raise IndexError(
+                    f"state_frame_index={state_frame_index} out of range for state length {state_np.shape[0]}"
+                )
+            state_np = state_np[frame_idx : frame_idx + 1]
+
+        state = torch.tensor(state_np, dtype=torch.float32)
         return state
 
     def prepare_traj(self, all_data):
-        """根据当前模式对 fur_x / fur_y 进行归一化"""
+        """根据当前模式对 fur_trajectory / fur_x / fur_y 进行归一化"""
+        if "fur_trajectory" in all_data:
+            fur = np.asarray(all_data["fur_trajectory"], dtype=np.float32)
+            # fur_trajectory 存储顺序为 [y, x]，所以 [:,0]=y, [:,1]=x
+            fur_y = self._normalize_by_mode(fur[:, 0], self.fur_y_01, self.fur_y_99, self.fur_y_min, self.fur_y_max)
+            fur_x = self._normalize_by_mode(fur[:, 1], self.fur_x_01, self.fur_x_99, self.fur_x_min, self.fur_x_max)
+            trajectory = torch.tensor(np.stack([fur_x, fur_y], axis=1), dtype=torch.float32)
+            return trajectory
+
         fur_x = self._normalize_by_mode(
-            all_data["fur_x"], self.fur_x_01, self.fur_x_99, self.fur_x_min, self.fur_x_max
+            np.asarray(all_data["fur_x"]), self.fur_x_01, self.fur_x_99, self.fur_x_min, self.fur_x_max
         )
         fur_y = self._normalize_by_mode(
-            all_data["fur_y"], self.fur_y_01, self.fur_y_99, self.fur_y_min, self.fur_y_max
+            np.asarray(all_data["fur_y"]), self.fur_y_01, self.fur_y_99, self.fur_y_min, self.fur_y_max
         )
         trajectory = torch.tensor(
-            np.concatenate((fur_x[:, :, np.newaxis], fur_y[:, :, np.newaxis]), axis=2)
+            np.concatenate((fur_x[:, :, np.newaxis], fur_y[:, :, np.newaxis]), axis=2), dtype=torch.float32
         )
         return trajectory
 

@@ -1,15 +1,21 @@
 import logging
+import math
 import os
 import random
+import time
 from collections import deque
 
 import bitsandbytes as bnb
 import einops
 import numpy as np
 import torch
+import torch._dynamo  # 必须在模块级别导入，否则在 __init__ 方法内部 import 会导致 torch 被视为局部变量
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from omegaconf import OmegaConf
 from PIL import Image
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data.distributed import DistributedSampler
 from transformers import AutoTokenizer
 
 import swanlab
@@ -17,13 +23,60 @@ import swanlab
 from src.agent.dataset import Bench2DriveDataset
 from src.model.DrivePi0.drivepi0 import DrivePiZero
 from src.model.DrivePi0.processing import VLAProcessor
-from src.utils.metric import get_action_accuracy
+from src.utils.metric import get_action_accuracy, get_bucketed_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
 from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_billions
 
 log = logging.getLogger(__name__)
 
 # os.environ["WANDB__SERVICE_WAIT"] = "300"
+
+
+class DistributedWeightedSampler(torch.utils.data.Sampler):
+    """WeightedRandomSampler + DistributedSampler 的组合版。
+
+    所有 rank 使用相同的 seed+epoch 生成同一份全局采样索引，
+    然后每个 rank 只取属于自己的切片，保证：
+      1) 各 rank 数据互不重叠
+      2) 加权采样逻辑保持不变
+      3) 调用 set_epoch() 后每个 epoch 的数据顺序不同
+    """
+
+    def __init__(self, weights, num_samples, num_replicas=None, rank=None,
+                 replacement=True, seed=0):
+        if num_replicas is None:
+            num_replicas = dist.get_world_size()
+        if rank is None:
+            rank = dist.get_rank()
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.replacement = replacement
+        self.seed = seed
+        self.epoch = 0
+        self.weights = torch.as_tensor(weights, dtype=torch.double)
+        # 向上取整，保证各 rank 样本数相同
+        self.num_samples_per_rank = int(math.ceil(num_samples / self.num_replicas))
+        self.total_size = self.num_samples_per_rank * self.num_replicas
+
+    def __iter__(self):
+        g = torch.Generator()
+        g.manual_seed(self.seed + self.epoch)
+        # 所有 rank 用同一 generator 生成全局索引
+        indices = torch.multinomial(
+            self.weights, self.total_size,
+            replacement=self.replacement, generator=g,
+        ).tolist()
+        # 每个 rank 取间隔为 num_replicas 的子集
+        indices = indices[self.rank::self.num_replicas]
+        assert len(indices) == self.num_samples_per_rank
+        return iter(indices)
+
+    def __len__(self):
+        return self.num_samples_per_rank
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+
 
 class DrivePiZeroTrainAgent:
     def __init__(self, cfg):
@@ -55,17 +108,6 @@ class DrivePiZeroTrainAgent:
         self.main_rank = not self.multi_gpu or global_rank == 0
 
         # logging
-        # self.use_wandb = cfg.get("wandb", False)
-        # if self.use_wandb and self.main_rank:
-        #     wandb.init(
-        #         entity=cfg.wandb.entity,
-        #         project=cfg.wandb.project,
-        #         name=cfg.wandb.run,
-        #         mode="offline",
-        #         config=OmegaConf.to_container(cfg, resolve=True),
-        #         id=self.wandb_id if hasattr(self, "wandb_id") else None,
-        #         resume="allow",  # not using resume_from
-        #     )
         # =========== SwanLab 初始化 ===========
         self.use_swanlab = cfg.get("swanlab", {}).get("enable", False)
         self.swanlab_run = None
@@ -82,7 +124,7 @@ class DrivePiZeroTrainAgent:
                 logdir=swan_log_dir,
             )
             log.info(f"SwanLab log directory set to: {swan_log_dir}")
-        
+
         self.save_model_freq = int(cfg.save_model_freq)
         self.log_freq = cfg.log_freq
         self.log_dir = cfg.log_dir
@@ -101,7 +143,7 @@ class DrivePiZeroTrainAgent:
         if cfg.quantize and not cfg.lora:
             log.warning(
                 "Quantizing VLM but not adding Lora weights, which means the VLM will be fully frozen!"
-            )  # since the weights have requires_grad=False. However, we are not excluding the weights from the optimizer yet!
+            )
         # dtype 处理 (支持 fp16)
         if cfg.get("use_bf16", False):
             self.dtype = torch.bfloat16
@@ -109,11 +151,30 @@ class DrivePiZeroTrainAgent:
             self.dtype = torch.float16
         else:
             self.dtype = torch.float32
-        self.model = DrivePiZero(cfg, use_ddp=self.multi_gpu)
-        if cfg.resume_checkpoint_path:
+
+        # 判断加载模式：
+        #   resume_checkpoint_path → 断点续训（恢复权重+优化器+进度）
+        #   finetune_checkpoint_path → 微调（只加载模型权重，优化器和进度从头开始）
+        #   都没设置 → 首次训练（加载预训练权重）
+        has_resume = bool(cfg.get("resume_checkpoint_path"))
+        has_finetune = bool(cfg.get("finetune_checkpoint_path"))
+        load_pretrained = not has_resume and not has_finetune
+
+        self.model = DrivePiZero(cfg, use_ddp=self.multi_gpu, load_pretrained=load_pretrained)
+        if has_resume:
+            # Resume: inject LoRA first so checkpoint keys match
+            if cfg.lora:
+                self.model.inject_lora(cfg)
             self.load_checkpoint(cfg.resume_checkpoint_path)
+        elif has_finetune:
+            # Finetune: load base weights first, then inject LoRA
+            self._load_model_weights_only(cfg.finetune_checkpoint_path)
+            if cfg.lora:
+                self.model.inject_lora(cfg)
         elif cfg.load_pretrained_weights:
             self.model.load_pretrained_weights()
+            if cfg.lora:
+                self.model.inject_lora(cfg)
         self.model.tie_action_proprio_weights()
         self.model.freeze_unused_weights()
         if cfg.lora:
@@ -126,11 +187,14 @@ class DrivePiZeroTrainAgent:
         if cfg.get(
             "use_torch_compile", True
         ):  # model being compiled in the first batch which takes some time
+            # vision_tower 使用官方实现，内部有 .item() 调用，不能被 compile
+            # 使用 torch._dynamo.disable 标记 vision_tower 的 forward，然后 compile 整个模型
+            self.model.vision_tower.forward = torch._dynamo.disable(self.model.vision_tower.forward)
             self.model = torch.compile(
                 self.model,
-                mode="default",  # "reduce-overhead" speeds up a lot and reduces VRAM usage a lot more, but causes nan loss on L40, maybe issue with cudagraphs or 8-bit optimizer; max-autotune works on H100s, takes a while to compile
-                # backend="inductor", # default: inductor; cudagraphs
+                mode="default",
             )
+            log.info("Compiled full model (vision_tower.forward excluded via dynamo.disable)")
         # modes: https://pytorch.org/docs/main/generated/torch.compile.html
         # backends: https://pytorch.org/docs/stable/torch.compiler.html
         log.info(f"Using cuda device: {self.device}, dtype: {self.dtype}")
@@ -138,14 +202,12 @@ class DrivePiZeroTrainAgent:
             log.info(
                 f"Using {local_world_size} GPUs in each of the {cfg.n_nodes} nodes"
             )
-            import torch.distributed as dist
-            from torch.nn.parallel import DistributedDataParallel as DDP
 
             self.model = DDP(
                 self.model,
                 device_ids=[local_rank],
                 gradient_as_bucket_view=True,
-                static_graph=False,  # didn't see improvement with True
+                static_graph=False,
             )
             model = self.model.module
             dist.barrier()
@@ -161,27 +223,97 @@ class DrivePiZeroTrainAgent:
             cfg.per_device_batch_size * self.grad_accumulation_steps * world_size
         )
 
-        # dataloader --- spawn one for each rank, num_workers=0
-        self.train_dataloader = DataLoader(  # batch: dict with keys 'state', 'trajectory', 'image_front'
-            Bench2DriveDataset(cfg.data.train).dataset,
+        # dataloader --- spawn one for each rank
+        train_dataset = Bench2DriveDataset(cfg.data.train).dataset
+
+        # ---- 构建采样权重 (如果启用了加权采样) ----
+        sample_weights = None
+
+        # 加权采样：平衡 navigation_id 类别分布
+        if cfg.get("nav_weighted_sampling", False):
+            log.info("Building weighted sampler for navigation_id balance...")
+            nav_labels = train_dataset.get_nav_labels()
+            from collections import Counter
+            label_counts = Counter(nav_labels)
+            log.info(f"Navigation label distribution: {dict(sorted(label_counts.items()))}")
+            sample_weights = [1.0 / label_counts[l] for l in nav_labels]
+
+        # 加权采样：平衡轨迹运动模式（静止/转弯/直行）
+        traj_sampling_cfg = cfg.get("trajectory_weighted_sampling", None)
+        if traj_sampling_cfg and traj_sampling_cfg.get("enable", False):
+            log.info("Building weighted sampler for trajectory type balance...")
+            traj_weights, stats = train_dataset.get_trajectory_weights(
+                static_threshold=traj_sampling_cfg.get("static_threshold", 1.0),
+                turn_threshold=traj_sampling_cfg.get("turn_threshold", 2.0),
+                static_weight=traj_sampling_cfg.get("static_weight", 2.0),
+                turn_weight=traj_sampling_cfg.get("turn_weight", 3.0),
+                straight_weight=traj_sampling_cfg.get("straight_weight", 1.0),
+                hard_case_weight_path=traj_sampling_cfg.get("hard_case_weight_path", None),
+                hard_case_alpha=traj_sampling_cfg.get("hard_case_alpha", 1.0),
+            )
+            log.info(f"Trajectory type distribution: {stats}")
+            log.info(
+                f"Sampling weights: straight={traj_sampling_cfg.get('straight_weight', 1.0)}, "
+                f"turn={traj_sampling_cfg.get('turn_weight', 3.0)}, "
+                f"static={traj_sampling_cfg.get('static_weight', 2.0)}"
+            )
+            sample_weights = traj_weights
+
+        # ---- 根据 multi_gpu 和加权采样构建最终 sampler ----
+        if self.multi_gpu:
+            if sample_weights is not None:
+                train_sampler = DistributedWeightedSampler(
+                    weights=sample_weights,
+                    num_samples=len(train_dataset),
+                    replacement=True,
+                    seed=self.seed,
+                )
+                log.info("Using DistributedWeightedSampler for multi-GPU weighted sampling")
+            else:
+                train_sampler = DistributedSampler(
+                    train_dataset,
+                    shuffle=True,
+                    seed=self.seed,
+                )
+                log.info("Using DistributedSampler for multi-GPU training")
+        else:
+            if sample_weights is not None:
+                train_sampler = WeightedRandomSampler(
+                    sample_weights, num_samples=len(sample_weights), replacement=True
+                )
+            else:
+                train_sampler = None
+
+        self.train_sampler = train_sampler
+
+        self.train_dataloader = DataLoader(
+            train_dataset,
             batch_size=cfg.per_device_batch_size,
             pin_memory=True,
-            num_workers=cfg.num_workers
+            num_workers=cfg.num_workers,
+            shuffle=(train_sampler is None),
+            sampler=train_sampler,
         )
 
         self.run_eval = cfg.data.get("val", False)
         if self.run_eval:
-            # use validation split; rebuild iterator each eval to avoid StopIteration
+            val_dataset = Bench2DriveDataset(cfg.data.val).dataset
+            if self.multi_gpu:
+                self.val_sampler = DistributedSampler(
+                    val_dataset, shuffle=False,
+                )
+            else:
+                self.val_sampler = None
             self.val_dataloader = DataLoader(
-                Bench2DriveDataset(cfg.data.val).dataset,
-                    batch_size=cfg.per_device_batch_size,
-                    pin_memory=True,
+                val_dataset,
+                batch_size=cfg.per_device_batch_size,
+                pin_memory=True,
                 num_workers=cfg.num_workers,
+                sampler=self.val_sampler,
             )
             self.eval_thresholds = cfg.eval_thresholds
             self.eval_freq = cfg.eval_freq
-            max_eval_batches = cfg.eval_size // cfg.per_device_batch_size // world_size
-            # cap by available val batches to avoid exhausting the iterator
+            max_eval_batches = max(cfg.eval_size // cfg.per_device_batch_size // world_size, 1)
             self.per_device_num_eval_batch = min(
                 max_eval_batches,
                 len(self.val_dataloader) if len(self.val_dataloader) > 0 else 1,
@@ -191,10 +323,11 @@ class DrivePiZeroTrainAgent:
         log.info(f"Per device batch size: {cfg.per_device_batch_size}")
         log.info(f"Gradient accumulation steps: {self.grad_accumulation_steps}")
 
-        # optimizer - trajectory only: 0.315B (0.333B with adaLN and time_dim=256),
-        # rest: 2.291B (0.109B with lora rank 64, 0.055B with rank 32)
+        # optimizer
         self.train_vlm = cfg.train_vlm
-        self.trained_parameters = model.action_expert_parameters
+        self.state_only_for_action = cfg.get("state_only_for_action", False)
+        self.action_expert_params = model.action_expert_parameters
+        self.trained_parameters = list(self.action_expert_params)
         self.action_optimizer = bnb.optim.AdamW8bit(
             model.action_expert_parameters,
             lr=cfg.action_lr,
@@ -212,11 +345,13 @@ class DrivePiZeroTrainAgent:
         log.info(
             f"Number of trained parameters (Trajectory): {get_num_params_in_billions(self.action_optimizer):.3f}B"
         )
+        self.vlm_trained_params = []
         if self.train_vlm:
             if cfg.lora:
                 vlm_trained_parameters = model.lora_trainable_vlm_parameters
             else:
                 vlm_trained_parameters = model.trainable_vlm_parameters
+            self.vlm_trained_params = vlm_trained_parameters
             self.trained_parameters += vlm_trained_parameters
             self.vlm_optimizer = bnb.optim.AdamW8bit(
                 vlm_trained_parameters,
@@ -237,6 +372,7 @@ class DrivePiZeroTrainAgent:
             )
         if cfg.resume_checkpoint_path:
             self.load_optimizer(cfg.resume_checkpoint_path)
+        # finetune 时不恢复优化器，使用全新的学习率调度
 
         ########### Input processing ###########
 
@@ -252,16 +388,21 @@ class DrivePiZeroTrainAgent:
             self.flow_t_max = 1 - cfg.get("flow_sig_min", 0.001)
             self.flow_beta_dist = torch.distributions.Beta(flow_alpha, flow_beta)
 
-        # processor --- assume paligemma for now
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            cfg.pretrained_model_path, padding_side="right"
-        )
-        self.processor = VLAProcessor(
-            self.tokenizer,
-            num_image_tokens=cfg.vision.config.num_image_tokens,
-            max_seq_len=cfg.max_seq_len,
-            tokenizer_padding=cfg.tokenizer_padding,
-        )
+        # processor --- paligemma
+        if self.state_only_for_action:
+            self.tokenizer = None
+            self.processor = None
+            log.info("Strict state-only enabled; skipping VLAProcessor initialization.")
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                cfg.pretrained_model_path, padding_side="right"
+            )
+            self.processor = VLAProcessor(
+                self.tokenizer,
+                num_image_tokens=cfg.vision.config.num_image_tokens,
+                max_seq_len=cfg.max_seq_len,
+                tokenizer_padding=cfg.tokenizer_padding,
+            )
         print('agent done')
 
     def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
@@ -276,21 +417,63 @@ class DrivePiZeroTrainAgent:
 
     def run(self):
         timer = Timer()
+        train_start_time = time.time()
         cnt_batch = 0 if not hasattr(self, "cnt_batch") else self.cnt_batch
         cnt_update = (
             0 if not hasattr(self, "cnt_update") else self.cnt_update
         )  # resume training if loaded checkpoint
+        cnt_update_start = cnt_update  # record start update for ETA calculation
         loss_train_deque = deque(maxlen=self.grad_accumulation_steps)
         new_eval_from_last_log = False
         if self.multi_gpu:
-            import torch.distributed as dist
-
             model = self.model.module
         else:
             model = self.model
         self.model.train()
 
         def preprocess_batch(batch, split_mask: bool, sample_fm_time: bool):
+            state = batch["state"]
+            trajectory = batch["trajectory"].squeeze(1)
+            texts = batch["language_instruction"]
+
+            if self.state_only_for_action:
+                batch_size = state.shape[0]
+                (
+                    causal_mask,
+                    vlm_position_ids,
+                    state_position_ids,
+                    action_position_ids,
+                ) = model.build_state_only_causal_mask_and_position_ids(
+                    batch_size=batch_size,
+                    device=state.device,
+                    dtype=self.dtype,
+                )
+
+                inputs = {
+                    "input_ids": torch.empty((batch_size, 0), dtype=torch.long),
+                    "pixel_values": torch.empty((0,), dtype=self.dtype),
+                    "vlm_position_ids": vlm_position_ids,
+                    "proprio_position_ids": state_position_ids,
+                    "action_position_ids": action_position_ids,
+                    "proprios": state.to(self.dtype),
+                    "actions": trajectory.to(self.dtype),
+                }
+
+                if split_mask:
+                    state_mask, action_mask = model.split_full_mask_into_submasks(
+                        causal_mask
+                    )
+                    inputs["image_text_proprio_mask"] = state_mask
+                    inputs["action_mask"] = action_mask
+                else:
+                    inputs["causal_mask"] = causal_mask
+
+                if sample_fm_time:
+                    inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
+
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                return inputs
+
             # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
             cam_names = ['front', 'right', 'left', 'back']
             # 图像语义标签：与 image_list 顺序严格对应
@@ -312,17 +495,8 @@ class DrivePiZeroTrainAgent:
 
             images = torch.cat(image_list, dim=1)  # [B, 8, C, H, W]
             batch_size = images.shape[0]
-            num_images_per_sample = images.shape[1]  # 8
 
-            state = batch["state"]  # [B, 5, 10]
-            trajectory = batch["trajectory"].squeeze(1)  # [B, 7, 2]
-            texts = batch["language_instruction"]
-            
-            model_inputs = self.processor(text=texts, images=images)
-            
-            # 验证图像token数量（对应正确调用代码中的验证逻辑）
-            num_image_tokens = (model_inputs["input_ids"] == self.processor.image_token_id).sum().item()
-            # print(f"input_ids 中图像token数量: {num_image_tokens}, pixel_values shape: {model_inputs['pixel_values'].shape}")
+            model_inputs = self.processor(text=texts, images=images, cam_labels=cam_labels)
 
             # build causal mask and position ids for trajectory
             causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
@@ -354,9 +528,26 @@ class DrivePiZeroTrainAgent:
                 inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
 
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+            # --- 方案 A: 辅助标签通过 model._aux_labels 传递 ---
+            if hasattr(model, 'enable_aux_loss') and model.enable_aux_loss and "maneuver_cls" in batch:
+                model._aux_labels = {
+                    "maneuver_cls": batch["maneuver_cls"].long().to(self.device),
+                    "stop_cls": batch["stop_cls"].long().to(self.device),
+                    "endpoint": batch["endpoint"].to(self.device).to(self.dtype),
+                    "progress": batch["progress"].to(self.device).to(self.dtype),
+                    "curvature": batch["curvature"].to(self.device).to(self.dtype),
+                }
+
             return inputs
-    
+
+        epoch = 0
         while 1:
+            # ---- 每个 epoch 开始时更新 sampler 的 epoch ----
+            if self.train_sampler is not None and hasattr(self.train_sampler, 'set_epoch'):
+                self.train_sampler.set_epoch(epoch)
+                log.info(f"Set train sampler epoch to {epoch}")
+
             for batch in self.train_dataloader:
                 '''
                 batch: dict with keys 'state', 'image_{front,right,left,back}', 'image_{front,right,left,back}_time', 'trajectory', 'language_instruction'
@@ -385,11 +576,16 @@ class DrivePiZeroTrainAgent:
                     normalized_loss = loss_train / self.grad_accumulation_steps
                     normalized_loss.backward()  # gradients synced
 
-                    # step
+                    # step - 分别裁剪 action 和 VLM 参数的梯度
                     torch.nn.utils.clip_grad_norm_(
-                        self.trained_parameters,
+                        self.action_expert_params,
                         max_norm=self.max_grad_norm,
                     )
+                    if self.train_vlm:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.vlm_trained_params,
+                            max_norm=self.max_grad_norm,
+                        )
                     self.action_optimizer.step()
                     self.action_lr_scheduler.step()
                     if self.train_vlm:
@@ -422,6 +618,11 @@ class DrivePiZeroTrainAgent:
                         len(self.eval_thresholds), device=self.device
                     )
                     eval_l1_loss = torch.tensor(0.0, device=self.device)
+                    # --- 方案 D: 分桶 eval 累积器 ---
+                    from collections import defaultdict
+                    bucket_l1_sums = defaultdict(float)
+                    bucket_acc_sums = defaultdict(lambda: defaultdict(float))
+                    bucket_counts = defaultdict(int)
                     if self.main_rank:
                         log.info(
                             f"Running evaluation for {self.per_device_num_eval_batch} batches..."
@@ -439,6 +640,13 @@ class DrivePiZeroTrainAgent:
                                     batch_eval, split_mask=True, sample_fm_time=False
                                 )
                             gt_trajectory = inputs.pop("actions")
+                            # 取出分桶 id 用于 bucketed eval
+                            trajectory_bucket = batch_eval.get("trajectory_bucket", None)
+                            if trajectory_bucket is not None:
+                                trajectory_bucket = trajectory_bucket.long().to(self.device)
+                            # 移除辅助标签（infer_action 不需要）
+                            for aux_key in ["maneuver_cls", "stop_cls", "endpoint", "progress", "curvature", "trajectory_bucket"]:
+                                inputs.pop(aux_key, None)
                             preds = model.infer_action(**inputs)
                             eval_accuracy += get_action_accuracy(
                                 gt_trajectory, preds, self.eval_thresholds
@@ -446,15 +654,30 @@ class DrivePiZeroTrainAgent:
                             eval_l1_loss += torch.nn.functional.l1_loss(
                                 preds, gt_trajectory
                             )
+                            # --- 方案 D: 分桶统计 ---
+                            if trajectory_bucket is not None:
+                                bucket_results = get_bucketed_action_accuracy(
+                                    gt_trajectory, preds, trajectory_bucket,
+                                    thresholds=[0.05, 0.1],
+                                )
+                                for bname, bmetrics in bucket_results.items():
+                                    if bmetrics["count"] > 0:
+                                        bucket_l1_sums[bname] += bmetrics["l1"] * bmetrics["count"]
+                                        bucket_counts[bname] += bmetrics["count"]
+                                        for k, v in bmetrics.items():
+                                            if k.startswith("acc@"):
+                                                bucket_acc_sums[bname][k] += v * bmetrics["count"]
                     actual_eval_batches = max(actual_eval_batches, 1)
                     eval_accuracy = eval_accuracy / actual_eval_batches
                     eval_l1_loss = eval_l1_loss / actual_eval_batches
                     self.model.train()
                     if self.multi_gpu:
+                        dist.barrier()
                         dist.all_reduce(eval_accuracy, op=dist.ReduceOp.SUM)
                         dist.all_reduce(eval_l1_loss, op=dist.ReduceOp.SUM)
                         eval_accuracy /= dist.get_world_size()
                         eval_l1_loss /= dist.get_world_size()
+                        eval_accuracy = torch.clamp(eval_accuracy, 0.0, 1.0)
                     if self.main_rank:
                         log_msg = f"Eval | l1 Loss: {eval_l1_loss.item():.3f} | "
                         log_msg += " | ".join(
@@ -465,13 +688,34 @@ class DrivePiZeroTrainAgent:
                                 )
                             ]
                         )
+                        # --- 方案 D: 输出分桶指标 ---
+                        for bname in ["straight", "turn", "static", "high_curvature"]:
+                            if bucket_counts.get(bname, 0) > 0:
+                                bl1 = bucket_l1_sums[bname] / bucket_counts[bname]
+                                log_msg += f" | {bname}_l1: {bl1:.3f}"
+                                for acc_key in sorted(bucket_acc_sums.get(bname, {}).keys()):
+                                    bacc = bucket_acc_sums[bname][acc_key] / bucket_counts[bname]
+                                    log_msg += f" | {bname}_{acc_key}: {bacc:.3f}"
                         log.info(log_msg)
+                        self.save_training(cnt_update, cnt_batch)
 
                 # log loss
                 if self.main_rank and cnt_batch % self.log_freq == 0:
                     loss_train_metric = np.mean(loss_train_deque)
                     peak_vram = torch.cuda.max_memory_reserved(self.gpu_id) / (1024**3)
-                    log_msg = f"Batch {cnt_batch} Update {cnt_update}: t {timer():8.4f} | vram {peak_vram:6.3f} | train loss {loss_train_metric:6.4f} | action lr {self.action_optimizer.param_groups[0]['lr']:10.8f}"
+                    # estimate ETA based on elapsed time since training start
+                    updates_done = cnt_update - cnt_update_start
+                    if updates_done > 0:
+                        elapsed = time.time() - train_start_time
+                        secs_per_update = elapsed / updates_done
+                        remaining_updates = self.n_updates - cnt_update
+                        eta_secs = secs_per_update * remaining_updates
+                        eta_h = int(eta_secs // 3600)
+                        eta_m = int((eta_secs % 3600) // 60)
+                        eta_str = f"{eta_h}h{eta_m:02d}m"
+                    else:
+                        eta_str = "N/A"
+                    log_msg = f"Batch {cnt_batch} Update {cnt_update}: t {timer():8.4f} | vram {peak_vram:6.3f} | train loss {loss_train_metric:6.4f} | action lr {self.action_optimizer.param_groups[0]['lr']:10.8f} | eta {eta_str}"
                     log.info(log_msg)
                     # 构建 metrics 字典
                     metrics = {
@@ -481,7 +725,7 @@ class DrivePiZeroTrainAgent:
                     }
                     if self.train_vlm:
                         metrics["vlm lr"] = self.vlm_optimizer.param_groups[0]["lr"]
-                    
+
                     if new_eval_from_last_log:
                         metrics.update(
                             {
@@ -492,10 +736,13 @@ class DrivePiZeroTrainAgent:
                             }
                         )
                         metrics["eval l1 loss"] = eval_l1_loss.item()
+                        # --- 方案 D: 分桶指标写入 SwanLab ---
+                        for bname in ["straight", "turn", "static", "high_curvature"]:
+                            if bucket_counts.get(bname, 0) > 0:
+                                metrics[f"eval/{bname}_l1"] = bucket_l1_sums[bname] / bucket_counts[bname]
+                                for acc_key in sorted(bucket_acc_sums.get(bname, {}).keys()):
+                                    metrics[f"eval/{bname}_{acc_key}"] = bucket_acc_sums[bname][acc_key] / bucket_counts[bname]
                         new_eval_from_last_log = False
-                    # if self.use_wandb:
-                    #     # 保持原有的 wandb
-                    #     wandb.log(metrics, step=cnt_batch, commit=True)
                     # [新增] SwanLab Log
                     if self.use_swanlab:
                         swanlab.log(metrics, step=cnt_batch)
@@ -504,6 +751,8 @@ class DrivePiZeroTrainAgent:
                 cnt_batch += 1
                 if cnt_update >= self.n_updates:
                     return
+            # ---- 一个 epoch 结束 ----
+            epoch += 1
 
     @log_execution_time()
     def save_training(self, cnt_update, cnt_batch):
@@ -524,7 +773,6 @@ class DrivePiZeroTrainAgent:
             "vlm_lr_scheduler": self.vlm_lr_scheduler.state_dict()
             if self.train_vlm
             else None,
-            # "wandb_id": wandb.run.id if self.use_wandb else None,
         }
         savepath = os.path.join(self.checkpoint_dir, f"step{cnt_update}.pt")
         torch.save(data, savepath)
@@ -537,7 +785,6 @@ class DrivePiZeroTrainAgent:
         data = torch.load(path, weights_only=True, map_location="cpu")
         self.cnt_update = data["cnt_update"]
         self.cnt_batch = data["cnt_batch"]
-        # self.wandb_id = data["wandb_id"]
         # remove "_orig_mod." prefix if saved model was compiled
         data["model"] = {
             k.replace("_orig_mod.", ""): v for k, v in data["model"].items()
@@ -562,4 +809,34 @@ class DrivePiZeroTrainAgent:
             optimizer_to(self.vlm_optimizer, self.device)
             self.vlm_lr_scheduler.load_state_dict(data["vlm_lr_scheduler"])
         log.info(f"Loaded optimizer and scheduler states from {path}")
-        
+
+    @log_execution_time()
+    def _load_model_weights_only(self, path):
+        """Finetune 模式：只加载模型权重，不恢复优化器/调度器/训练计数器"""
+        data = torch.load(path, weights_only=True, map_location="cpu")
+        ckpt = {
+            k.replace("_orig_mod.", ""): v for k, v in data["model"].items()
+        }
+        model_state = self.model.state_dict()
+        filtered = {}
+        skipped = []
+        for k, v in ckpt.items():
+            if k not in model_state:
+                skipped.append(k)
+                continue
+            if model_state[k].shape != v.shape:
+                skipped.append(f"[shape mismatch] {k}")
+                continue
+            filtered[k] = v
+
+        # proprio 因 tie_weights 合并到 action，跳过是正常的
+        real_skipped = [s for s in skipped if "mixtures.proprio" not in s]
+        if real_skipped:
+            log.warning(f"Finetune: skipped {len(real_skipped)} keys: {real_skipped[:5]}")
+
+        missing, _ = self.model.load_state_dict(filtered, strict=False)
+        if missing:
+            log.warning(f"Finetune: {len(missing)} keys missing from checkpoint (using random init)")
+
+        log.info(f"Finetune: loaded {len(filtered)} / {len(model_state)} model weights from {path}")
+        log.info("Optimizer and LR scheduler are freshly initialized (not restored)")

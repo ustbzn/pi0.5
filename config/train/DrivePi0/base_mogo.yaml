@@ -5,8 +5,8 @@ hydra:
     dir: ${log_dir}
 _target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
 
-current_dir: /D2/NXT/vlm/miaobinqi/DriveMoE  # You need to set path
-run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_0109
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi  # You need to set path
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_drivepi_mogo_ablation_state_only_noHisTraj_1frame
 log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
 
 name: drive-pi0
@@ -15,9 +15,10 @@ n_nodes: 1
 seed: 42
 pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/paligemma-3b-pt-224   # You need to set path
 load_pretrained_weights: True
-resume_checkpoint_path: 
+resume_checkpoint_path:
+finetune_checkpoint_path:
 # resume_checkpoint_path: ${current_dir}/checkpoint
-train_vlm: True
+train_vlm: False
 action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
 use_torch_compile: True
 use_bf16: True
@@ -28,28 +29,44 @@ quantize: False
 lora: False
 lora_r: 32
 lora_dropout: 0.05
+# LoRA 细粒度控制
+lora_vlm: ${lora}      # language model attention
+lora_vlm_mlp: False     # language model MLP
+lora_vision: False      # vision tower
+lora_projector: False   # projector
+# state-only 和 mask_vlm 功能开关
+state_only_for_action: False
+mask_vlm_for_action: False
 
 data:
   train:
-    statistics_path: ${current_dir}/${data.train.dynamic_dir}/statistics.json
+    statistics_path: ${data.train.dynamic_dir}/statistics_9dim.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: datasets/mogo-test # 训练集不变
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2 # 训练集不变
     fixed_dir: b2d_fixed_camera
     split: train
     num_of_action_experts: 13 # useless in drive-pi0
     shuffle_buffer_size: 200000
-    norm_mode: ${norm_mode}  # 引用顶层的 norm_mode
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+    state_frame_index: 0
+    nav_onehot: False
+    state_only: ${state_only_for_action}
   val:
-    statistics_path: ${current_dir}/${data.val.dynamic_dir}/statistics.json
+    statistics_path: ${data.val.dynamic_dir}/statistics_9dim.json
     use_fixed_images: False
     work_dir: ${current_dir}
-    dynamic_dir: datasets/mogo-test # 测试集不变
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2 # 测试集不变
     fixed_dir: b2d_fixed_camera
     split: val
     num_of_action_experts: 13 # useless in drive-pi0
     shuffle_buffer_size: 200000
-    norm_mode: ${norm_mode}  # 引用顶层的 norm_mode
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+    state_frame_index: 0
+    nav_onehot: False
+    state_only: ${state_only_for_action}
 
 swanlab:
   enable: True
@@ -65,41 +82,33 @@ swanlab:
 #   run: ${now:%H-%M-%S}_${name}
 
 log_freq: 16
-n_epochs: 15
 # 归一化方法: percentile_clip, percentile, minmax
-norm_mode: percentile
-# 需要修改的参数
-n_train: 480  # total training samples; update when dataset size changes
-# n_updates: 总更新次数 = ceil(训练样本数 / 实际全局batch大小) * epoch数
-# 注意: 实际 global_batch_size 会在训练代码中自动计算 (448 = 4 GPUs * 16 per_device * 7 accumulation)
-# 使用向上取整确保每个epoch至少有一次更新: ceil(480 / 448) * n_epochs = 2 * 15 = 30
-# 或者可以设置更大的值，让模型训练更多步
-n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}  # 向上取整
-# save_model_freq: 每多少个更新保存一次模型
-# 设置为每个epoch保存一次: ceil(n_train / global_batch_size)
-# 如果希望更频繁保存，可以减小这个值
-save_model_freq: ${eval:'(${n_train} + ${global_batch_size} - 1) // ${global_batch_size}'}  # 向上取整，每个epoch保存一次
-eval_freq: 100
-# eval_freq: ${eval:'${n_train} // ${global_batch_size} * 4'}
-eval_size: 20
-eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+norm_mode: minmax
 
-# 需要修改的参数
-# 注意: 实际 global_batch_size = per_device_batch_size * grad_accumulation_steps * num_gpus
-# 如果有4个GPU，每个设备16，建议设置为 64 的倍数 (4 * 16 = 64)
-# 例如: 64, 128, 192, 256, 320, 384, 448, 512 等
-global_batch_size: 64  # 1 GPU * 16 per_device * 7 accumulation = 64
-per_device_batch_size: 16
+# ===== 只需设置以下 3 个参数，其余自动计算 =====
+n_epochs: 40
+n_train: 59778
+per_device_batch_size: 8  # max_seq_len=2180 时 attention 显存约为 seq_len=600 时的 13 倍，需大幅减小
+# ================================================
+
+num_gpus: 8
+global_batch_size: ${eval:'${per_device_batch_size} * ${num_gpus}'}
+n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}
+save_model_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
+eval_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 10'}
+eval_size: 1024
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
 num_workers: 8
+
 # 学习率
 action_lr: 1e-5
 vlm_lr: 1e-5
 action_lr_scheduler:
-  first_cycle_steps: 10000000 # basically no decaying
+  first_cycle_steps: ${n_updates} # basically no decaying
   min_lr: 1e-8
   warmup_steps: 200 # a bit of warmup
 vlm_lr_scheduler:
-  first_cycle_steps: 10000000
+  first_cycle_steps: ${n_updates}
   min_lr: 1e-8
   warmup_steps: 200
 action_weight_decay: 0
@@ -111,14 +120,42 @@ flow_sampling: beta
 num_inference_steps: 10
 final_action_clip_value: 1.0  # data normalized in [-1,1]
 
-cond_steps: 5  # 必须与 window.sh 中的 --window_size 参数一致
-horizon_steps: 7  # 必须与 window.sh 中的 --horizon 参数一致
+cond_steps: 1  # 必须与 window.sh 中的 --window_size 参数一致
+horizon_steps: 6  # mogo_dataset_navi_v2 的 trajectory 有 6 个未来点
 action_dim: 2 # EEF_POS
-proprio_dim: 10  # 实际维度: his_speed(1) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + x_command_far(1) + y_command_far(1) = 10
+proprio_dim: 7  # 实际维度: his_speed(2) + his_acceleration(2) + his_angular_velocity(1) + his_theta(1) + navigation_id(1) = 7
 state_dim: ${proprio_dim}
-max_seq_len: 532  # fixed 512 for image + max 20 for text
+max_seq_len: 2180  # 8 images * 256 patches(patch_size=14, 224/14=16, 16*16=256) + cam labels (~48) + text (~25) + 余量
 tokenizer_padding: max_length # instead of truncating to longest
 max_image_text_tokens: ${max_seq_len}
+
+# ===== 加权采样配置 =====
+nav_weighted_sampling: False
+trajectory_weighted_sampling:
+  enable: False
+  static_threshold: 1.0
+  turn_threshold: 2.0
+  static_weight: 2.0
+  turn_weight: 3.0
+  straight_weight: 1.0
+  hard_case_weight_path: null
+  hard_case_alpha: 1.0
+
+# ===== 轨迹辅助损失 =====
+trajectory_loss:
+  lambda_smooth: 0.05
+  lambda_accel: 0.02
+  endpoint_weight_mode: linear  # none or linear
+  endpoint_weight_max: 2.0
+
+# ===== 方案 A: 辅助监督 heads =====
+aux_loss:
+  enable: False
+  lambda_maneuver: 0.2
+  lambda_stop: 0.1
+  lambda_endpoint: 0.2
+  lambda_progress: 0.05
+  lambda_curvature: 0.05
 
 mixture:
   vlm:   # gemma
@@ -164,7 +201,7 @@ vision:
     patch_size: 14
     layer_norm_eps: 1e-6
     attention_dropout: 0.0
-    num_image_tokens: 512 # 2 images: 256 * 2
+    num_image_tokens: 2048 # 8 images: 256 * 8
     lora:
       r: ${lora_r}
       dropout: ${lora_dropout}

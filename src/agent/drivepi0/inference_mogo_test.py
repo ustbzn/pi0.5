@@ -23,7 +23,7 @@ from transformers import AutoTokenizer
 
 from src.model.DrivePi0.drivepi0 import DrivePiZeroInference
 from src.agent.dataset import Bench2DriveDataset
-from src.model.DrivePi0.processing import VLAProcessor
+from src.model.DrivePi0.processing import VLAProcessor, DEFAULT_CAM_LABELS
 from src.utils.metric import get_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
 
@@ -68,26 +68,26 @@ class DrivePiZeroInferenceAgent:
     
     
     def run(self, data_dict):
-        images_front = data_dict["image_front"]
-        images_front = images_front.unsqueeze(0)
-        images_front_history = data_dict["image_front_history"]
-        images_front_history = images_front_history.unsqueeze(0)
-        # images_back = data_dict["image_back"]
-        # images_back = images_back.unsqueeze(0)
-            
+        # 4 cameras x 2 time steps = 8 images
+        cam_names = ['front', 'right', 'left', 'back']
+        image_list = []
+        for cam in cam_names:
+            img = data_dict[f"image_{cam}"]  # [H, W, C]
+            img = img.unsqueeze(0)  # [1, H, W, C]
+            img = einops.rearrange(img, "B H W C -> B C H W")
+            image_list.append(img.unsqueeze(1))  # [1, 1, C, H, W]
+        for cam in cam_names:
+            img = data_dict[f"image_{cam}_time"]  # [H, W, C]
+            img = img.unsqueeze(0)  # [1, H, W, C]
+            img = einops.rearrange(img, "B H W C -> B C H W")
+            image_list.append(img.unsqueeze(1))  # [1, 1, C, H, W]
+
+        images = torch.cat(image_list, dim=1)  # [1, 8, C, H, W]
+
         state = data_dict["state"].unsqueeze(0)
         texts = [data_dict["language_instruction"]]
-            
-        images_front = einops.rearrange(images_front, "B H W C -> B C H W")  # remove cond_steps dimension
-        images_front = images_front.unsqueeze(1)
-        images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")  # remove cond_steps dimension
-        images_front_history = images_front_history.unsqueeze(1)
-        # images_back = einops.rearrange(images_back, "B H W C -> B C H W")  # remove cond_steps dimension
-        # images_back = images_back.unsqueeze(1)
-            
-        # images = torch.cat((images_front, images_front_history, images_back), dim=1)
-        images = torch.cat((images_front, images_front_history), dim=1)
-        model_inputs = self.processor(text=texts, images=images)
+
+        model_inputs = self.processor(text=texts, images=images, cam_labels=DEFAULT_CAM_LABELS)
 
         # build causal mask and position ids for trajectory
         causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
@@ -257,13 +257,36 @@ class DrivePiZeroInferenceAgent:
                     
                     # 准备数据
                     state = normalize.prepare_state(all_data)
-                    
+
                     data_dict = {}
-                    image_front_path = extract_image_path(all_data['his_cam_front'])
-                    data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
-                    image_front_time_path = extract_image_path(all_data['his_cam_front_time'])
-                    data_dict['image_front_history'] = image_normalization(image_front_time_path, (224, 224))
-                    data_dict["language_instruction"] = "predict trajectory"
+                    # 加载 4 方向 × 2 时间步 = 8 张图
+                    cam_key_map = {
+                        'front': ('cam_front', 'cam_front_prev_1'),
+                        'right': ('cam_right', 'cam_right_prev_1'),
+                        'left':  ('cam_left',  'cam_left_prev_1'),
+                        'back':  ('cam_back',  'cam_back_prev_1'),
+                    }
+                    # 兼容旧格式数据
+                    if 'cam_front' not in all_data:
+                        cam_key_map = {
+                            'front': ('his_cam_front', 'his_cam_front_time'),
+                            'right': ('his_cam_right', 'his_cam_right_time'),
+                            'left':  ('his_cam_left',  'his_cam_left_time'),
+                            'back':  ('his_cam_back',  'his_cam_back_time'),
+                        }
+                    for cam_name, (current_key, history_key) in cam_key_map.items():
+                        path = extract_image_path(all_data[current_key])
+                        path_time = extract_image_path(all_data[history_key])
+                        data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224))
+                        data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224))
+
+                    # 导航指令
+                    nav_desc = all_data.get('navigation_command_descreption')
+                    if nav_desc is not None:
+                        nav_desc = np.asarray(nav_desc).reshape(-1)
+                        data_dict['language_instruction'] = f"Predict trajectory based on the navigation command: {str(nav_desc[0])}"
+                    else:
+                        data_dict['language_instruction'] = 'predict trajectory'
                     data_dict['state'] = state
                     
                     # 推理
@@ -496,13 +519,36 @@ if __name__ == '__main__':
                 all_data = pickle.load(f)
             normalize = Normalize.get_instance(statistic_path, norm_mode=inference_agent.norm_mode)
             state = normalize.prepare_state(all_data)
-            
+
             data_dict = {}
-            image_front_path = extract_image_path(all_data['his_cam_front'])
-            data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
-            image_front_time_path = extract_image_path(all_data['his_cam_front_time'])
-            data_dict['image_front_history'] = image_normalization(image_front_time_path, (224, 224))
-            data_dict["language_instruction"] = "predict trajectory"
+            # 加载 4 方向 × 2 时间步 = 8 张图
+            cam_key_map = {
+                'front': ('cam_front', 'cam_front_prev_1'),
+                'right': ('cam_right', 'cam_right_prev_1'),
+                'left':  ('cam_left',  'cam_left_prev_1'),
+                'back':  ('cam_back',  'cam_back_prev_1'),
+            }
+            # 兼容旧格式数据
+            if 'cam_front' not in all_data:
+                cam_key_map = {
+                    'front': ('his_cam_front', 'his_cam_front_time'),
+                    'right': ('his_cam_right', 'his_cam_right_time'),
+                    'left':  ('his_cam_left',  'his_cam_left_time'),
+                    'back':  ('his_cam_back',  'his_cam_back_time'),
+                }
+            for cam_name, (current_key, history_key) in cam_key_map.items():
+                path = extract_image_path(all_data[current_key])
+                path_time = extract_image_path(all_data[history_key])
+                data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224))
+                data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224))
+
+            # 导航指令
+            nav_desc = all_data.get('navigation_command_descreption')
+            if nav_desc is not None:
+                nav_desc_arr = np.asarray(nav_desc).reshape(-1)
+                data_dict['language_instruction'] = f"Predict trajectory based on the navigation command: {str(nav_desc_arr[0])}"
+            else:
+                data_dict['language_instruction'] = 'predict trajectory'
             data_dict['state'] = state
             
             trajectory = inference_agent.run(data_dict=data_dict)

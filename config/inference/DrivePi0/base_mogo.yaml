@@ -50,7 +50,7 @@ action_dim: 2 # EEF_POS
 proprio_dim: 10  # POS_EULER
 state_dim: ${proprio_dim}
 # 参数更改
-max_seq_len: 532  # fixed 512 for image + max 20 for text
+max_seq_len: 2120  # 8 images * 256 patches + cam labels (~48 tokens) + text (~20 tokens)
 tokenizer_padding: max_length # instead of truncating to longest
 max_image_text_tokens: ${max_seq_len}
 
@@ -99,7 +99,7 @@ vision:
     layer_norm_eps: 1e-6
     attention_dropout: 0.0
     # 参数更改
-    num_image_tokens: 512 # 2 images: 256 * 2
+    num_image_tokens: 2048 # 8 images: 256 * 8
     lora:
       r: ${lora_r}
       dropout: ${lora_dropout}

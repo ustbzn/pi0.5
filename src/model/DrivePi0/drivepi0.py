@@ -27,7 +27,12 @@ log = logging.getLogger(__name__)
 
 class DrivePiZero(nn.Module, NoSyncBase):
     @log_execution_time()
-    def __init__(self, cfg, use_ddp: bool = False):
+    def __init__(self, cfg, use_ddp: bool = False, load_pretrained: bool = True):
+        """
+        Args:
+            load_pretrained: True  = 首次训练，从预训练模型加载权重
+                             False = 恢复训练/推理，仅创建架构，权重由 checkpoint 提供
+        """
         super().__init__()
         self.cfg = cfg
         self.use_ddp = use_ddp  # used in NoSyncBase
@@ -56,6 +61,46 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self.proprio_dim = cfg.proprio_dim
         self.final_action_clip_value = cfg.final_action_clip_value
         self.flow_sig_min = cfg.get("flow_sig_min", 0.001)
+        self.mask_vlm_for_action = cfg.get("mask_vlm_for_action", False)
+        self.state_only_for_action = cfg.get("state_only_for_action", False)
+
+        # Trajectory auxiliary losses
+        traj_loss_cfg = cfg.get("trajectory_loss", {})
+        self.lambda_smooth = traj_loss_cfg.get("lambda_smooth", 0.0)
+        self.lambda_accel = traj_loss_cfg.get("lambda_accel", 0.0)
+        self.endpoint_weight_mode = traj_loss_cfg.get("endpoint_weight_mode", "none")
+        self.endpoint_weight_max = traj_loss_cfg.get("endpoint_weight_max", 3.0)
+
+        # ===== 方案 A: Action-grounded 辅助监督 heads =====
+        aux_loss_cfg = cfg.get("aux_loss", {})
+        self.enable_aux_loss = aux_loss_cfg.get("enable", False)
+        if self.enable_aux_loss:
+            self.lambda_maneuver = aux_loss_cfg.get("lambda_maneuver", 0.2)
+            self.lambda_stop = aux_loss_cfg.get("lambda_stop", 0.1)
+            self.lambda_endpoint = aux_loss_cfg.get("lambda_endpoint", 0.2)
+            self.lambda_progress = aux_loss_cfg.get("lambda_progress", 0.05)
+            self.lambda_curvature = aux_loss_cfg.get("lambda_curvature", 0.05)
+            # 5 个 head：从 pooled action embedding 预测辅助目标
+            self.maneuver_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 5),
+            )
+            self.stop_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 2),
+            )
+            self.endpoint_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 2),
+            )
+            self.progress_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 1),
+            )
+            self.curvature_head = nn.Sequential(
+                nn.LayerNorm(self.action_hidden_size),
+                nn.Linear(self.action_hidden_size, 1),
+            )
 
         # text input only
         self.embed_tokens = nn.Embedding(
@@ -109,12 +154,20 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
     @property
     def action_expert_parameters(self):
-        return (
+        params = (
             list(self.action_encoder.parameters())
             + list(self.action_decoder.parameters())
             + list(self.proprio_encoder.parameters())
             + list(self.joint_model.mixtures["action"].parameters())
         )  # note: action and proprio share weights
+        # 方案 A: 辅助 heads 也归入 action expert（跟随 action_lr 训练）
+        if self.enable_aux_loss:
+            params += list(self.maneuver_head.parameters())
+            params += list(self.stop_head.parameters())
+            params += list(self.endpoint_head.parameters())
+            params += list(self.progress_head.parameters())
+            params += list(self.curvature_head.parameters())
+        return params
 
     @property
     def trainable_vlm_parameters(self):
@@ -229,6 +282,86 @@ class DrivePiZero(nn.Module, NoSyncBase):
             return True
         return False
 
+    def inject_lora(self, cfg):
+        """Inject LoRA adapters into VLM components (vision tower, projector, gemma).
+
+        Controlled by cfg fields:
+          - lora_vlm (bool):     language model attention (q/k/v/o_proj)
+          - lora_vlm_mlp (bool): language model MLP (gate/up/down_proj)
+          - lora_vision (bool):  vision tower attention
+          - lora_projector (bool): projector
+
+        Must be called AFTER loading base weights (for finetune) or BEFORE
+        loading a LoRA checkpoint (for resume).
+        """
+        from src.model.lora import LoRALinear
+
+        r = cfg.lora_r
+        lora_alpha = cfg.get("lora_alpha", r)
+        lora_dropout = cfg.lora_dropout
+        total = 0
+
+        def _wrap(module, attr_name):
+            original = getattr(module, attr_name)
+            if isinstance(original, nn.Linear):
+                setattr(module, attr_name, LoRALinear(
+                    original, r=r, lora_alpha=lora_alpha,
+                    lora_dropout=lora_dropout,
+                ))
+                return 1
+            return 0
+
+        # --- VLM language model (gemma) ---
+        if cfg.get("lora_vlm", cfg.lora):
+            vlm_attn_targets = cfg.get(
+                "lora_vlm_target_modules",
+                ["q_proj", "k_proj", "v_proj", "o_proj"],
+            )
+            cnt = 0
+            for name, layer in self.joint_model.mixtures["vlm"].named_modules():
+                if hasattr(layer, 'self_attn'):
+                    for target in vlm_attn_targets:
+                        if hasattr(layer.self_attn, target):
+                            cnt += _wrap(layer.self_attn, target)
+            log.info(f"LoRA VLM attention: {cnt} layers (targets={vlm_attn_targets})")
+            total += cnt
+
+        if cfg.get("lora_vlm_mlp", False):
+            mlp_targets = ["gate_proj", "up_proj", "down_proj"]
+            cnt = 0
+            for name, layer in self.joint_model.mixtures["vlm"].named_modules():
+                if hasattr(layer, 'mlp'):
+                    for target in mlp_targets:
+                        if hasattr(layer.mlp, target):
+                            cnt += _wrap(layer.mlp, target)
+            log.info(f"LoRA VLM MLP: {cnt} layers")
+            total += cnt
+
+        # --- Vision tower ---
+        if cfg.get("lora_vision", False):
+            cnt = 0
+            for name, module in self.vision_tower.named_modules():
+                if hasattr(module, 'out_proj'):
+                    cnt += _wrap(module, 'out_proj')
+                if hasattr(module, 'in_proj'):
+                    cnt += _wrap(module, 'in_proj')
+            log.info(f"LoRA Vision: {cnt} layers")
+            total += cnt
+
+        # --- Projector ---
+        if cfg.get("lora_projector", False):
+            cnt = 0
+            for name, module in self.multi_modal_projector.named_modules():
+                if isinstance(module, nn.Linear):
+                    parent_name = name.rsplit('.', 1)
+                    if len(parent_name) == 2:
+                        parent = dict(self.multi_modal_projector.named_modules())[parent_name[0]]
+                        cnt += _wrap(parent, parent_name[1])
+            log.info(f"LoRA Projector: {cnt} layers")
+            total += cnt
+
+        log.info(f"LoRA injection complete: {total} total layers (r={r}, alpha={lora_alpha})")
+
     def freeze_non_lora_weights_in_vlm(self):
         """Keep all bias frozen"""
         for name, param in self.vision_tower.named_parameters():
@@ -308,9 +441,10 @@ class DrivePiZero(nn.Module, NoSyncBase):
         )  # smallest value, avoid using inf for softmax nan issues with padding
         for idx, cnt in enumerate(image_text_token_cnts):
             causal_mask[idx, :cnt, :cnt] = 0  # image/text attend to itself
-            causal_mask[idx, proprio_start:, :cnt] = (
-                0  # proprio/action attend to image/text
-            )
+            if not self.mask_vlm_for_action:
+                causal_mask[idx, proprio_start:, :cnt] = (
+                    0  # proprio/action attend to image/text
+                )
         causal_mask[:, proprio_start:proprio_end, proprio_start:proprio_end] = (
             0  # proprio attend to itself
         )
@@ -336,10 +470,61 @@ class DrivePiZero(nn.Module, NoSyncBase):
         # since proprio and action share the same mixture weights, makes sense to use [1 (proprio), 2 (action), 3 (action), ...] instead of [1 (proprio), 1 (action), 2 (action), ...]
         return causal_mask, vlm_position_ids, proprio_position_ids, action_position_ids
 
+    def build_state_only_causal_mask_and_position_ids(
+        self,
+        batch_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Tuple[torch.FloatTensor, torch.LongTensor, torch.LongTensor, torch.LongTensor]:
+        """Build causal mask for state-only mode (no VLM tokens)."""
+        total_tokens = self.num_proprio_tokens + self.num_action_tokens
+        proprio_end = self.num_proprio_tokens
+
+        causal_mask = torch.full(
+            (batch_size, total_tokens, total_tokens),
+            torch.finfo(dtype).min,
+            dtype=dtype,
+            device=device,
+        )
+
+        # proprio -> proprio
+        causal_mask[:, :proprio_end, :proprio_end] = 0
+        # action -> proprio + action
+        causal_mask[:, proprio_end:, :] = 0
+
+        causal_mask = causal_mask.unsqueeze(1)
+
+        vlm_position_ids = torch.empty((batch_size, 0), dtype=torch.long, device=device)
+        proprio_position_ids = (
+            torch.arange(1, self.num_proprio_tokens + 1, device=device)
+            .unsqueeze(0)
+            .expand(batch_size, -1)
+        )
+        action_position_ids = (
+            torch.arange(
+                self.num_proprio_tokens + 1,
+                self.num_proprio_tokens + self.num_action_tokens + 1,
+                device=device,
+            )
+            .unsqueeze(0)
+            .expand(batch_size, -1)
+        )
+
+        return causal_mask, vlm_position_ids, proprio_position_ids, action_position_ids
+
     def split_full_mask_into_submasks(
         self, causal_mask: torch.FloatTensor
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
         """split into ones for paligemma and action"""
+        if self.state_only_for_action:
+            state_mask = causal_mask[
+                ...,
+                : self.num_proprio_tokens,
+                : self.num_proprio_tokens,
+            ]
+            action_mask = causal_mask[..., -self.num_action_tokens :, :]
+            return state_mask, action_mask
+
         image_text_proprio_mask = causal_mask[
             ...,
             : self.max_image_text_tokens + self.num_proprio_tokens,
@@ -445,9 +630,63 @@ class DrivePiZero(nn.Module, NoSyncBase):
         action_position_ids: torch.LongTensor,
         proprios: torch.FloatTensor,
     ) -> torch.FloatTensor:
-        dtype, device = pixel_values.dtype, pixel_values.device
-        bsz = pixel_values.size(0)
+        dtype, device = proprios.dtype, proprios.device
+        bsz = proprios.size(0)
 
+        # ---- state-only mode: no VLM, only proprio -> action ----
+        if self.state_only_for_action:
+            kv_caches = {"proprio": KVCache()}
+
+            proprio_embeds = self.proprio_encoder(proprios)
+
+            _, kv_caches = self.joint_model(
+                attention_mask=image_text_proprio_mask,
+                position_ids_all={
+                    "proprio": proprio_position_ids,
+                },
+                embeds_all={
+                    "proprio": proprio_embeds,
+                },
+                kv_caches=kv_caches,
+                cache_mode="append",
+                return_caches=True,
+            )
+
+            action = torch.randn(
+                (bsz, self.horizon_steps, self.action_dim), device=device, dtype=dtype
+            )
+
+            delta_t = 1.0 / self.num_inference_steps
+            t = torch.zeros(bsz, device=device, dtype=dtype)
+            for _ in range(self.num_inference_steps):
+                time_cond = self.time_embedding(t)
+                if self.action_expert_adaptive_mode:
+                    action_embeds = self.action_encoder(action)
+                else:
+                    action_embeds = self.action_encoder(action, time_cond)
+
+                action_embeds = self.joint_model(
+                    attention_mask=action_mask,
+                    position_ids_all={"action": action_position_ids},
+                    embeds_all={"action": action_embeds},
+                    time_cond=time_cond,
+                    kv_caches=kv_caches,
+                    cache_mode="append_non_active",
+                )["action"]
+
+                action_vel = self.action_decoder(action_embeds)
+                action += delta_t * action_vel
+                t += delta_t
+
+            if self.final_action_clip_value is not None:
+                action = torch.clamp(
+                    action,
+                    -self.final_action_clip_value,
+                    self.final_action_clip_value,
+                )
+            return action
+
+        # ---- normal mode: VLM + proprio -> action ----
         kv_caches = self.joint_model.build_mixture_caches()
 
         # merge the text tokens and the image tokens
@@ -644,9 +883,6 @@ class DrivePiZero(nn.Module, NoSyncBase):
         x1 = actions
         psi_t = self.psi_t(x0, x1, t)
 
-        # text tokens + image tokens
-        inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
-
         # proprio
         proprio_embeds = self.proprio_encoder(proprios)
 
@@ -658,28 +894,93 @@ class DrivePiZero(nn.Module, NoSyncBase):
             action_embeds = self.action_encoder(psi_t)
         else:
             action_embeds = self.action_encoder(psi_t, time_cond)
-        action_embeds = self.joint_model(
-            attention_mask=causal_mask,
-            position_ids_all={
-                "vlm": vlm_position_ids,
-                "proprio": proprio_position_ids,
-                "action": action_position_ids,
-            },
-            embeds_all={
-                "vlm": inputs_embeds,
-                "proprio": proprio_embeds,
-                "action": action_embeds,
-            },
-            time_cond=time_cond,
-            kv_caches={},  # no caching during training
-        )["action"]
+
+        if self.state_only_for_action:
+            action_embeds = self.joint_model(
+                attention_mask=causal_mask,
+                position_ids_all={
+                    "proprio": proprio_position_ids,
+                    "action": action_position_ids,
+                },
+                embeds_all={
+                    "proprio": proprio_embeds,
+                    "action": action_embeds,
+                },
+                time_cond=time_cond,
+                kv_caches={},  # no caching during training
+            )["action"]
+        else:
+            # text tokens + image tokens
+            inputs_embeds = self._forward_siglip_and_text_embedding(input_ids, pixel_values)
+
+            action_embeds = self.joint_model(
+                attention_mask=causal_mask,
+                position_ids_all={
+                    "vlm": vlm_position_ids,
+                    "proprio": proprio_position_ids,
+                    "action": action_position_ids,
+                },
+                embeds_all={
+                    "vlm": inputs_embeds,
+                    "proprio": proprio_embeds,
+                    "action": action_embeds,
+                },
+                time_cond=time_cond,
+                kv_caches={},  # no caching during training
+            )["action"]
 
         # [Batch_Size, Horizon_Steps, Action_Dim]
         v_psi = self.action_decoder(action_embeds)
 
         # compare to true velocity
         d_psi = x1 - (1 - self.flow_sig_min) * x0
-        return torch.mean((v_psi - d_psi) ** 2)
+        residual = v_psi - d_psi  # [B, H, A]
+
+        # --- distance-weighted MSE: give higher weight to farther points ---
+        if self.endpoint_weight_mode == "linear":
+            H = residual.shape[1]
+            w = torch.linspace(1.0, self.endpoint_weight_max, H,
+                               device=residual.device, dtype=residual.dtype)
+            point_weights = w[None, :, None]  # [1, H, 1]
+            mse_loss = torch.mean(residual ** 2 * point_weights)
+        else:
+            mse_loss = torch.mean(residual ** 2)
+
+        loss = mse_loss
+
+        # --- smoothness / accel loss on RECONSTRUCTED trajectory ---
+        if self.lambda_smooth > 0 or self.lambda_accel > 0:
+            t_expand = t[:, None, None]  # [B, 1, 1]
+            x1_hat = psi_t + (1 - t_expand) * v_psi
+
+        if self.lambda_smooth > 0:
+            traj_diff = x1_hat[:, 1:, :] - x1_hat[:, :-1, :]
+            gt_diff = x1[:, 1:, :] - x1[:, :-1, :]
+            smooth_loss = torch.mean((traj_diff - gt_diff) ** 2)
+            loss = loss + self.lambda_smooth * smooth_loss
+
+        if self.lambda_accel > 0 and x1.shape[1] >= 3:
+            traj_accel = x1_hat[:, 2:, :] - 2 * x1_hat[:, 1:-1, :] + x1_hat[:, :-2, :]
+            gt_accel = x1[:, 2:, :] - 2 * x1[:, 1:-1, :] + x1[:, :-2, :]
+            accel_loss = torch.mean((traj_accel - gt_accel) ** 2)
+            loss = loss + self.lambda_accel * accel_loss
+
+        # ===== 方案 A: Action-grounded 辅助监督 =====
+        if self.enable_aux_loss and hasattr(self, '_aux_labels') and self._aux_labels is not None:
+            import torch.nn.functional as F
+            aux = self._aux_labels
+            pooled_action = action_embeds.mean(dim=1)  # [B, action_hidden_size]
+            aux_loss = (
+                self.lambda_maneuver * F.cross_entropy(self.maneuver_head(pooled_action), aux["maneuver_cls"])
+                + self.lambda_stop * F.cross_entropy(self.stop_head(pooled_action), aux["stop_cls"])
+                + self.lambda_endpoint * F.smooth_l1_loss(self.endpoint_head(pooled_action), aux["endpoint"])
+                + self.lambda_progress * F.smooth_l1_loss(self.progress_head(pooled_action), aux["progress"])
+                + self.lambda_curvature * F.smooth_l1_loss(self.curvature_head(pooled_action), aux["curvature"])
+            )
+            loss = loss + aux_loss
+            self._aux_labels = None  # 用完清除
+
+        return loss.to(v_psi.dtype)
 
 
 class DrivePiZeroInference(DrivePiZero):

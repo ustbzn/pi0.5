@@ -19,7 +19,11 @@ class Bench2DriveDataset:
             split=config.get("split", None),
             dynamic_dir_name=config.get("dynamic_dir", "b2d_dynamic_camera"),
             fixed_dir_name=config.get("fixed_dir", "b2d_fixed_camera"),
-            norm_mode=config.get("norm_mode", "percentile")
+            norm_mode=config.get("norm_mode", "percentile"),
+            nav_onehot=config.get("nav_onehot", False),
+            use_his_trajectory=config.get("use_his_trajectory", False),
+            state_frame_index=config.get("state_frame_index", None),
+            state_only=config.get("state_only", False),
         )
         self.dataset = dataset
 
@@ -32,7 +36,7 @@ if __name__ == '__main__':
     fixed_camera_dataset = Bench2DriveDataset(fixed_camera_config.data.train).dataset
     dynamic_camera_train_dataset = Bench2DriveDataset(dynamic_camera_train_config.data.train).dataset
     dynamic_camera_eval_dataset = Bench2DriveDataset(dynamic_camera_eval_config.data.val).dataset
-    
+
     fixed_camera_dataloader = DataLoader(fixed_camera_dataset, batch_size=1, shuffle=False)
     dynamic_camera_train_dataloader = DataLoader(dynamic_camera_train_dataset, batch_size=1, shuffle=False)
     dynamic_camera_eval_dataloader = DataLoader(dynamic_camera_eval_dataset, batch_size=1, shuffle=False)

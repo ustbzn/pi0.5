@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import torch
 
@@ -6,20 +6,47 @@ IMAGENET_STANDARD_MEAN = torch.tensor([0.5, 0.5, 0.5])
 IMAGENET_STANDARD_STD = torch.tensor([0.5, 0.5, 0.5])
 
 
+# 默认的 8 相机标签（4 方向 × 2 时间步），顺序与 train.py 中 image_list 拼接顺序一致
+DEFAULT_CAM_LABELS = [
+    'current front view', 'current right view',
+    'current left view', 'current rear view',
+    'previous front view', 'previous right view',
+    'previous left view', 'previous rear view',
+]
+
+
 def add_image_tokens_to_prompt(
     prefix_prompt,
     bos_token,
     image_seq_len,
     image_token,
+    cam_labels=None,
+    num_images=1,
 ):
-    # Quoting from the blog (https://huggingface.co/blog/paligemma#detailed-inference-process):
-    #   The input text is tokenized normally.
-    #   A <bos> token is added at the beginning, and an additional newline token (\n) is appended.
-    #   This newline token is an essential part of the input prompt the model was trained with, so adding it explicitly ensures it's always there.
-    #   The tokenized text is also prefixed with a fixed number of <image> tokens.
-    # NOTE: from the paper it looks like the `\n` should be tokenized separately, but in the HF implementation this is not done.
-    #       ref to HF implementation: https://github.com/huggingface/transformers/blob/7f79a97399bb52aad8460e1da2f36577d5dccfed/src/transformers/models/paligemma/processing_paligemma.py#L55-L73
-    return f"{image_token * image_seq_len}{bos_token}{prefix_prompt}\n"
+    """构建包含图像 token 和可选相机标签的 prompt。
+
+    Args:
+        prefix_prompt: 原始文本 prompt（如导航指令）
+        bos_token: BOS token
+        image_seq_len: 每张图的 token 数（如 256）
+        image_token: image token 字符串（如 "<image>"）
+        cam_labels: 每张图的文本标签列表，长度应等于 num_images。
+                    为 None 时退回原始行为（所有 image token 连续拼接）
+        num_images: 图像数量
+
+    Returns:
+        构建好的 prompt 字符串
+    """
+    if cam_labels is not None and len(cam_labels) == num_images:
+        # 带标签模式：在每组 image token 前插入文本标签
+        # 格式: "label1: <image>*256 label2: <image>*256 ... <bos> text\n"
+        parts = []
+        for label in cam_labels:
+            parts.append(f"{label}: {image_token * image_seq_len} ")
+        return f"{''.join(parts)}{bos_token}{prefix_prompt}\n"
+    else:
+        # 原始模式：所有 image token 连续拼接
+        return f"{image_token * (image_seq_len * num_images)}{bos_token}{prefix_prompt}\n"
 
 
 def rescale(
@@ -69,11 +96,13 @@ class VLAProcessor:
         num_image_tokens: int,
         max_seq_len: int,
         tokenizer_padding: str = "max_length",  #  # instead of truncating to longest
+        patches_per_image: int = 256,
     ):
         super().__init__()
 
-        self.image_seq_length = num_image_tokens # 256
-        self.max_seq_len = max_seq_len # 296
+        self.num_image_tokens = num_image_tokens  # 总 image token 数（如 2048 = 8 * 256）
+        self.patches_per_image = patches_per_image  # 每张图的 patch 数（如 256）
+        self.max_seq_len = max_seq_len
         self.tokenizer_padding = tokenizer_padding
 
         # Tokenizer described here: https://github.com/google-research/big_vision/blob/main/big_vision/configs/proj/paligemma/README.md#tokenizer
@@ -97,6 +126,7 @@ class VLAProcessor:
         self,
         text: List[str],
         images: torch.LongTensor,
+        cam_labels: Optional[List[str]] = None,
         truncation: bool = True,
     ) -> dict:
         assert len(images) == len(
@@ -107,6 +137,8 @@ class VLAProcessor:
         assert (
             images.dtype == torch.uint8
         ), f"Expected uint8 tensor for images, got {images.dtype}."
+
+        num_images = images.shape[1]
 
         pixel_values = process_images(
             images,
@@ -120,8 +152,10 @@ class VLAProcessor:
             add_image_tokens_to_prompt(
                 prefix_prompt=prompt,
                 bos_token=self.tokenizer.bos_token,
-                image_seq_len=self.image_seq_length,
+                image_seq_len=self.patches_per_image,
                 image_token=self.IMAGE_TOKEN,
+                cam_labels=cam_labels,
+                num_images=num_images,
             )
             for prompt in text
         ]
