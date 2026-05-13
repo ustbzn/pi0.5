@@ -1,0 +1,580 @@
+import os
+import torch
+import wandb
+import einops
+import random
+import logging
+import numpy as np
+import bitsandbytes as bnb
+from collections import deque
+from omegaconf import OmegaConf
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
+
+from src.model.DriveMoE.drivemoe import DriveMoE
+from src.agent.dataset import Bench2DriveDataset
+from src.model.DrivePi0.processing import VLAProcessor
+from src.utils.metric import get_action_accuracy
+from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
+from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_billions
+
+log = logging.getLogger(__name__)
+
+os.environ["WANDB__SERVICE_WAIT"] = "300"
+
+class DriveMoETrainAgent:
+    def __init__(self, cfg):
+        self.config = cfg
+        # seeding
+        self.seed = cfg.get("seed", 42)
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
+        
+        self.stage = cfg.stage
+        self.horizon_steps = cfg.horizon_steps
+        self.cond_steps = cfg.cond_steps
+
+        # devices
+        self.gpu_id = cfg.gpu_id
+        self.device = torch.device(f"cuda:{self.gpu_id}")
+        self.multi_gpu = cfg.multi_gpu
+        world_size = 1  # single gpu
+        if self.multi_gpu:
+            global_rank = int(os.environ["RANK"])
+            local_rank = int(os.environ["LOCAL_RANK"])
+            local_world_size = int(os.environ["LOCAL_WORLD_SIZE"])
+            world_size = int(os.environ["WORLD_SIZE"])
+            group_rank = int(os.environ["GROUP_RANK"])
+            log.info(
+                f"GPU local ID: {self.gpu_id}. Global rank: {global_rank}. Local rank: {local_rank}. Local world size: {local_world_size}. World size: {world_size}. Group rank: {group_rank}"
+            )
+            for i in range(torch.cuda.device_count()):
+                log.info(
+                    f"Local rank: {local_rank}, GPU UUID: {torch.cuda.get_device_properties(i).uuid}"
+                )
+        self.main_rank = not self.multi_gpu or global_rank == 0
+
+        # logging
+        self.save_model_freq = int(cfg.save_model_freq)
+        self.log_freq = cfg.log_freq
+        self.log_dir = cfg.log_dir
+        self.checkpoint_dir = os.path.join(self.log_dir, "checkpoint")
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+
+        # training params
+        self.n_updates = int(cfg.n_updates)
+        self.max_grad_norm = cfg.max_grad_norm
+        self.use_amp = cfg.get("use_amp", True)
+
+        # model
+        assert not (
+            (cfg.quantize or cfg.lora) and not cfg.load_pretrained_weights
+        ), "Please load pretrained weights if quantizing VLM or using Lora."
+        if cfg.quantize and not cfg.lora:
+            log.warning(
+                "Quantizing VLM but not adding Lora weights, which means the VLM will be fully frozen!"
+            )  # since the weights have requires_grad=False. However, we are not excluding the weights from the optimizer yet!
+        self.dtype = torch.bfloat16 if cfg.get("use_bf16", True) else torch.float32
+        self.model = DriveMoE(cfg, use_ddp=self.multi_gpu)
+        if cfg.resume_checkpoint_path:
+            self.load_checkpoint(cfg.resume_checkpoint_path)
+        elif self.stage == 2:
+            self.load_model(cfg.ckpt_path)
+        elif cfg.load_pretrained_weights:
+            self.model.load_pretrained_weights()
+        self.model.tie_action_proprio_weights()
+        self.model.freeze_unused_weights()
+        if cfg.lora:
+            self.model.freeze_non_lora_weights_in_vlm()
+        self.model.to(self.dtype)
+        self.model.to(self.device)
+        
+        self.use_wandb = cfg.get("wandb", False)
+        if self.use_wandb and self.main_rank:
+            run = wandb.init(
+                entity=cfg.wandb.entity,
+                project=cfg.wandb.project,
+                name=self.run_name if hasattr(self, "run_name") else cfg.wandb.run,
+                mode="offline",
+                config=OmegaConf.to_container(cfg, resolve=True),
+                id=self.wandb_id if hasattr(self, "wandb_id") else None,
+                resume="allow",
+            )
+            print(f"Run resumed: {run.resumed}")
+            log.info(f"Wandb id: {run.id}")
+        
+        if cfg.get(
+            "use_torch_compile", True
+        ):
+            self.model = torch.compile(
+                self.model,
+                mode="default",
+            )
+        log.info(f"Using cuda device: {self.device}, dtype: {self.dtype}")
+        if self.multi_gpu:
+            log.info(
+                f"Using {local_world_size} GPUs in each of the {cfg.n_nodes} nodes"
+            )
+            import torch.distributed as dist
+            from torch.nn.parallel import DistributedDataParallel as DDP
+
+            self.model = DDP(
+                self.model,
+                device_ids=[local_rank],
+                gradient_as_bucket_view=True,
+                static_graph=False,
+                find_unused_parameters=True,
+            )
+            model = self.model.module
+            dist.barrier()
+        else:
+            model = self.model
+        log_allocated_gpu_memory(log, "loading model", self.gpu_id)
+
+        # determine batch size and gradient accumulation steps
+        self.grad_accumulation_steps = max(
+            cfg.global_batch_size // cfg.per_device_batch_size // world_size, 1
+        )
+        actual_global_batch_size = (
+            cfg.per_device_batch_size * self.grad_accumulation_steps * world_size
+        )
+
+        # dataloader --- spawn one for each rank, num_workers=0
+        self.train_dataloader = DataLoader(
+            Bench2DriveDataset(cfg.data.train).dataset,
+            batch_size=cfg.per_device_batch_size,
+            pin_memory=True,
+            shuffle=True,
+            num_workers=cfg.num_workers
+        )
+
+        self.run_eval = cfg.data.get("val", False)
+        if self.run_eval:
+            self.val_dataiterator = iter(
+                DataLoader(
+                    Bench2DriveDataset(cfg.data.train).dataset,
+                    batch_size=cfg.per_device_batch_size,
+                    pin_memory=True,
+                    shuffle=False,
+                    num_workers=cfg.num_workers
+                )
+            )
+            self.eval_thresholds = cfg.eval_thresholds
+            self.eval_freq = cfg.eval_freq
+            self.per_device_num_eval_batch = (
+                cfg.eval_size // cfg.per_device_batch_size // world_size
+            )
+        log.info(f"Total number of gradient updates: {self.n_updates}")
+        log.info(f"Global batch size: {actual_global_batch_size}")
+        log.info(f"Per device batch size: {cfg.per_device_batch_size}")
+        log.info(f"Gradient accumulation steps: {self.grad_accumulation_steps}")
+
+        self.train_vlm = cfg.train_vlm
+        self.trained_parameters = model.action_expert_parameters
+        self.action_optimizer = bnb.optim.AdamW8bit(
+            model.action_expert_parameters,
+            lr=cfg.action_lr,
+            weight_decay=cfg.action_weight_decay,
+        )
+        self.action_lr_scheduler = CosineAnnealingWarmupRestarts(
+            self.action_optimizer,
+            first_cycle_steps=cfg.action_lr_scheduler.first_cycle_steps,
+            cycle_mult=1.0,
+            max_lr=cfg.action_lr,
+            min_lr=cfg.action_lr_scheduler.min_lr,
+            warmup_steps=cfg.action_lr_scheduler.warmup_steps,
+            gamma=1.0,
+        )
+        log.info(
+            f"Number of trained parameters (Trajectory): {get_num_params_in_billions(self.action_optimizer):.3f}B"
+        )
+        if self.train_vlm:
+            if cfg.lora:
+                vlm_trained_parameters = model.lora_trainable_vlm_parameters
+            else:
+                vlm_trained_parameters = model.trainable_vlm_parameters
+            self.trained_parameters += vlm_trained_parameters
+            self.vlm_optimizer = bnb.optim.AdamW8bit(
+                vlm_trained_parameters,
+                lr=cfg.vlm_lr,
+                weight_decay=cfg.vlm_weight_decay,
+            )
+            self.vlm_lr_scheduler = CosineAnnealingWarmupRestarts(
+                self.vlm_optimizer,
+                first_cycle_steps=cfg.vlm_lr_scheduler.first_cycle_steps,
+                cycle_mult=1.0,
+                max_lr=cfg.vlm_lr,
+                min_lr=cfg.vlm_lr_scheduler.min_lr,
+                warmup_steps=cfg.vlm_lr_scheduler.warmup_steps,
+                gamma=1.0,
+            )
+            log.info(
+                f"Number of trained parameters (VLM): {get_num_params_in_billions(self.vlm_optimizer):.3f}B"
+            )
+        if cfg.resume_checkpoint_path:
+            self.load_optimizer(cfg.resume_checkpoint_path)
+
+        # flow matching timestep sampling
+        self.flow_sampling = cfg.get("flow_sampling", "beta")
+        assert self.flow_sampling in [
+            "uniform",
+            "beta",
+        ], f"Invalid flow matching timestep sampling mode: {self.flow_sampling}"
+        if self.flow_sampling == "beta":
+            flow_alpha = cfg.get("flow_alpha", 1.5)
+            flow_beta = cfg.get("flow_beta", 1)
+            self.flow_t_max = 1 - cfg.get("flow_sig_min", 0.001)
+            self.flow_beta_dist = torch.distributions.Beta(flow_alpha, flow_beta)
+
+        # processor
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            cfg.pretrained_model_path, padding_side="right"
+        )
+        self.processor = VLAProcessor(
+            self.tokenizer,
+            num_image_tokens=cfg.vision.config.num_image_tokens,
+            max_seq_len=cfg.max_seq_len,
+            tokenizer_padding=cfg.tokenizer_padding,
+        )
+
+    def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
+        if self.flow_sampling == "uniform":  # uniform between 0 and 1
+            eps = 1e-5
+            t = (torch.rand(1) + torch.arange(bsz) / bsz) % (1 - eps)
+        elif self.flow_sampling == "beta":  # from pi0 paper
+            z = self.flow_beta_dist.sample((bsz,))
+            t = self.flow_t_max * (1 - z)  # flip and shift
+        return t
+
+    def run(self):
+        timer = Timer()
+        cnt_batch = 0 if not hasattr(self, "cnt_batch") else self.cnt_batch
+        cnt_update = (
+            0 if not hasattr(self, "cnt_update") else self.cnt_update
+        )  # resume training if loaded checkpoint
+        total_loss_train_deque = deque(maxlen=self.grad_accumulation_steps)
+        action_loss_train_deque = deque(maxlen=self.grad_accumulation_steps)
+        camera_loss_train_deque = deque(maxlen=self.grad_accumulation_steps)
+        scenario_loss_train_deque = deque(maxlen=self.grad_accumulation_steps)
+        new_eval_from_last_log = False
+        if self.multi_gpu:
+            import torch.distributed as dist
+
+            model = self.model.module
+        else:
+            model = self.model
+        self.model.train()
+
+        def preprocess_batch(batch, split_mask: bool, sample_fm_time: bool):
+            images_front = batch["image_front"]
+            images_front_history = batch["image_front_time"]
+            images_front_left = batch["image_front_left"]
+            images_front_right = batch["image_front_right"]
+            images_back = batch["image_back"]
+            images_back_left = batch["image_back_left"]
+            images_back_right = batch["image_back_right"]
+            
+            state = batch["state"]
+            trajectory = batch["trajectory"].squeeze(1)  # remove the time dimension
+            texts = batch["language_instruction"]
+            waypoints = batch["waypoints"]
+            camera_ids = batch.get("cam_id", None)
+            scenario_ids = batch.get("scenario_id", None)
+            images_front = einops.rearrange(images_front, "B H W C -> B C H W")
+            images_front = images_front.unsqueeze(1)
+            images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")
+            images_front_history = images_front_history.unsqueeze(1)
+            images_front_left = einops.rearrange(images_front_left, "B H W C -> B C H W")
+            images_front_left = images_front_left.unsqueeze(1)
+            images_front_right = einops.rearrange(images_front_right, "B H W C -> B C H W")
+            images_front_right = images_front_right.unsqueeze(1)
+            images_back = einops.rearrange(images_back, "B H W C -> B C H W")
+            images_back = images_back.unsqueeze(1)
+            images_back_left = einops.rearrange(images_back_left, "B H W C -> B C H W")
+            images_back_left = images_back_left.unsqueeze(1)
+            images_back_right = einops.rearrange(images_back_right, "B H W C -> B C H W")
+            images_back_right = images_back_right.unsqueeze(1)
+            images = torch.cat((
+                images_front, 
+                images_front_history,
+                images_front_left,
+                images_front_right,
+                images_back,
+                images_back_left, 
+                images_back_right
+            ), dim=1)
+            model_inputs = self.processor(text=texts, images=images)
+
+            # build causal mask and position ids for trajectory
+            causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
+                model.build_causal_mask_and_position_ids(
+                    model_inputs["attention_mask"], self.dtype
+                )
+            )
+
+            inputs = {
+                "input_ids": model_inputs["input_ids"],
+                "pixel_values": model_inputs["pixel_values"].to(self.dtype),
+                "vlm_position_ids": vlm_position_ids,
+                "proprio_position_ids": state_position_ids,
+                "action_position_ids": action_position_ids,
+                "proprios": state.to(self.dtype),
+                "actions": trajectory.to(self.dtype),
+                "waypoints": waypoints.to(self.dtype),
+                "camera_ids": camera_ids,
+                "scenario_ids": scenario_ids,
+            }
+            if split_mask:
+                image_text_proprio_mask, action_mask = (
+                    model.split_full_mask_into_submasks(causal_mask)
+                )
+                inputs["image_text_proprio_mask"] = image_text_proprio_mask
+                inputs["action_mask"] = action_mask
+            else:
+                inputs["causal_mask"] = causal_mask
+
+            # sample flow matching timesteps
+            if sample_fm_time:
+                inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
+
+            inputs = {k: v.to(self.device) for k, v in inputs.items() if v is not None}
+            return inputs
+    
+        while 1:
+            for batch in self.train_dataloader:
+                inputs = preprocess_batch(batch, split_mask=False, sample_fm_time=True)
+                # make sure only syncing when taking gradient steps
+                if (cnt_batch + 1) % self.grad_accumulation_steps != 0:
+                    with self.model.no_sync():
+                        with torch.autocast(
+                            device_type="cuda", dtype=self.dtype, enabled=self.use_amp
+                        ):
+                            total_loss, action_loss, camera_loss, scenario_loss = self.model(**inputs)
+                        
+                        normalized_total_loss = total_loss / self.grad_accumulation_steps
+                        normalized_total_loss.backward()
+                else:
+                    with torch.autocast(
+                        device_type="cuda", dtype=self.dtype, enabled=self.use_amp
+                    ):
+                        total_loss, action_loss, camera_loss, scenario_loss = self.model(**inputs)
+                    normalized_total_loss = total_loss / self.grad_accumulation_steps
+                    normalized_total_loss.backward()
+
+                    # step
+                    torch.nn.utils.clip_grad_norm_(
+                        self.trained_parameters,
+                        max_norm=self.max_grad_norm,
+                    )
+                    self.action_optimizer.step()
+                    self.action_lr_scheduler.step()
+                    if self.train_vlm:
+                        self.vlm_optimizer.step()
+                        self.vlm_lr_scheduler.step()
+                    self.action_optimizer.zero_grad(set_to_none=True)
+                    if self.train_vlm:
+                        self.vlm_optimizer.zero_grad(set_to_none=True)
+                    cnt_update += 1
+
+                    # save model at the end of update, models just synced
+                    if self.main_rank and (
+                        cnt_update % self.save_model_freq == 0
+                        or cnt_update == self.n_updates
+                    ):
+                        self.save_training(cnt_update, cnt_batch)
+
+                # aggregate loss
+                if self.multi_gpu:
+                    dist.all_reduce(total_loss, op=dist.ReduceOp.SUM)
+                    total_loss_train_deque.append(total_loss.item() / dist.get_world_size())
+                    dist.all_reduce(action_loss, op=dist.ReduceOp.SUM)
+                    action_loss_train_deque.append(action_loss.item() / dist.get_world_size())
+                    if camera_loss is not None:
+                        dist.all_reduce(camera_loss, op=dist.ReduceOp.SUM)
+                        camera_loss_train_deque.append(camera_loss.item() / dist.get_world_size())
+                    if scenario_loss is not None:
+                        dist.all_reduce(scenario_loss, op=dist.ReduceOp.SUM)
+                        scenario_loss_train_deque.append(scenario_loss.item() / dist.get_world_size())
+                else:
+                    total_loss_train_deque.append(total_loss.item())
+                    action_loss_train_deque.append(action_loss.item())
+                    if camera_loss is not None:
+                        camera_loss_train_deque.append(camera_loss.item())
+                    if scenario_loss is not None:
+                        scenario_loss_train_deque.append(scenario_loss.item() / dist.get_world_size())
+
+                # validation with action accuracy
+                if self.run_eval and (cnt_batch + 1) % self.eval_freq == 0:
+                    new_eval_from_last_log = True
+                    self.model.eval()
+                    eval_accuracy = torch.zeros(
+                        len(self.eval_thresholds), device=self.device
+                    )
+                    eval_l1_loss = torch.tensor(0.0, device=self.device)
+                    if self.main_rank:
+                        log.info(
+                            f"Running evaluation for {self.per_device_num_eval_batch} batches..."
+                        )
+                    with torch.no_grad():
+                        for _ in range(self.per_device_num_eval_batch):
+                            batch_eval = next(self.val_dataiterator)
+                            inputs = preprocess_batch(
+                                    batch_eval, split_mask=True, sample_fm_time=False
+                                )
+                            gt_trajectory = inputs.pop("actions")
+                            if "camera_ids" in inputs:
+                                inputs.pop("camera_ids")
+                            if "scenario_ids" in inputs:
+                                inputs.pop("scenario_ids")
+                            preds, _, _ = model.infer_action(**inputs)
+                            eval_accuracy += get_action_accuracy(
+                                gt_trajectory, preds, self.eval_thresholds
+                            )
+                            eval_l1_loss += torch.nn.functional.l1_loss(
+                                preds, gt_trajectory
+                            )
+                    eval_accuracy = eval_accuracy / self.per_device_num_eval_batch
+                    eval_l1_loss = eval_l1_loss / self.per_device_num_eval_batch
+                    self.model.train()
+                    if self.multi_gpu:
+                        dist.all_reduce(eval_accuracy, op=dist.ReduceOp.SUM)
+                        dist.all_reduce(eval_l1_loss, op=dist.ReduceOp.SUM)
+                        eval_accuracy /= dist.get_world_size()
+                        eval_l1_loss /= dist.get_world_size()
+                    if self.main_rank:
+                        log_msg = f"Eval | l1 Loss: {eval_l1_loss.item():.3f} | "
+                        log_msg += " | ".join(
+                            [
+                                f"acc thres {threshold}: {accuracy.item():.3f}"
+                                for threshold, accuracy in zip(
+                                    self.eval_thresholds, eval_accuracy
+                                )
+                            ]
+                        )
+                        log.info(log_msg)
+
+                # log loss
+                if self.main_rank and cnt_batch % self.log_freq == 0:
+                    total_loss_train_metric = np.mean(total_loss_train_deque)
+                    action_loss_train_metric = np.mean(action_loss_train_deque)
+                    if camera_loss_train_deque:
+                        camera_loss_train_metric = np.mean(camera_loss_train_deque)
+                    if scenario_loss_train_deque:
+                        scenario_loss_train_metric = np.mean(scenario_loss_train_deque)
+                    peak_vram = torch.cuda.max_memory_reserved(self.gpu_id) / (1024**3)
+                    log_msg = f"Batch {cnt_batch} Update {cnt_update}: t {timer():8.4f} | vram {peak_vram:6.3f} | total loss {total_loss_train_metric:6.4f} | action loss {action_loss_train_metric:6.4f}"
+                    if camera_loss_train_deque:
+                        log_msg += f" | camera loss {camera_loss_train_metric:6.4f}"
+                    if scenario_loss_train_deque:
+                        log_msg += f" | scenario loss {scenario_loss_train_metric:6.4f}"
+                    log_msg +=f" | action lr {self.action_optimizer.param_groups[0]['lr']:10.8f}"
+                    if self.train_vlm:
+                        log_msg += f" | vlm lr {self.vlm_optimizer.param_groups[0]['lr']:10.8f}"
+                    log.info(log_msg)
+                    if self.use_wandb:
+                        wandb_metrics = {
+                            "total loss": total_loss_train_metric,
+                            "action loss": action_loss_train_metric,
+                            "gradient steps": cnt_update,
+                            "action lr": self.action_optimizer.param_groups[0]["lr"],
+                        }
+                        if camera_loss_train_deque:
+                            wandb_metrics["camera loss"] = camera_loss_train_metric
+                        if scenario_loss_train_deque:
+                            wandb_metrics["scenario loss"] = scenario_loss_train_metric
+                        if self.train_vlm:
+                            wandb_metrics["vlm lr"] = self.vlm_optimizer.param_groups[
+                                0
+                            ]["lr"]
+                        if new_eval_from_last_log:
+                            wandb_metrics.update(
+                                {
+                                    f"eval acc - thres {threshold}": accuracy.item()
+                                    for threshold, accuracy in zip(
+                                        self.eval_thresholds, eval_accuracy
+                                    )
+                                }
+                            )
+                            wandb_metrics["eval l1 loss"] = eval_l1_loss.item()
+                            new_eval_from_last_log = False
+                        wandb.log(wandb_metrics, step=cnt_batch, commit=True)
+
+                # Count
+                cnt_batch += 1
+                if cnt_update >= self.n_updates:
+                    return
+
+    @log_execution_time()
+    def save_training(self, cnt_update, cnt_batch):
+        data = {
+            "cnt_update": cnt_update,
+            "cnt_batch": cnt_batch,
+            "model": (
+                self.model.module.state_dict()
+                if self.multi_gpu
+                else self.model.state_dict()
+            ),
+            "action_optimizer": self.action_optimizer.state_dict(),
+            "vlm_optimizer": self.vlm_optimizer.state_dict()
+            if self.train_vlm
+            else None,
+            "action_lr_scheduler": self.action_lr_scheduler.state_dict(),
+            "vlm_lr_scheduler": self.vlm_lr_scheduler.state_dict()
+            if self.train_vlm
+            else None,
+            "wandb_id": wandb.run.id if self.use_wandb else None,
+            "run_name": wandb.run.name if self.use_wandb else None,
+            "stage": self.stage,
+            "horizon_steps": self.horizon_steps,
+            "cond_steps": self.cond_steps,
+        }
+        savepath = os.path.join(self.checkpoint_dir, f"step{cnt_update}.pt")
+        torch.save(data, savepath)
+        checkpoint_size_in_gb = os.path.getsize(savepath) / (1024**3)
+        log.info(f"Saved model to {savepath}, size: {checkpoint_size_in_gb:.3f} GB")
+
+    @log_execution_time()
+    def load_checkpoint(self, path):
+        """load to cpu first, then move to gpu"""
+        data = torch.load(path, weights_only=True, map_location="cpu")
+        self.cnt_update = data["cnt_update"]
+        self.cnt_batch = data["cnt_batch"]
+        self.wandb_id = data["wandb_id"]
+        self.run_name = data["run_name"]
+        data["model"] = {
+            k.replace("_orig_mod.", ""): v for k, v in data["model"].items()
+        }
+        self.model.load_state_dict(data["model"], strict=True)
+        log.info(
+            f"Loaded model from {path} at update {self.cnt_update} batch {self.cnt_batch}"
+        )
+    
+    @log_execution_time()
+    def load_model(self, path):
+        """load to cpu first, then move to gpu"""
+        data = torch.load(path, weights_only=True, map_location="cpu")
+        assert data["stage"] == 1, "The ckpt is not stage1 ckpt!"
+        data["model"] = {
+            k.replace("_orig_mod.", ""): v for k, v in data["model"].items()
+        }
+        self.model.load_state_dict(data["model"], strict=True)
+        log.info(
+            f"Loaded stage1 model from {path}"
+        )
+
+    @log_execution_time()
+    def load_optimizer(self, path):
+        """load to cpu first, then move to gpu"""
+        from src.utils.optim import optimizer_to
+
+        data = torch.load(path, weights_only=True, map_location="cpu")
+        self.action_optimizer.load_state_dict(data["action_optimizer"])
+        optimizer_to(self.action_optimizer, self.device)
+        self.action_lr_scheduler.load_state_dict(data["action_lr_scheduler"])
+
+        if self.train_vlm:
+            self.vlm_optimizer.load_state_dict(data["vlm_optimizer"])
+            optimizer_to(self.vlm_optimizer, self.device)
+            self.vlm_lr_scheduler.load_state_dict(data["vlm_lr_scheduler"])
+        log.info(f"Loaded optimizer and scheduler states from {path}")

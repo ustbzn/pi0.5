@@ -1,0 +1,1 @@
+REPO_ID=rethinklab/DriveMoE TOOL=aria2c INCLUDE_PATTERNS=labels/camera_labels/* labels/scenario_labels/* EXCLUDE_PATTERNS= DATASET=0 HF_USERNAME= HF_TOKEN= HF_ENDPOINT=https://hf-mirror.com REVISION=main

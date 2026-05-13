@@ -1,0 +1,141 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivemoe.eval.DriveMoEEvalAgent
+
+log_dir: log/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
+name: drivemoe
+device: cuda
+gpu_id: 0
+n_nodes: 1
+seed: 42
+action_expert_adaptive_mode:
+quantize: False
+lora: False
+lora_r: 32
+lora_dropout: 0.0
+pretrained_model_path: ckpts/paligemma-3b-pt-224
+checkpoint_path: "YOUR_CHECKPOINT_PATH"  # You need to set path
+
+data:
+  statistics_path: config/statistics/b2d_statistics.json
+  work_dir: exp/b2d_action
+  split: val
+  return_camera_id: True
+  return_scenario_id: True
+  is_drivemoe: True
+  set_scene_priority: False
+
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+device_batch_size: 32
+
+num_workers: 32
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0
+
+criterion:  # useless in eval mode
+  _target_: src.model.DriveMoE.loss.CombinedLoss
+  camera_router_weight: 5.0
+  action_router_weight: 5.0
+  action_weight: 1.0
+  gamma: 2.0  # used for Focal Loss
+
+cond_steps: 5
+horizon_steps: 10
+action_dim: 2
+proprio_dim: 10
+max_seq_len: 788
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+num_camera_views_selected: 5
+num_scenario_selected: 7
+stage: 2  # useless
+
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 16384
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256
+
+image_token_index: 257152
+vocab_size: 257216
+pad_token_id: 0
+
+vision:
+  _target_: src.model.paligemma.siglip.SiglipVisionModel
+  config:
+    hidden_size: 1152
+    intermediate_size: 4304
+    num_hidden_layers: 27
+    num_attention_heads: 16
+    num_channels: 3
+    image_size: 224
+    patch_size: 14
+    layer_norm_eps: 1e-6
+    attention_dropout: 0.0
+    num_image_tokens: 768
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+  use_quantize: ${quantize}
+  use_lora: ${lora}
+
+vision_projector:
+  _target_: src.model.paligemma.siglip.PaliGemmaMultiModalProjector
+  config:
+    vision_config:
+      hidden_size: 1152
+      projection_dim: 2048
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+  use_quantize: ${quantize}
+  use_lora: ${lora}
+
+joint:
+  _target_: src.model.DriveMoE.joint_model.JointModel
+  config:
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 18
+    num_attention_heads: 8
+    num_key_value_heads: 1
+    head_dim: 256
+    max_position_embeddings: 8192
+    rms_norm_eps: 1e-6
+    rope_theta: 10000.0
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    num_moe_layers: 4
+    num_shared_experts: 1
+    num_skill_experts: ${num_scenario_selected}
+    num_experts_per_tok: 3
