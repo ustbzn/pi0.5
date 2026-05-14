@@ -588,17 +588,22 @@ class DrivePiZeroTrainAgent:
             # print(f"input_ids 中图像token数量: {num_image_tokens}, pixel_values shape: {model_inputs['pixel_values'].shape}")
 
             # build causal mask and position ids for trajectory
-            causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
+            causal_mask, _vlm_pos_1d, state_position_ids, action_position_ids = (
                 model.build_causal_mask_and_position_ids(
                     model_inputs["attention_mask"], self.dtype
                 )
+            )
+            # P0-A: 使用官方 3D M-RoPE position_ids 替代 1D arange
+            vlm_position_ids = model.build_qwen3_vl_position_ids(
+                model_inputs["input_ids"],
+                model_inputs["image_grid_thw"],
+                model_inputs["attention_mask"],
             )
 
             inputs = {
                 "input_ids": model_inputs["input_ids"],
                 "pixel_values": model_inputs["pixel_values"].to(self.dtype),
                 "image_grid_thw": model_inputs["image_grid_thw"],
-                # "vlm_causal_mask": vlm_causal_mask,
                 "vlm_position_ids": vlm_position_ids,
                 "proprio_position_ids": state_position_ids,
                 "action_position_ids": action_position_ids,
