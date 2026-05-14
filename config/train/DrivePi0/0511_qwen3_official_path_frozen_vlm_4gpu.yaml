@@ -1,0 +1,269 @@
+##########################################################################
+# 0511 Qwen3-VL 官方前向路径对齐 + 冻结 VLM (4 GPU)
+#
+# 基于 0509_qwen3_aligned_planD_hardcase_bucketedEval_4gpu.yaml
+#
+# 本配置的核心修复 (P0 修复计划):
+#   1. P0-A: 3D M-RoPE position_ids
+#      - 使用 build_qwen3_vl_position_ids() 生成官方 3D 位置编码
+#      - 替代之前错误的 1D arange，恢复图像空间位置信息
+#      - 对文本 token: 3 个维度使用相同的递增位置
+#      - 对图像 token: t=0, h=0..H-1, w=0..W-1
+#
+#   2. P0-B: JointModel batch size 推断修复
+#      - 从 hidden_states 推导 bsz，而非 position_ids.shape[0]
+#      - 避免 3D position_ids ([3, B, S]) 导致 bsz=3 的错误
+#
+#   3. P0-C: RoPE 通过参数显式传递 (position_embeddings_all)
+#      - VLM 预计算一次 (cos, sin)，所有 28 层共享
+#      - 对齐官方 Qwen3VLTextModel 的行为
+#      - 避免每层重复计算 600 token 的 RoPE
+#
+#   4. P0-D: DeepStack 视觉特征逐层注入
+#      - vision_tower 返回 deepstack_feature_lists (layer 5/11/17 的中间特征)
+#      - VLM decoder layer 0/1/2 完成后分别注入对应的 deepstack 特征
+#      - 使用 in-place masked add，对齐官方 _deepstack_process
+#
+#   5. P0-E: VLM block 使用官方 causal mask (decoder-only)
+#      - VLM token 内部使用 lower-triangular causal mask
+#      - 替代之前错误的全双向注意力
+#      - action/proprio 仍然可以 attend 全部 VLM token（不变）
+#
+# 训练/评测/推理代码同步修改:
+#   - train.py: preprocess_batch 调用 build_qwen3_vl_position_ids()
+#   - eval_full.py: preprocess_batch_vlm 调用 build_qwen3_vl_position_ids()
+#   - inference_mogo_test.py: run() 调用 build_qwen3_vl_position_ids()
+#
+# 验证目标:
+#   - 冻结 VLM 条件下，acc@0.05 应超过 state-only baseline (0.683)
+#   - 之前 0509 配置因路径未对齐，acc@0.05 仅 0.660
+#
+# 基线对照:
+#   - state-only baseline: acc@0.05 = 0.683
+#   - 0509 (未对齐): acc@0.05 = 0.660
+##########################################################################
+
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_naviv2_7dim_noHisTraj_1frame_qwen3_official_path_frozen_vlm_4gpu
+log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
+
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+load_pretrained_weights: True
+
+# 不使用 finetune checkpoint，从头训练以验证修复效果
+finetune_checkpoint_path:
+resume_checkpoint_path:
+
+# ===== 核心配置: 冻结 VLM，验证官方路径对齐的效果 =====
+# 冻结 VLM 可以隔离变量：如果修复有效，仅靠正确的 VLM 特征传递
+# 就应该超过 state-only baseline
+train_vlm: False
+action_expert_adaptive_mode:  # adaLN, adaLN-Zero, or None
+use_torch_compile: True
+use_bf16: True
+use_amp: True
+quantize: False
+
+# 使用图像 + 文本 + state（非 state-only 模式）
+state_only_for_action: False
+mask_vlm_for_action: False
+
+# ===== LoRA 配置 =====
+# 冻结 VLM 实验不使用 LoRA
+lora: False
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.05
+lora_vlm: False
+lora_vlm_mlp: False
+lora_vision: False
+lora_vision_mlp: False
+lora_vision_merger: False
+
+data:
+  train:
+    statistics_path: ${data.train.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+    state_frame_index: 0
+  val:
+    statistics_path: ${data.val.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+    state_frame_index: 0
+
+swanlab:
+  enable: False
+  project: DriveMoE_Qwen3
+  experiment_name: ${run_name}
+  mode: cloud
+  description: "0511: 官方前向路径对齐(3D M-RoPE + DeepStack + Causal Mask) + 冻结VLM验证"
+  entity: null
+
+log_freq: 16
+# 归一化方法: percentile_clip, percentile, minmax
+norm_mode: minmax
+
+# ===== 方案 D 核心配置: 轨迹类型加权采样 + hard case 加权 =====
+trajectory_weighted_sampling:
+  enable: True
+  static_threshold: 1.0       # 末端位移 < 1m 判定为静止
+  turn_threshold: 2.0         # 末端横向偏移 > 2m 判定为转弯
+  static_weight: 2.0          # 静止样本采样权重
+  turn_weight: 3.0            # 转弯样本采样权重
+  straight_weight: 1.0        # 直行样本采样权重
+  hard_case_weight_path: null  # 先设为 null，等离线推理完成后填入路径
+  hard_case_alpha: 1.0         # hard case 权重缩放系数
+
+# ===== 只需设置以下 3 个参数，其余自动计算 =====
+n_epochs: 40
+n_train: 59778
+per_device_batch_size: 24
+# ================================================
+
+num_gpus: 4
+global_batch_size: ${eval:'${per_device_batch_size} * ${num_gpus}'}
+n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}
+save_model_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
+eval_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 10'}
+eval_size: 1024
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+num_workers: 8
+
+action_lr: 1e-5
+vlm_lr: 1e-5
+action_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+vlm_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+action_weight_decay: 0
+vlm_weight_decay: 0
+max_grad_norm: 1.0
+
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0
+
+trajectory_loss:
+  lambda_smooth: 0.05
+  lambda_accel: 0.02
+  endpoint_weight_mode: linear
+  endpoint_weight_max: 2.0
+
+cond_steps: 1
+horizon_steps: 6
+action_dim: 2
+proprio_dim: 7
+state_dim: ${proprio_dim}
+
+# ===== max_seq_len 说明 =====
+# Qwen3-VL 对 224x224 图像的处理流程:
+#   1. Processor 将 224x224 resize 到 256x256 (patch_size=16 的最近倍数)
+#   2. 切分为 16x16=256 个 patch (每个 patch 16x16 像素)
+#   3. 经过 spatial_merge_size=2x2 合并后: 8x8=64 tokens/image
+#   4. 8 张图 × 64 tokens = 512 image tokens
+#   5. 文本+特殊 token ≈ 58 tokens (含 camera labels、chat template、prompt)
+#   6. 总有效 token ≈ 570, 当前 max_seq_len=600 有 30 token 余量, 足够使用
+max_seq_len: 600
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 6144
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: False
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256
+
+pad_token_id: 0
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    # ===== 关键: hidden_act 使用 Qwen3 官方的 silu =====
+    # Qwen3 官方 config 的 hidden_act 是 "silu"
+    # 此字段被 Qwen3MLP 读取, 决定 Action/Proprio Expert 的激活函数
+    hidden_act: "silu"
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    # ===== M-RoPE 配置: 支持 3D 位置编码 =====
+    # mrope_section: [24, 20, 20] 表示 head_dim=128 中
+    #   temporal 维度占 24*2=48 维
+    #   height 维度占 20*2=40 维
+    #   width 维度占 20*2=40 维
+    rope_scaling:
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+      rope_type: "default"
+
+image_token_index: 151655
+video_token_id: 151656
+vision_start_token_id: 151652
+vision_end_token_id: 151653
+vocab_size: 151936
+bos_token_id: 151643
+eos_token_id: 151645

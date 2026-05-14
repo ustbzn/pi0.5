@@ -28,11 +28,12 @@ def forward_mixture_layers(
     attention_mask: torch.Tensor,
     position_ids_all: Dict[torch.LongTensor, torch.LongTensor],
     embeds_all: Dict[torch.FloatTensor, torch.FloatTensor],
-    layer_idx: Union[int, Dict[str, int]],   # ← 改为支持 per-mixture dict
+    layer_idx: Union[int, Dict[str, int]],
     post_attn_skip_names: List[str] = ["vlm"],
     kv_caches: Dict[KVCache, KVCache] = {},
     cache_mode: str = "append_non_active",
     time_cond: Optional[torch.FloatTensor] = None,
+    position_embeddings_all: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {},
 ) -> Dict[torch.FloatTensor, torch.FloatTensor]:
     """the usual norm + attn + res + norm + mlp + res"""
     # ── 辅助：按 mixture 名称取各自的 layer_idx ──────────────────────
@@ -66,6 +67,7 @@ def forward_mixture_layers(
         post_attn_skip_names=post_attn_skip_names,
         kv_caches=kv_caches,
         cache_mode=cache_mode,
+        position_embeddings_all=position_embeddings_all,
     )
     hidden_states_pre_res = hidden_states_post_attn
 
@@ -145,12 +147,13 @@ def forward_mixture_attn(
     attention_mask: torch.Tensor,
     position_ids_all: Dict[torch.LongTensor, torch.LongTensor],
     hidden_states_all: Dict[torch.FloatTensor, torch.FloatTensor],
-    layer_idx: Union[int, Dict[str, int]],   # ← 同样改为 Union
+    layer_idx: Union[int, Dict[str, int]],
     post_attn_skip_names: List[str] = ["vlm"],
     kv_caches: Dict[KVCache, KVCache] = {},
     cache_mode: str = "append_non_active",
-    attn_softclamp: float = 50.0,  # default in gemma
+    attn_softclamp: float = 50.0,
     attention_dropout: float = 0.0,
+    position_embeddings_all: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {},
 ) -> Dict[torch.FloatTensor, torch.FloatTensor]:
     """Assume all mixtures have the same head dim"""
     def get_lidx(name: str) -> int:
@@ -173,8 +176,7 @@ def forward_mixture_attn(
     # bsz = len(attention_mask)
     q_lens = [hidden_states.size(1) for hidden_states in hidden_states_all.values()]
     active_mixture_names = list(hidden_states_all.keys())
-    first_active = active_mixture_names[0]
-    bsz = position_ids_all[first_active].shape[0]
+    bsz = next(iter(hidden_states_all.values())).shape[0]
     # ── 核心修复：从实际 embeddings 推导 bsz，而非 len(attention_mask) ──
     # attention_mask 的第一维不一定等于真实 batch size（例如全局 mask 缓存）
     # if active_mixture_names:
@@ -217,16 +219,18 @@ def forward_mixture_attn(
                 key_states_all[name], value_states_all[name] = kv_cache.get(get_lidx(name))
 
     # ── 3. 为 active mixture 计算 RoPE + K/V ─────────────────────────
-    # the caching logic below can be much simplified if we ignore the "no_append" mode, which is only used in the naive action inference mode
     for name in active_mixture_names:
-        # prepare rope
         query_states = query_states_all[name]
-        lidx = get_lidx(name)  # ← 每个 mixture 用自己的 layer_idx
+        lidx = get_lidx(name)
         position_ids = position_ids_all[name]
-        rope_cos, rope_sin = mixtures[name].attn_func(
-            "forward_rotary_emb", lidx, query_states, position_ids
-        )
-        # print(f"forward_mixture_attn: mixture '{name}', layer_idx {lidx}, query_states shape {query_states.shape}, rope_cos shape {rope_cos.shape}, rope_sin shape {rope_sin.shape}")
+
+        # 如果有预计算的 position_embeddings（VLM），直接使用
+        if name in position_embeddings_all:
+            rope_cos, rope_sin = position_embeddings_all[name]
+        else:
+            rope_cos, rope_sin = mixtures[name].attn_func(
+                "forward_rotary_emb", lidx, query_states, position_ids
+            )
 
         # always use kv cache if it has the current layer
         flag_cached_mixture = name in kv_caches and kv_caches[name].has_item(lidx)
@@ -458,6 +462,7 @@ class JointModel(nn.Module):
         kv_caches: Dict[KVCache, KVCache] = {},
         cache_mode: str = "append_non_active",
         return_caches: bool = False,
+        deepstack_data: Optional[Tuple] = None,
     ) -> Dict[torch.FloatTensor, torch.FloatTensor]:
         """
         Assume attention_mask is in the right block attention form
@@ -466,16 +471,16 @@ class JointModel(nn.Module):
         """
         active_mixture_names = list(embeds_all.keys())
 
-        # normalization
-        # [Batch_Size, Seq_Len, Hidden_Size] Qwen3VLM 的输入已经在 VLMMixtureAdapter 内部做了 LayerNorm，这里不需要重复归一化，直接放行
-        # for name in active_mixture_names:
-        #     hidden_size = embeds_all[name].shape[-1]
-        #     normalizer = torch.tensor(
-        #         hidden_size**0.5,
-        #         dtype=embeds_all[name].dtype,
-        #         device=embeds_all[name].device,
-        #     )
-        #     embeds_all[name] *= normalizer
+        # 预计算 VLM 的 position_embeddings (cos, sin)，所有层共享
+        # 对齐官方 Qwen3VLTextModel: position_embeddings = self.rotary_emb(hidden_states, position_ids)
+        position_embeddings_all = {}
+        if "vlm" in active_mixture_names and "vlm" in position_ids_all:
+            vlm_pos_ids = position_ids_all["vlm"]
+            vlm_embeds = embeds_all["vlm"]
+            vlm_cos, vlm_sin = self.mixtures["vlm"].model.rotary_emb(
+                vlm_embeds, vlm_pos_ids
+            )
+            position_embeddings_all["vlm"] = (vlm_cos, vlm_sin)
 
         # layers
         for vlm_layer_idx in range(self.num_hidden_layers):   # 0-27
@@ -528,9 +533,21 @@ class JointModel(nn.Module):
                 cache_mode=cache_mode,
                 post_attn_skip_names=final_layer_post_attn_skip_names
                     if is_final_layer else [],
+                position_embeddings_all=position_embeddings_all,
             )
             # 合并回 embeds_all
             embeds_all.update(embeds_updated)
+
+            # P0-D: DeepStack 注入 — VLM layer 0/1/2 完成后分别注入
+            if (deepstack_data is not None
+                    and "vlm" in active_this_step
+                    and "vlm" in embeds_all):
+                visual_pos_masks, deepstack_features = deepstack_data
+                if vlm_layer_idx < len(deepstack_features):
+                    self.mixtures["vlm"].deepstack_inject(
+                        embeds_all["vlm"], visual_pos_masks,
+                        deepstack_features[vlm_layer_idx],
+                    )
 
         hidden_states_all = {}
         for name in active_mixture_names:

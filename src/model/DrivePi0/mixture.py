@@ -1,5 +1,5 @@
 """
-Individual mixture in PaliGemma format
+Individual mixture in Qwen3-aligned format
 
 Additional support for AdaLN(-Zero) and (Q)LoRA
 
@@ -12,13 +12,11 @@ import torch.nn as nn
 
 from src.model.lora import get_layer
 from src.model.paligemma.modules import (
-    GemmaMLP,
-    GemmaRMSNorm,
     GemmaRotaryEmbedding,
 )
 from src.model.qwen3.modules import (
-    Qwen3MLP, 
-    Qwen3RMSNorm, 
+    Qwen3MLP,
+    Qwen3RMSNorm,
     Qwen3RotaryEmbedding)
 from src.model.utils import apply_rotary_pos_emb, repeat_kv
 from src.model.DrivePi0.modules import AdaptiveLayerscale, AdaptiveRMSNorm
@@ -42,7 +40,7 @@ class Mixture(nn.Module):
                     eps=config.rms_norm_eps,
                 )
             else:
-                self.norm = GemmaRMSNorm(
+                self.norm = Qwen3RMSNorm(
                     config.hidden_size,
                     eps=config.rms_norm_eps,
                 )
@@ -86,7 +84,7 @@ class MixtureDecoderLayer(nn.Module):
         super().__init__()
         self.self_attn = MixtureAttention(config)
 
-        self.mlp = GemmaMLP(
+        self.mlp = Qwen3MLP(
             config, use_quantize=config.use_quantize, use_lora=config.use_lora
         )
 
@@ -112,11 +110,11 @@ class MixtureDecoderLayer(nn.Module):
                     config.time_hidden_size,
                 )
         else:
-            self.input_layernorm = GemmaRMSNorm(
+            self.input_layernorm = Qwen3RMSNorm(
                 config.hidden_size,
                 eps=config.rms_norm_eps,
             )
-            self.post_attention_layernorm = GemmaRMSNorm(
+            self.post_attention_layernorm = Qwen3RMSNorm(
                 config.hidden_size,
                 eps=config.rms_norm_eps,
             )

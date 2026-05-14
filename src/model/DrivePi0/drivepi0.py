@@ -42,6 +42,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self.vocab_size = cfg.vocab_size
         self.pad_token_id = cfg.pad_token_id
         self.image_token_index = cfg.image_token_index
+        self.vision_start_token_id = cfg.get("vision_start_token_id", 151652)
         self.use_lm_head = cfg.get("use_lm_head", False)
 
         self.max_image_text_tokens = cfg.max_image_text_tokens
@@ -304,7 +305,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
     @property
     def trainable_vlm_parameters(self):
         return (
-            list(self.vision_tower.parameters())
+            [param for param in self.vision_tower.parameters() if param.requires_grad]
             # + list(self.multi_modal_projector.parameters())# 去掉 multi_modal_projector，已集成在 vision_tower 内
             + self.trainable_qwen_parameters
         )
@@ -327,7 +328,11 @@ class DrivePiZero(nn.Module, NoSyncBase):
         """获取可训练的Qwen参数"""
         trainable_params = []
         for name, param in self.joint_model.named_parameters():
-            if "mixtures.vlm" in name and not self._check_qwen_unused_parameter_by_name(name):
+            if (
+                param.requires_grad
+                and "mixtures.vlm" in name
+                and not self._check_qwen_unused_parameter_by_name(name)
+            ):
                 trainable_params.append(param)
         return trainable_params
 
@@ -336,7 +341,12 @@ class DrivePiZero(nn.Module, NoSyncBase):
         """获取可训练的LoRA-Qwen参数"""
         trainable_params = []
         for name, param in self.named_parameters():
-            if "lora_" in name and "mixtures.vlm" in name and not self._check_qwen_unused_parameter_by_name(name):
+            if (
+                param.requires_grad
+                and "lora_" in name
+                and "mixtures.vlm" in name
+                and not self._check_qwen_unused_parameter_by_name(name)
+            ):
                 trainable_params.append(param)
         return trainable_params
 
@@ -405,15 +415,17 @@ class DrivePiZero(nn.Module, NoSyncBase):
         log.info("Loaded pre-trained weights for lm part of the joint model")
 
     def _check_qwen_unused_parameter_by_name(self, name: str) -> bool:
-        """no need to train vlm parameters after attention of last layer"""
+        """Language-model parameters that do not affect the action loss."""
         last_hidden_layer_index = self.joint_model.num_hidden_layers - 1
-        if (
-            f"{last_hidden_layer_index}.post" in name
+        return (
+            "embed_tokens" in name
+            or name.startswith("model.norm")
+            or f"{last_hidden_layer_index}.post" in name
             or f"{last_hidden_layer_index}.mlp" in name
+            or f"{last_hidden_layer_index}.self_attn.q_proj" in name
+            or f"{last_hidden_layer_index}.self_attn.q_norm" in name
             or f"{last_hidden_layer_index}.self_attn.o_proj" in name
-        ):
-            return True
-        return False
+        )
 
     def inject_lora(self, cfg):
         """Inject LoRA adapters into configurable components.
@@ -567,6 +579,87 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
     # ---------- Input preparation ----------#
 
+    def build_qwen3_vl_position_ids(
+        self,
+        input_ids: torch.LongTensor,
+        image_grid_thw: torch.LongTensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.LongTensor:
+        """生成 Qwen3-VL 官方 3D M-RoPE position_ids。
+
+        复刻 Qwen3VLModel.get_rope_index() 的 image 分支。
+        对文本 token: 3 个维度使用相同的递增位置。
+        对图像 token: t=0, h=0..H-1, w=0..W-1 (H=grid_h//merge, W=grid_w//merge)。
+
+        Returns:
+            position_ids: [3, B, S] — (temporal, height, width) 位置编码
+        """
+        spatial_merge_size = self.vision_tower.spatial_merge_size
+        image_token_id = self.image_token_index
+        vision_start_token_id = self.vision_start_token_id
+
+        bsz, seq_len = input_ids.shape
+        position_ids = torch.ones(
+            3, bsz, seq_len,
+            dtype=input_ids.dtype, device=input_ids.device,
+        )
+
+        image_index = 0
+        for i in range(bsz):
+            mask_i = attention_mask[i]
+            ids_i = input_ids[i][mask_i == 1]
+            input_tokens = ids_i.tolist()
+
+            vision_start_indices = torch.argwhere(ids_i == vision_start_token_id).squeeze(1)
+            vision_tokens = ids_i[vision_start_indices + 1]
+            image_nums = (vision_tokens == image_token_id).sum().item()
+
+            llm_pos_ids_list = []
+            st = 0
+            remain_images = image_nums
+
+            for _ in range(image_nums):
+                ed = input_tokens.index(image_token_id, st)
+                remain_images -= 1
+
+                t, h, w = (
+                    image_grid_thw[image_index][0],
+                    image_grid_thw[image_index][1],
+                    image_grid_thw[image_index][2],
+                )
+                image_index += 1
+
+                llm_grid_t = t.item()
+                llm_grid_h = h.item() // spatial_merge_size
+                llm_grid_w = w.item() // spatial_merge_size
+
+                text_len = ed - st
+                st_idx = llm_pos_ids_list[-1].max() + 1 if llm_pos_ids_list else 0
+                llm_pos_ids_list.append(
+                    torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx
+                )
+
+                t_index = torch.arange(llm_grid_t).view(-1, 1).expand(-1, llm_grid_h * llm_grid_w).flatten()
+                h_index = torch.arange(llm_grid_h).view(1, -1, 1).expand(llm_grid_t, -1, llm_grid_w).flatten()
+                w_index = torch.arange(llm_grid_w).view(1, 1, -1).expand(llm_grid_t, llm_grid_h, -1).flatten()
+                llm_pos_ids_list.append(
+                    torch.stack([t_index, h_index, w_index]) + text_len + st_idx
+                )
+                st = ed + llm_grid_t * llm_grid_h * llm_grid_w
+
+            if st < len(input_tokens):
+                st_idx = llm_pos_ids_list[-1].max() + 1 if llm_pos_ids_list else 0
+                text_len = len(input_tokens) - st
+                llm_pos_ids_list.append(
+                    torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx
+                )
+
+            if llm_pos_ids_list:
+                llm_positions = torch.cat(llm_pos_ids_list, dim=1).reshape(3, -1)
+                position_ids[:, i, mask_i == 1] = llm_positions.to(position_ids.device)
+
+        return position_ids
+
     def build_causal_mask_and_position_ids(
         self, attention_mask: torch.Tensor, dtype: torch.dtype
     ) -> Tuple[torch.FloatTensor]:
@@ -604,10 +697,16 @@ class DrivePiZero(nn.Module, NoSyncBase):
             dtype=dtype,
         )  # smallest value, avoid using inf for softmax nan issues with padding
         for idx, cnt in enumerate(image_text_token_cnts):
-            causal_mask[idx, :cnt, :cnt] = 0  # image/text attend to itself
+            cnt = int(cnt.item())
+            # VLM token 内部使用 causal mask (decoder-only, lower-triangular)
+            # 对齐官方 Qwen3-VL 的 causal 语义
+            causal_mask[idx, :cnt, :cnt] = torch.triu(
+                torch.full((cnt, cnt), torch.finfo(dtype).min, dtype=dtype),
+                diagonal=1,
+            )
             if not self.mask_vlm_for_action:
                 causal_mask[idx, proprio_start:, :cnt] = (
-                    0  # proprio/action attend to image/text
+                    0  # proprio/action attend to all VLM tokens
                 )
         causal_mask[:, proprio_start:proprio_end, proprio_start:proprio_end] = (
             0  # proprio attend to itself
@@ -791,28 +890,27 @@ class DrivePiZero(nn.Module, NoSyncBase):
         pixel_values: torch.FloatTensor,
         image_grid_thw: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-    ) -> torch.FloatTensor:
+    ) -> Tuple[torch.FloatTensor, Optional[list], Optional[torch.Tensor]]:
+        """返回 (inputs_embeds, deepstack_feature_lists, visual_pos_masks)"""
         dtype = self.embed_tokens.weight.dtype
         device = input_ids.device
         bsz, seq_len = input_ids.shape
 
-        # 1. 文本嵌入
         inputs_embeds = self.embed_tokens(input_ids)
         final_embedding = inputs_embeds.clone()
 
-        # 2. 视觉特征：官方 vision_tower 内部已包含 merger(projector)
-        # 输入: pixel_values [total_patches, patch_dim], image_grid_thw [num_images, 3]
-        # 输出: 返回 (hidden_states, deepstack_feature_lists) 元组
+        deepstack_feature_lists = None
+        visual_pos_masks = None
+
         if pixel_values is not None and pixel_values.numel() > 0:
             vision_output = self.vision_tower(
                 pixel_values.to(dtype),
                 grid_thw=image_grid_thw,
             )
-            # import pdb; pdb.set_trace()
             image_features = vision_output[0]
+            deepstack_feature_lists = vision_output[1] if len(vision_output) > 1 else None
             image_features = image_features.to(dtype)
 
-            # 3. 替换 <|image_pad|> 位置
             image_token_mask = (input_ids == self.image_token_index)
             num_masked = image_token_mask.sum().item()
             num_features = image_features.shape[0]
@@ -823,8 +921,9 @@ class DrivePiZero(nn.Module, NoSyncBase):
                 )
 
             final_embedding[image_token_mask] = image_features.to(dtype)
+            visual_pos_masks = image_token_mask
 
-        return final_embedding
+        return final_embedding, deepstack_feature_lists, visual_pos_masks
 
     def infer_action(
         self,
@@ -901,9 +1000,10 @@ class DrivePiZero(nn.Module, NoSyncBase):
         # print("image_grid_thw.shape:", image_grid_thw.shape)
 
         # merge the text tokens and the image tokens
-        inputs_embeds = self._forward_qwen3_vision_and_text_embedding(
-            input_ids, pixel_values, image_grid_thw=image_grid_thw  # 传递图像网格信息以正确处理视觉输入
+        inputs_embeds, deepstack_features, visual_pos_masks = self._forward_qwen3_vision_and_text_embedding(
+            input_ids, pixel_values, image_grid_thw=image_grid_thw
         )
+        deepstack_data = (visual_pos_masks, deepstack_features) if deepstack_features else None
 
         # proprio
         proprio_embeds = self._encode_proprio(
@@ -915,7 +1015,6 @@ class DrivePiZero(nn.Module, NoSyncBase):
         # forward pass thru the vlm and proprio, cache the kv
         _, kv_caches = self.joint_model(
             attention_mask=image_text_proprio_mask,
-            # vlm_attention_mask=vlm_causal_mask,
             position_ids_all={
                 "vlm": vlm_position_ids,
                 "proprio": proprio_position_ids,
@@ -927,6 +1026,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
             kv_caches=kv_caches,
             cache_mode="append",
             return_caches=True,
+            deepstack_data=deepstack_data,
         )
 
         # sample pure action noise
@@ -988,9 +1088,10 @@ class DrivePiZero(nn.Module, NoSyncBase):
         kv_caches = self.joint_model.build_mixture_caches()
 
         # merge the text tokens and the image tokens
-        inputs_embeds = self._forward_qwen3_vision_and_text_embedding(
-            input_ids, pixel_values, image_grid_thw=image_grid_thw  # 传递图像网格信息以正确处理视觉输入
+        inputs_embeds, deepstack_features, visual_pos_masks = self._forward_qwen3_vision_and_text_embedding(
+            input_ids, pixel_values, image_grid_thw=image_grid_thw
         )
+        deepstack_data = (visual_pos_masks, deepstack_features) if deepstack_features else None
 
         # encode proprio
         proprio_embeds = self._encode_proprio(
@@ -1151,11 +1252,12 @@ class DrivePiZero(nn.Module, NoSyncBase):
             )["action"]
         else:
             # text tokens + image tokens
-            inputs_embeds = self._forward_qwen3_vision_and_text_embedding(
+            inputs_embeds, deepstack_features, visual_pos_masks = self._forward_qwen3_vision_and_text_embedding(
                 input_ids,
                 pixel_values,
                 image_grid_thw=image_grid_thw,
             )
+            deepstack_data = (visual_pos_masks, deepstack_features) if deepstack_features else None
 
             action_embeds = self.joint_model(
                 attention_mask=causal_mask,
@@ -1170,7 +1272,8 @@ class DrivePiZero(nn.Module, NoSyncBase):
                     "action": action_embeds,
                 },
                 time_cond=time_cond,
-                kv_caches={},  # no caching during training
+                kv_caches={},
+                deepstack_data=deepstack_data,
             )["action"]
 
         # [Batch_Size, Horizon_Steps, Action_Dim]

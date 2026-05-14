@@ -142,6 +142,19 @@ class VLMMixtureAdapter(nn.Module):
         out = self.model.norm(hidden_states)
         return out.to(src_dtype)
 
+    @torch.compiler.disable
+    def deepstack_inject(
+        self,
+        hidden_states: torch.Tensor,
+        visual_pos_masks: torch.Tensor,
+        deepstack_embed: torch.Tensor,
+    ) -> torch.Tensor:
+        """对齐官方 Qwen3VLTextModel._deepstack_process: in-place masked add"""
+        visual_pos_masks = visual_pos_masks.to(hidden_states.device)
+        deepstack_embed = deepstack_embed.to(hidden_states.device, hidden_states.dtype)
+        hidden_states[visual_pos_masks] = hidden_states[visual_pos_masks].clone() + deepstack_embed
+        return hidden_states
+
     # ── 内部工具 ──────────────────────────────────────────────────────
     @staticmethod
     def _apply_rotary(states: torch.Tensor, cos: torch.Tensor,

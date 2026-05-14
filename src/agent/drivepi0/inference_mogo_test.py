@@ -195,10 +195,16 @@ class DrivePiZeroInferenceAgent:
         )
 
         # build causal mask and position ids for trajectory
-        causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
+        causal_mask, _, state_position_ids, action_position_ids = (
             self.model.build_causal_mask_and_position_ids(
                 model_inputs["attention_mask"], self.dtype
             )
+        )
+        # P0-A: 使用官方 3D M-RoPE position_ids 替代 1D arange
+        vlm_position_ids = self.model.build_qwen3_vl_position_ids(
+            model_inputs["input_ids"],
+            model_inputs["image_grid_thw"],
+            model_inputs["attention_mask"],
         )
 
         inputs = {
