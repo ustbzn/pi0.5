@@ -1,0 +1,159 @@
+##########################################################################
+# 0514 Qwen3-VL 官方前向路径评测配置
+#
+# 来源:
+#   - 由 config/train/DrivePi0/0514_qwen3_official_path_vlm_4gpu.yaml
+#     提取推理/评测所需字段得到。
+#
+# 用途:
+#   - 配合 script/evaluation/eval_mogo_action_avg_l2.sh 使用。
+#   - inference_mogo_test.py 读取本配置完成 MOGO val 集推理。
+#   - 该配置只描述模型结构、数据归一化、VLM/state 输入方式；
+#     具体 checkpoint_path 由评测脚本写入临时 runtime config。
+#
+# 与 0514 训练配置保持一致的关键点:
+#   - VLM 模式: state_only_for_action=False, mask_vlm_for_action=False
+#   - 不使用 LoRA: lora=False 及各组件 LoRA=False
+#   - noHisTraj + 1frame: use_his_trajectory=False, state_frame_index=0, cond_steps=1
+#   - 7 维 state: proprio_dim=7
+#   - Qwen3 官方路径参数: 3D M-RoPE + hidden_act=silu
+##########################################################################
+
+defaults:
+  - _self_
+
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo
+name: drive-pi0
+device: cuda
+gpu_id: 0
+n_nodes: 1
+seed: 42
+
+# Qwen3-VL-2B 本地权重路径；必须与训练配置一致。
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+
+# checkpoint_path 会被 eval_mogo_action_avg_l2.sh 写入临时配置。
+# 如果直接运行 inference_mogo_test.py，可手动把这里改成目标 .pt。
+checkpoint_path:
+
+# 运行相关配置。
+use_torch_compile: False  # 评测默认关闭 compile，避免首次编译慢且额外占显存。
+use_bf16: True            # 与 0514 训练一致，降低 VLM 推理显存占用。
+quantize: False
+
+# VLM + no-LoRA 设置，与 0514 训练一致。
+train_vlm: True
+state_only_for_action: False
+mask_vlm_for_action: False
+action_expert_adaptive_mode:
+lora: False
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.05
+lora_vlm: False
+lora_vlm_mlp: False
+lora_vision: False
+lora_vision_mlp: False
+lora_vision_merger: False
+
+# 数据与归一化配置。
+norm_mode: minmax
+data:
+  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/statistics_9dim.json
+  use_fixed_images: False
+  work_dir: ${current_dir}
+  dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2
+  fixed_dir: b2d_fixed_camera
+  split: val
+  num_of_action_experts: 13
+  shuffle_buffer_size: 200000
+  norm_mode: ${norm_mode}
+  use_his_trajectory: False
+  nav_onehot: False
+  state_frame_index: 0
+
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+device_batch_size: 32
+num_workers: 8
+
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0
+debug: False
+save_trajectories: True
+
+# 0514: 当前帧 state/image 输入，预测 6 个未来轨迹点。
+cond_steps: 1
+horizon_steps: 6
+action_dim: 2
+proprio_dim: 7
+state_dim: ${proprio_dim}
+
+# 8 张图 × 64 image tokens + 文本/chat template token，600 与训练一致。
+max_seq_len: 600
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 6144
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: False
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+
+time_hidden_size: 256
+pad_token_id: 0
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    hidden_act: "silu"
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    rope_scaling:
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+      rope_type: "default"
+
+# Qwen3-VL-2B 官方 token 配置。
+image_token_index: 151655
+video_token_id: 151656
+vision_start_token_id: 151652
+vision_end_token_id: 151653
+vocab_size: 151936
+bos_token_id: 151643
+eos_token_id: 151645
