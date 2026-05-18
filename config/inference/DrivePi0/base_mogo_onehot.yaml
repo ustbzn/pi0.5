@@ -51,7 +51,7 @@ action_dim: 2 # EEF_POS
 proprio_dim: 13  # his_speed(1) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + navigation_id_onehot(5) = 13
 state_dim: ${proprio_dim}
 # 参数更改
-max_seq_len: 600
+max_seq_len: 640
 tokenizer_padding: max_length
 max_image_text_tokens: ${max_seq_len}
 

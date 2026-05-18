@@ -12,7 +12,10 @@ from PIL import Image
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
-import swanlab
+try:
+    import swanlab
+except ImportError:
+    swanlab = None
 # import wandb
 from src.agent.dataset import Bench2DriveDataset
 from src.model.DrivePi0.drivepi0 import DrivePiZero
@@ -69,6 +72,11 @@ class DrivePiZeroTrainAgent:
         # =========== SwanLab 初始化 ===========
         self.use_swanlab = cfg.get("swanlab", {}).get("enable", False)
         self.swanlab_run = None
+        if self.use_swanlab and swanlab is None:
+            raise ImportError(
+                "swanlab is enabled in the config, but the package is not installed. "
+                "Install `swanlab` or set `swanlab.enable=false`."
+            )
         if self.use_swanlab and self.main_rank:
             swan_log_dir = os.path.join(os.getcwd(), "swanlog")
             os.makedirs(swan_log_dir, exist_ok=True)

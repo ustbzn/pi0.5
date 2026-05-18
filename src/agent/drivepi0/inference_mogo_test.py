@@ -13,7 +13,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional
 
-import hydra
 import einops
 import imageio
 from tqdm import *

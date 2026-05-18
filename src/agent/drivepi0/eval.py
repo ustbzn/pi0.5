@@ -1,7 +1,6 @@
 import logging
 import os
 
-import hydra
 import einops
 import imageio
 from tqdm import *

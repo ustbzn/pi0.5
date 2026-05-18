@@ -53,7 +53,7 @@ action_dim: 2 # EEF_POS
 proprio_dim: 13  # his_speed(3) + his_acceleration(3) + his_angular_velocity(3) + his_theta(1) + his_trajectory(2) + navigation_id(1) = 13
 state_dim: ${proprio_dim}
 # 参数更改
-max_seq_len: 600  # 8 images x 64 tokens = 512 + ~26 text tokens = 538, 留余量到 600
+max_seq_len: 640  # 8 images x 64 tokens = 512，实际文本与特殊 token 约 100+，640 可避免截断
 tokenizer_padding: max_length # instead of truncating to longest
 max_image_text_tokens: ${max_seq_len}
 

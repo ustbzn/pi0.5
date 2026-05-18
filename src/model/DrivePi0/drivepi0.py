@@ -812,13 +812,15 @@ class DrivePiZero(nn.Module, NoSyncBase):
         deepstack_feature_lists = None
         visual_pos_masks = None
 
+        # 2. 视觉特征：Qwen3-VL 使用 pooler_output，已经按 spatial_merge_size
+        # 聚合到与 <|image_pad|> 占位符一一对应的 token 数。
         if pixel_values is not None and pixel_values.numel() > 0:
             vision_output = self.vision_tower(
                 pixel_values.to(dtype),
                 grid_thw=image_grid_thw,
+                return_dict=True,
             )
-            image_features = vision_output[0]
-            deepstack_feature_lists = vision_output[1] if len(vision_output) > 1 else None
+            image_features = vision_output.pooler_output
             image_features = image_features.to(dtype)
 
             image_token_mask = (input_ids == self.image_token_index)
@@ -932,6 +934,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
             return_caches=True,
             deepstack_data=deepstack_data,
         )
+        
 
         # sample pure action noise
         action = torch.randn(
