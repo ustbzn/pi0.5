@@ -40,16 +40,16 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 GPU_ID="${GPU_ID:-0}"
 
 # 0514 训练产物 checkpoint。训练未保存到该 step 前，脚本会提前报错退出。
-CHECKPOINT_PATH="${CHECKPOINT_PATH:-${PROJECT_DIR}/logs/train/drive-pi0/2026-05-14_12-54_mogo_naviv2_7dim_noHisTraj_1frame_qwen3_official_path_vlm_4gpu/checkpoint/step18690.pt}"
+CHECKPOINT_PATH="${CHECKPOINT_PATH:-${PROJECT_DIR}/logs/train/drive-pi0/2026-05-14_20-56_qwen3_hdmap_all_features_8gpu/checkpoint/step37400.pt}"
 
-# 由 config/train/DrivePi0/0514_qwen3_official_path_vlm_4gpu.yaml 提取出的评测配置。
-CONFIG_PATH="${CONFIG_PATH:-${PROJECT_DIR}/config/inference/DrivePi0/0514_qwen3_official_path_vlm_4gpu.yaml}"
+# 由 config/train/DrivePi0/0514_qwen3_hdmap_all_features_8gpu.yaml 提取出的评测配置。
+CONFIG_PATH="${CONFIG_PATH:-${PROJECT_DIR}/config/inference/DrivePi0/0514_qwen3_hdmap_all_features_8gpu.yaml}"
 
 # MOGO naviv2 val 数据目录；inference_mogo_test.py 会遍历其中的 pkl。
-VAL_DATA_DIR="${VAL_DATA_DIR:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/val}"
+VAL_DATA_DIR="${VAL_DATA_DIR:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_0509/val}"
 
 # 与 0514 训练一致的 statistics 文件，用于 state/trajectory 的归一化和反归一化。
-STATISTIC_PATH="${STATISTIC_PATH:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/statistics_9dim.json}"
+STATISTIC_PATH="${STATISTIC_PATH:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_0509/statistics.json}"
 
 # 评测输出根目录。每次运行会在下面创建一个带 checkpoint 名称的 RUN_DIR。
 EVAL_ROOT="${EVAL_ROOT:-${PROJECT_DIR}/logs/eval/drive-pi0/mogo_action_avg_l2}"
@@ -125,6 +125,17 @@ export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH:-}"
 export WANDB_DISABLED="${WANDB_DISABLED:-true}"
 export CONFIG_PATH CHECKPOINT_PATH STATISTIC_PATH TMP_CONFIG_PATH USE_TORCH_COMPILE USE_BF16
 
+# 从 inference config 中读取 norm_mode，确保 acc 评测落在与训练一致的归一化空间。
+# 默认回退到 minmax，与当前 0514 训练配置保持一致。
+NORM_MODE="${NORM_MODE:-$(python - <<PY
+from omegaconf import OmegaConf
+import os
+cfg = OmegaConf.load(os.environ["CONFIG_PATH"])
+mode = cfg.get("norm_mode") or cfg.get("data", {}).get("norm_mode") or "minmax"
+print(mode)
+PY
+)}"
+
 echo "============================================================================"
 echo "MOGO Avg. L2 评测配置"
 echo "mode: ${MODE}"
@@ -138,6 +149,7 @@ echo "trajectory_dir: ${TRAJECTORY_DIR}"
 echo "analysis_dir: ${ANALYSIS_DIR}"
 echo "use_torch_compile: ${USE_TORCH_COMPILE}"
 echo "use_bf16: ${USE_BF16}"
+echo "norm_mode: ${NORM_MODE}"
 echo "============================================================================"
 
 if [[ "${MODE}" == "eval" ]]; then
@@ -181,6 +193,7 @@ python src/utils/analyzing_traj_mogo.py \
   --trajectory_dir "${TRAJECTORY_DIR}" \
   --mode error \
   --statistic_path "${STATISTIC_PATH}" \
+  --norm_mode "${NORM_MODE}" \
   --output_dir "${ANALYSIS_DIR}" \
   2>&1 | tee "${ANALYSIS_LOG}"
 

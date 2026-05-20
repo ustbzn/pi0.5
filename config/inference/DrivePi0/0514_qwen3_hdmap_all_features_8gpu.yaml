@@ -1,0 +1,214 @@
+##########################################################################
+# 0514 Qwen3-VL 官方前向路径 + HDMap 全功能评测配置
+#
+# 来源:
+#   - 由 config/train/DrivePi0/0514_qwen3_hdmap_all_features_8gpu.yaml
+#     提取推理/评测所需字段得到。
+#
+# 用途:
+#   - 配合 script/evaluation/eval_mogo_action_avg_l2.sh 使用。
+#   - inference_mogo_test.py 读取本配置完成 MOGO val 集推理。
+#   - 该配置只描述模型结构、数据归一化、VLM/state 输入方式；
+#     具体 checkpoint_path 由评测脚本写入临时 runtime config。
+#
+# 与 0514 训练配置保持一致的关键点:
+#   - VLM 模式: state_only_for_action=False, mask_vlm_for_action=False
+#   - 不使用 LoRA: lora=False 及各组件 LoRA=False
+#   - 保持 8 路相机 + HDMap BEV 图像输入: use_hdmap_image=True
+#   - state/history 配置: use_his_trajectory=True, proprio_dim=9
+#   - Qwen3 官方路径参数: 3D M-RoPE + hidden_act=silu
+##########################################################################
+
+defaults:
+  - _self_
+
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU
+log_dir: ${oc.env:LOG_DIR}/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
+name: drive-pi0
+device: cuda
+gpu_id: 0
+n_nodes: 1
+seed: 42
+
+# Qwen3-VL-2B 本地权重路径；必须与训练配置一致。
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+
+# checkpoint_path 会被 eval_mogo_action_avg_l2.sh 写入临时配置。
+# 如果直接运行 inference_mogo_test.py，可手动把这里改成目标 .pt。
+checkpoint_path:
+
+# 运行相关配置。
+use_torch_compile: False  # 评测默认关闭 compile，避免首次编译慢且额外占显存。
+use_bf16: True            # 与 0514 训练一致，降低 Qwen3-VL 推理显存占用。
+quantize: False
+
+# VLM + no-LoRA 设置，与 0514 训练一致。
+train_vlm: True
+state_only_for_action: False
+mask_vlm_for_action: False
+use_lm_head: False
+action_expert_adaptive_mode:        # adaLN / adaLN-Zero / null；当前默认不使用
+lora: False
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.05
+lora_vlm: False
+lora_vlm_target_modules: [q_proj, k_proj, v_proj, o_proj]
+lora_vlm_mlp: False
+lora_vision: False
+lora_vision_mlp: False
+lora_vision_merger: False
+# DrivePi0 当前前向只消费 vision_output[0]，deepstack merger 默认关闭。
+lora_vision_deepstack_merger: False
+
+# ==================== HDMap 开关 (A/B/C1-C3) ====================
+# A: HDMap PNG 作为第 9 张图输入 VLM。依赖 hdmap_bev_npz -> hdmap_bev_img 路径转换。
+use_hdmap_image: True
+hdmap_image_size: [352, 192]        # (H, W)，BEV PNG 通常是纵向长图
+
+# B: HDMap 8 维手工标量特征拼入 proprio state。
+# 开启后 proprio_dim 需要额外 +8。本配置默认关闭。
+use_hdmap_proprio: False
+
+# C1/C2/C3: 原始 HDMap BEV 多通道下采样 + CNN 编码 + gated residual 融合。
+use_hdmap_cnn: False
+hdmap_cnn_dim: 32
+hdmap_bev_downsample_size: [96, 180] # (H, W)，更大尺寸保留更多道路拓扑
+hdmap_downsample_mode:
+  lanes: max
+  lane_links: max
+  lane_boundaries: max
+  junctions: area
+hdmap_channel_scale: [0.08, 0.12, 0.10, 1.0]
+hdmap_fusion_mode: gated_residual   # concat / gated_residual
+
+# C2: HDMap 模块使用独立 optimizer group。
+# 评测不实际使用，但保留与训练配置一致。
+separate_hdmap_optimizer_group: False
+hdmap_lr: 1e-4
+hdmap_weight_decay: 1e-4
+hdmap_lr_scheduler:
+  min_lr: 1e-6
+
+# 归一化方法: percentile_clip, percentile, minmax
+norm_mode: minmax
+
+data:
+  # statistics_path 会被 eval_mogo_action_avg_l2.sh 写入临时配置。
+  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap/statistics.json
+  use_fixed_images: False
+  work_dir: ${current_dir}
+  dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap
+  fixed_dir: b2d_fixed_camera
+  split: val
+  num_of_action_experts: 13
+  shuffle_buffer_size: 200000
+  norm_mode: ${norm_mode}
+  nav_onehot: False
+  use_his_trajectory: True
+  state_frame_index:
+  cam_image_size: ${cam_image_size}
+  use_hdmap_image: ${use_hdmap_image}
+  use_hdmap_proprio: ${use_hdmap_proprio}
+  use_hdmap_cnn: ${use_hdmap_cnn}
+  hdmap_image_size: ${hdmap_image_size}
+  hdmap_bev_downsample_size: ${hdmap_bev_downsample_size}
+  hdmap_downsample_mode: ${hdmap_downsample_mode}
+  hdmap_channel_scale: ${hdmap_channel_scale}
+
+# ==================== 评测超参数 ====================
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+device_batch_size: 32
+num_workers: 8
+flow_sampling: beta
+flow_alpha: 1.5
+flow_beta: 1.0
+flow_sig_min: 0.001
+num_inference_steps: 10
+final_action_clip_value: 1.0  # data normalized in [-1,1]
+debug: False
+save_trajectories: True
+
+# ==================== 序列维度 ====================
+cond_steps: 5
+horizon_steps: 6
+action_dim: 2 # trajectory: [x, y]
+# proprio_dim 计算:
+#   his_speed(2)+his_acceleration(2)+his_angular_velocity(1)+his_theta(1)
+#   + his_trajectory(2)+navigation_id(1)=9
+proprio_dim: 9
+state_dim: ${proprio_dim}
+
+# 8 路相机 + 1 张 HDMap BEV，保留足够文本余量。
+cam_image_size: [224, 224]
+max_seq_len: 700
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+# ==================== Mixture 配置 ====================
+mixture:
+  vlm:   # qwen3-vl
+    hidden_size: 2048  # Qwen3-VL-2B 的 hidden_size
+    intermediate_size: 6144  # Qwen3-VL-2B 的 intermediate_size（官方值）
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: False
+    adaptive_mode:  # not applicable for qwen3-vl
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True  # technically no, but sharing weights with action anyway
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+
+time_hidden_size: 256 # only applicable if using adaptive
+
+# Fixed
+pad_token_id: 0
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: ${pretrained_model_path}
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28  # Qwen3-VL-2B 的层数
+    num_attention_heads: 16  # Qwen3-VL-2B 的 attention heads（官方值）
+    num_key_value_heads: 8  # Qwen3-VL-2B 的 KV heads（官方值）
+    head_dim: 128  # Qwen3-VL-2B 的 head_dim（官方值）
+    hidden_act: "silu"  # 与 0514 训练配置对齐
+    max_position_embeddings: 262144  # Qwen3-VL-2B 的 max position embeddings（官方值）
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000  # Qwen3-VL-2B 的 rope_theta（官方值）
+    attention_bias: False  # Qwen3-VL-2B 不使用 bias（官方值）
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    # RoPE配置（官方）
+    rope_scaling:
+      mrope_interleaved: true  # Interleaved-MRoPE（官方值）
+      mrope_section: [24, 20, 20]  # 官方值
+      rope_type: "default"
+
+# Qwen3-VL-2B 官方 token 配置。
+image_token_index: 151655  # Qwen3-VL-2B 的图像 token ID（官方值）
+video_token_id: 151656  # Qwen3-VL-2B 的视频 token ID（官方值）
+vision_start_token_id: 151652  # Qwen3-VL-2B 的视觉开始 token ID（官方值）
+vision_end_token_id: 151653  # Qwen3-VL-2B 的视觉结束 token ID（官方值）
+vocab_size: 151936  # Qwen3-VL-2B 的 vocab size（官方值）
+bos_token_id: 151643  # Qwen3-VL-2B 的 bos token ID（官方值）
+eos_token_id: 151645  # Qwen3-VL-2B 的 eos token ID（官方值）
