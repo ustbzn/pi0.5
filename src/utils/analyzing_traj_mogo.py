@@ -418,60 +418,80 @@ class MOGOTrajectoryAnalyzer:
         self,
         statistic_path: str = "statistics.json",
         eval_thresholds: Optional[List[float]] = None,
+        norm_mode: str = "percentile",
     ) -> Dict[str, object]:
-        """按照 eval_old.py 的风格计算评估指标"""
+        """按照 eval_old.py 的风格计算评估指标
+
+        ``norm_mode`` 必须与训练时 ``cfg.data.val.norm_mode`` 完全一致，否则 acc
+        会落到错误的归一化空间，造成与训练 eval 不可比。直接构造新的 Normalize
+        而不是用单例，避免 ``Normalize._instance`` 被同进程其他调用提前固化。
+        """
         if self.gt_trajectories is None or self.pred_trajectories is None:
             print("错误: 请先加载轨迹数据")
             return {}
-        
+
         if eval_thresholds is None:
             eval_thresholds = [0.05, 0.1, 0.2, 0.3, 0.5]
-        
+
         print("\n" + "=" * 60)
         print("Eval-style 指标")
         print("=" * 60)
-        
+
         # 真实坐标下的 L1 / L2
         diff = self.pred_trajectories - self.gt_trajectories
         l1_error = np.mean(np.abs(diff))
         l2_error = np.mean(diff ** 2)
-        
+
         print(f"真实坐标 L1 Loss: {l1_error:.4f}")
         print(f"真实坐标 L2 Loss (MSE): {l2_error:.4f}")
-        
+
         # 归一化空间下的多阈值准确率
-        normalize = Normalize.get_instance(statistic_path)
-        
+        normalize = Normalize(statistic_path, norm_mode=norm_mode)
+        print(f"acc 评测使用 norm_mode = {normalize.norm_mode}")
+
         gt_x = self.gt_trajectories[:, :, 0]
         gt_y = self.gt_trajectories[:, :, 1]
         pred_x = self.pred_trajectories[:, :, 0]
         pred_y = self.pred_trajectories[:, :, 1]
-        
-        gt_x_norm = normalize.standard_normalize(gt_x, normalize.fur_x_01, normalize.fur_x_99)
-        gt_y_norm = normalize.standard_normalize(gt_y, normalize.fur_y_01, normalize.fur_y_99)
-        pred_x_norm = normalize.standard_normalize(pred_x, normalize.fur_x_01, normalize.fur_x_99)
-        pred_y_norm = normalize.standard_normalize(pred_y, normalize.fur_y_01, normalize.fur_y_99)
-        
+
+        gt_x_norm = normalize._normalize_by_mode(
+            gt_x, normalize.fur_x_01, normalize.fur_x_99,
+            normalize.fur_x_min, normalize.fur_x_max,
+        )
+        gt_y_norm = normalize._normalize_by_mode(
+            gt_y, normalize.fur_y_01, normalize.fur_y_99,
+            normalize.fur_y_min, normalize.fur_y_max,
+        )
+        pred_x_norm = normalize._normalize_by_mode(
+            pred_x, normalize.fur_x_01, normalize.fur_x_99,
+            normalize.fur_x_min, normalize.fur_x_max,
+        )
+        pred_y_norm = normalize._normalize_by_mode(
+            pred_y, normalize.fur_y_01, normalize.fur_y_99,
+            normalize.fur_y_min, normalize.fur_y_max,
+        )
+
         gt_norm = np.stack([gt_x_norm, gt_y_norm], axis=-1)
         pred_norm = np.stack([pred_x_norm, pred_y_norm], axis=-1)
-        
+
         gt_tensor = torch.from_numpy(gt_norm).float()
         pred_tensor = torch.from_numpy(pred_norm).float()
-        
+
         acc_tensor = get_action_accuracy(gt_tensor, pred_tensor, thresholds=eval_thresholds)
         accuracies = acc_tensor.cpu().numpy()
-        
-        print("\n归一化空间多阈值准确率（与 eval_old.py 一致）：")
+
+        print("\n归一化空间多阈值准确率（与训练 eval 一致）：")
         for t, acc in zip(eval_thresholds, accuracies):
             print(f"  acc thres {t}: {acc:.4f}")
-        
+
         print("=" * 60)
-        
+
         return {
             "l1_loss": l1_error,
             "l2_loss": l2_error,
             "thresholds": eval_thresholds,
             "accuracies": accuracies,
+            "norm_mode": normalize.norm_mode,
         }
     
     def _load_images_from_pkl(
@@ -987,6 +1007,13 @@ def main():
         help="用于归一化/反归一化的统计文件路径"
     )
     parser.add_argument(
+        "--norm_mode",
+        type=str,
+        default="percentile",
+        choices=["percentile", "percentile_clip", "minmax"],
+        help="acc 评测使用的归一化模式，必须与训练 cfg.data.val.norm_mode 一致",
+    )
+    parser.add_argument(
         "--eval_thresholds",
         type=float,
         nargs="+",
@@ -1051,6 +1078,7 @@ def main():
         analyzer.compute_eval_style_metrics(
             statistic_path=args.statistic_path,
             eval_thresholds=args.eval_thresholds,
+            norm_mode=args.norm_mode,
         )
 
     if args.mode == "dual":

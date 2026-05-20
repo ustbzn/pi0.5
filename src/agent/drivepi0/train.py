@@ -20,7 +20,14 @@ import swanlab
 from src.agent.dataset import Bench2DriveDataset
 from src.model.DrivePi0.drivepi0 import DrivePiZero
 from src.model.DrivePi0.processing import VLAProcessor
-from src.utils.metric import get_action_accuracy, get_bucketed_action_accuracy
+from src.data.utils.normalization import Normalize
+from src.utils.metric import (
+    get_action_accuracy,
+    get_action_accuracy_counts,
+    get_action_l1_sum_count,
+    get_bucketed_action_accuracy,
+    get_denormalized_action_avg_l2_sum_count,
+)
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
 from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_billions
 
@@ -350,6 +357,10 @@ class DrivePiZeroTrainAgent:
             self.eval_seed = int(cfg.get("eval_seed", self.seed))
             self.eval_repeats = max(int(cfg.get("eval_repeats", 1)), 1)
             self.eval_full_val = bool(cfg.get("eval_full_val", False))
+            self.eval_avg_l2_normalizer = Normalize(
+                cfg.data.val.statistics_path,
+                norm_mode=cfg.data.val.get("norm_mode", "percentile"),
+            )
             eval_map_modes = cfg.get("eval_map_modes", ["normal"])
             if isinstance(eval_map_modes, str):
                 eval_map_modes = [eval_map_modes]
@@ -891,20 +902,37 @@ class DrivePiZeroTrainAgent:
 
                                 repeat_accuracies = []
                                 repeat_l1_losses = []
+                                repeat_avg_l2_losses = []
                                 bucket_l1_sums = defaultdict(float)
+                                bucket_avg_l2_sums = defaultdict(float)
                                 bucket_acc_sums = defaultdict(lambda: defaultdict(float))
                                 bucket_counts = defaultdict(int)
                                 for repeat_idx in range(self.eval_repeats):
-                                    eval_accuracy = torch.zeros(
+                                    eval_acc_correct = torch.zeros(
                                         len(self.eval_thresholds),
                                         device=self.device,
                                     )
-                                    eval_l1_loss = torch.tensor(
+                                    eval_acc_count = torch.tensor(
+                                        0.0,
+                                        device=self.device,
+                                    )
+                                    eval_l1_sum = torch.tensor(
+                                        0.0,
+                                        device=self.device,
+                                    )
+                                    eval_l1_count = torch.tensor(
+                                        0.0,
+                                        device=self.device,
+                                    )
+                                    eval_avg_l2_sum = torch.tensor(
+                                        0.0,
+                                        device=self.device,
+                                    )
+                                    eval_avg_l2_count = torch.tensor(
                                         0.0,
                                         device=self.device,
                                     )
                                     val_iterator = iter(self.val_dataloader)
-                                    actual_eval_batches = 0
                                     for eval_batch_idx in range(
                                         self.per_device_num_eval_batch
                                     ):
@@ -912,7 +940,6 @@ class DrivePiZeroTrainAgent:
                                             batch_eval = next(val_iterator)
                                         except StopIteration:
                                             break
-                                        actual_eval_batches += 1
                                         inputs = preprocess_batch(
                                             batch_eval,
                                             split_mask=True,
@@ -939,21 +966,37 @@ class DrivePiZeroTrainAgent:
                                         )
                                         self._set_eval_seed(eval_seed)
                                         preds = model.infer_action(**map_inputs)
-                                        eval_accuracy += get_action_accuracy(
+                                        acc_correct, acc_count = get_action_accuracy_counts(
                                             gt_trajectory,
                                             preds,
                                             self.eval_thresholds,
                                         )
-                                        eval_l1_loss += torch.nn.functional.l1_loss(
-                                            preds,
+                                        eval_acc_correct += acc_correct
+                                        eval_acc_count += acc_count
+
+                                        l1_sum, l1_count = get_action_l1_sum_count(
                                             gt_trajectory,
+                                            preds,
                                         )
+                                        eval_l1_sum += l1_sum
+                                        eval_l1_count += l1_count
+
+                                        avg_l2_sum, avg_l2_count = (
+                                            get_denormalized_action_avg_l2_sum_count(
+                                                gt_trajectory,
+                                                preds,
+                                                self.eval_avg_l2_normalizer,
+                                            )
+                                        )
+                                        eval_avg_l2_sum += avg_l2_sum
+                                        eval_avg_l2_count += avg_l2_count
                                         if trajectory_bucket is not None:
                                             bucket_results = get_bucketed_action_accuracy(
                                                 gt_trajectory,
                                                 preds,
                                                 trajectory_bucket,
                                                 thresholds=[0.05, 0.1],
+                                                avg_l2_normalizer=self.eval_avg_l2_normalizer,
                                             )
                                             for bname, bmetrics in bucket_results.items():
                                                 count = bmetrics["count"]
@@ -962,39 +1005,112 @@ class DrivePiZeroTrainAgent:
                                                 bucket_l1_sums[bname] += (
                                                     bmetrics["l1"] * count
                                                 )
+                                                bucket_avg_l2_sums[bname] += (
+                                                    bmetrics["avg_l2"] * count
+                                                )
                                                 bucket_counts[bname] += count
                                                 for key, value in bmetrics.items():
                                                     if key.startswith("acc@"):
                                                         bucket_acc_sums[bname][key] += (
                                                             value * count
                                                         )
-                                    actual_eval_batches = max(actual_eval_batches, 1)
-                                    eval_accuracy = eval_accuracy / actual_eval_batches
-                                    eval_l1_loss = eval_l1_loss / actual_eval_batches
 
                                     if self.multi_gpu:
                                         dist.barrier()
                                         dist.all_reduce(
-                                            eval_accuracy,
+                                            eval_acc_correct,
                                             op=dist.ReduceOp.SUM,
                                         )
                                         dist.all_reduce(
-                                            eval_l1_loss,
+                                            eval_acc_count,
                                             op=dist.ReduceOp.SUM,
                                         )
-                                        eval_accuracy /= dist.get_world_size()
-                                        eval_l1_loss /= dist.get_world_size()
-                                        eval_accuracy = torch.clamp(
-                                            eval_accuracy,
-                                            0.0,
-                                            1.0,
+                                        dist.all_reduce(
+                                            eval_l1_sum,
+                                            op=dist.ReduceOp.SUM,
                                         )
+                                        dist.all_reduce(
+                                            eval_l1_count,
+                                            op=dist.ReduceOp.SUM,
+                                        )
+                                        dist.all_reduce(
+                                            eval_avg_l2_sum,
+                                            op=dist.ReduceOp.SUM,
+                                        )
+                                        dist.all_reduce(
+                                            eval_avg_l2_count,
+                                            op=dist.ReduceOp.SUM,
+                                        )
+
+                                    eval_accuracy = eval_acc_correct / torch.clamp(
+                                        eval_acc_count,
+                                        min=1.0,
+                                    )
+                                    eval_l1_loss = eval_l1_sum / torch.clamp(
+                                        eval_l1_count,
+                                        min=1.0,
+                                    )
+                                    eval_avg_l2 = eval_avg_l2_sum / torch.clamp(
+                                        eval_avg_l2_count,
+                                        min=1.0,
+                                    )
 
                                     repeat_accuracies.append(eval_accuracy.detach())
                                     repeat_l1_losses.append(eval_l1_loss.detach())
+                                    repeat_avg_l2_losses.append(eval_avg_l2.detach())
+
+                                if self.multi_gpu:
+                                    bucket_keys = ["acc@0.05", "acc@0.1"]
+                                    bucket_stats = torch.tensor(
+                                        [
+                                            [
+                                                bucket_l1_sums.get(bname, 0.0),
+                                                bucket_avg_l2_sums.get(bname, 0.0),
+                                                float(bucket_counts.get(bname, 0)),
+                                                *[
+                                                    bucket_acc_sums.get(bname, {}).get(
+                                                        key,
+                                                        0.0,
+                                                    )
+                                                    for key in bucket_keys
+                                                ],
+                                            ]
+                                            for bname in [
+                                                "straight",
+                                                "turn",
+                                                "static",
+                                                "high_curvature",
+                                            ]
+                                        ],
+                                        device=self.device,
+                                        dtype=torch.float64,
+                                    )
+                                    dist.all_reduce(bucket_stats, op=dist.ReduceOp.SUM)
+                                    bucket_l1_sums.clear()
+                                    bucket_avg_l2_sums.clear()
+                                    bucket_acc_sums.clear()
+                                    bucket_counts.clear()
+                                    for bname, row in zip(
+                                        [
+                                            "straight",
+                                            "turn",
+                                            "static",
+                                            "high_curvature",
+                                        ],
+                                        bucket_stats.cpu().tolist(),
+                                    ):
+                                        bucket_l1_sums[bname] = row[0]
+                                        bucket_avg_l2_sums[bname] = row[1]
+                                        bucket_counts[bname] = int(row[2])
+                                        for key, value in zip(bucket_keys, row[3:]):
+                                            bucket_acc_sums[bname][key] = value
 
                                 acc_stack = torch.stack(repeat_accuracies, dim=0)
                                 l1_stack = torch.stack(repeat_l1_losses, dim=0)
+                                avg_l2_stack = torch.stack(
+                                    repeat_avg_l2_losses,
+                                    dim=0,
+                                )
                                 eval_results[map_mode] = {
                                     "acc_mean": acc_stack.mean(dim=0),
                                     "acc_std": (
@@ -1008,6 +1124,12 @@ class DrivePiZeroTrainAgent:
                                         if l1_stack.shape[0] > 1
                                         else torch.zeros_like(l1_stack[0])
                                     ),
+                                    "avg_l2_mean": avg_l2_stack.mean(),
+                                    "avg_l2_std": (
+                                        avg_l2_stack.std(unbiased=False)
+                                        if avg_l2_stack.shape[0] > 1
+                                        else torch.zeros_like(avg_l2_stack[0])
+                                    ),
                                     "bucket": {},
                                 }
                                 for bname in ["straight", "turn", "static", "high_curvature"]:
@@ -1016,6 +1138,7 @@ class DrivePiZeroTrainAgent:
                                         continue
                                     bucket_metrics = {
                                         "l1": bucket_l1_sums[bname] / count,
+                                        "avg_l2": bucket_avg_l2_sums[bname] / count,
                                         "count": count,
                                     }
                                     for acc_key in sorted(
@@ -1033,8 +1156,12 @@ class DrivePiZeroTrainAgent:
                         show_eval_std = self.eval_repeats > 1
                         for map_mode, result in eval_results.items():
                             l1_msg = f"{result['l1_mean'].item():.3f}"
+                            avg_l2_msg = f"{result['avg_l2_mean'].item():.3f}"
                             if show_eval_std:
                                 l1_msg += f"±{result['l1_std'].item():.3f}"
+                                avg_l2_msg += (
+                                    f"±{result['avg_l2_std'].item():.3f}"
+                                )
 
                             acc_msgs = []
                             for threshold, accuracy, std in zip(
@@ -1047,11 +1174,16 @@ class DrivePiZeroTrainAgent:
                                     acc_msg += f"±{std.item():.3f}"
                                 acc_msgs.append(acc_msg)
 
-                            log_msg = f"Eval [{map_mode}] | l1 Loss: {l1_msg} | "
+                            log_msg = (
+                                f"Eval [{map_mode}] | l1 Loss: {l1_msg} | "
+                                f"Avg. L2: {avg_l2_msg} | "
+                            )
                             log_msg += " | ".join(acc_msgs)
                             for bname, bucket_metrics in result["bucket"].items():
                                 log_msg += (
                                     f" | {bname}_l1: {bucket_metrics['l1']:.3f}"
+                                    f" | {bname}_avg_l2: "
+                                    f"{bucket_metrics['avg_l2']:.3f}"
                                 )
                                 for acc_key in sorted(bucket_metrics.keys()):
                                     if not acc_key.startswith("acc@"):
@@ -1066,6 +1198,12 @@ class DrivePiZeroTrainAgent:
                             )
                             eval_metrics_for_log[f"eval/{map_mode}/l1_std"] = (
                                 result["l1_std"].item()
+                            )
+                            eval_metrics_for_log[f"eval/{map_mode}/avg_l2_mean"] = (
+                                result["avg_l2_mean"].item()
+                            )
+                            eval_metrics_for_log[f"eval/{map_mode}/avg_l2_std"] = (
+                                result["avg_l2_std"].item()
                             )
                             for threshold, accuracy, std in zip(
                                 self.eval_thresholds,
@@ -1082,6 +1220,9 @@ class DrivePiZeroTrainAgent:
                                 eval_metrics_for_log[f"eval/{map_mode}/{bname}_l1"] = (
                                     bucket_metrics["l1"]
                                 )
+                                eval_metrics_for_log[
+                                    f"eval/{map_mode}/{bname}_avg_l2"
+                                ] = bucket_metrics["avg_l2"]
                                 eval_metrics_for_log[f"eval/{map_mode}/{bname}_count"] = (
                                     bucket_metrics["count"]
                                 )
@@ -1095,6 +1236,9 @@ class DrivePiZeroTrainAgent:
                             normal_result = eval_results["normal"]
                             eval_metrics_for_log["eval l1 loss"] = normal_result[
                                 "l1_mean"
+                            ].item()
+                            eval_metrics_for_log["eval avg l2"] = normal_result[
+                                "avg_l2_mean"
                             ].item()
                             eval_metrics_for_log.update(
                                 {

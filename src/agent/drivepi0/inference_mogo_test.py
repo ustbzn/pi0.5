@@ -522,13 +522,13 @@ class DrivePiZeroInferenceAgent:
                         y_pred = torch.from_numpy(y_pred)
                     pred_traj_real = torch.stack([x_pred, y_pred], dim=1).squeeze(0)
                     if isinstance(pred_traj_real, torch.Tensor):
-                        pred_traj_real = pred_traj_real.cpu().numpy()
+                        pred_traj_real = pred_traj_real.float().cpu().numpy()
                     
                     # 获取真实轨迹
                     # 新数据格式：fur_trajectory ndarray [N, 2]，存储顺序为 [y, x]
                     if "fur_trajectory" in all_data:
                         fur_raw = np.asarray(all_data["fur_trajectory"], dtype=np.float32)  # [N, 2] (y, x)
-                        gt_traj_real = np.stack([fur_raw[:, 1], fur_raw[:, 0]], axis=-1)  # 转为 [N, 2] (x, y)
+                        gt_traj_real = np.stack([fur_raw[:, 1], fur_raw[:, 0]], axis=-1).astype(np.float32)  # 转为 [N, 2] (x, y)
                     else:
                         # 兼容旧格式 fur_x / fur_y
                         fur_x_gt = all_data["fur_x"]
@@ -538,7 +538,7 @@ class DrivePiZeroInferenceAgent:
                         if fur_x_gt_arr.ndim == 2:
                             fur_x_gt_arr = fur_x_gt_arr[-1]
                             fur_y_gt_arr = fur_y_gt_arr[-1]
-                        gt_traj_real = np.stack([fur_x_gt_arr, fur_y_gt_arr], axis=-1)
+                        gt_traj_real = np.stack([fur_x_gt_arr, fur_y_gt_arr], axis=-1).astype(np.float32)
                     
                     # 存储（已经是 numpy 数组）
                     scene_pred_trajectories.append(pred_traj_real)
