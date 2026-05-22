@@ -127,10 +127,25 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
         # JointModel 直接接收 language_model
         from src.model.DrivePi0.joint_model import JointModel
+        # ── MoE 配置透传 ─────────────────────────────────────────────
+        # cfg.moe 写在顶层，但 Mixture 是用 cfg.joint.config 构造的，
+        # 需要把 moe 段合并进去，MixtureDecoderLayer 才能 config.get("moe")。
+        moe_cfg = cfg.get("moe", None)
+        if moe_cfg is not None:
+            from omegaconf import OmegaConf as _OC
+            _OC.set_struct(cfg.joint.config, False)
+            cfg.joint.config.moe = moe_cfg
+        # ────────────────────────────────────────────────────────────
         self.joint_model = JointModel(
             cfg.joint.config,
             pretrained_language_model=language_model,
         )
+
+        # ── MoE: 缓存 aux_loss 系数（forward 末尾用） ────────────────
+        self.moe_cfg = moe_cfg
+        self.moe_aux_loss_coeff = 1.0
+        if moe_cfg is not None:
+            self.moe_aux_loss_coeff = float(moe_cfg.get("aux_loss_coeff", 1.0))
 
         # Action, proprio, time encoders
         self.action_expert_adaptive_mode = cfg.action_expert_adaptive_mode
@@ -238,6 +253,24 @@ class DrivePiZero(nn.Module, NoSyncBase):
             + list(self.proprio_encoder.parameters())
             + list(self.joint_model.mixtures["action"].parameters())
         )
+        # ── MoE：将 routed/router/(可选)shared 参数从 action group 中剔除，
+        # 交给独立的 moe_optimizer 管理。
+        moe_cfg = self.cfg.get("moe", None)
+        action_moe_enable = bool(
+            moe_cfg
+            and moe_cfg.get("action_expert", None)
+            and moe_cfg.action_expert.get("enable", False)
+        )
+        if action_moe_enable:
+            excluded_ids = set()
+            for p in self.moe_router_parameters:
+                excluded_ids.add(id(p))
+            for p in self.moe_routed_expert_parameters:
+                excluded_ids.add(id(p))
+            if bool(moe_cfg.get("freeze_shared_expert", False)):
+                for p in self.moe_shared_expert_parameters:
+                    excluded_ids.add(id(p))
+            params = [p for p in params if id(p) not in excluded_ids]
         # 方案 A: 辅助 heads 跟随 action expert 使用 action_lr 训练
         if self.enable_aux_loss:
             params += list(self.maneuver_head.parameters())
@@ -569,6 +602,79 @@ class DrivePiZero(nn.Module, NoSyncBase):
     def freeze_all_weights(self):
         for _, param in self.named_parameters():
             param.requires_grad = False
+
+    # ==================== MoE 辅助方法 / 参数分组 ====================
+    # 设计说明详见 docs/moe_design_v2_适配方案.md
+    #   - aux_loss 不通过 forward 返回值传出，而是缓存到每个 SharedExpertMoEMLP 模块的
+    #     ``_pending_aux_loss`` 属性，由本类 forward 末尾统一遍历收集。
+    #   - 这样 layer_func("mlp", ...) 接口保持不变，torch.compile 边界不需要处理 tuple。
+    def _iter_moe_modules(self):
+        """遍历本模型中所有 SharedExpertMoEMLP 子模块。"""
+        from src.model.DrivePi0.moe_mlp import SharedExpertMoEMLP
+        for m in self.modules():
+            if isinstance(m, SharedExpertMoEMLP):
+                yield m
+
+    def _collect_moe_aux_loss(self) -> torch.Tensor:
+        """汇总所有 MoE 模块的 aux_loss，并清空各模块的缓存。
+
+        Returns:
+            标量 tensor。若没有 MoE 模块或本轮 forward 未触发 MoE，则返回 0。
+        """
+        total: Optional[torch.Tensor] = None
+        for m in self._iter_moe_modules():
+            aux = m.consume_aux_loss()
+            if aux is None:
+                continue
+            total = aux if total is None else total + aux
+        if total is None:
+            device = next(self.parameters()).device
+            return torch.zeros((), device=device)
+        return total
+
+    def has_moe(self) -> bool:
+        return any(True for _ in self._iter_moe_modules())
+
+    def init_routed_experts_from_shared(self, noise_std: float = 0.01):
+        """在 shared_expert 已经加载到目标权重后调用，给所有 routed expert 做初始化。
+
+        - 首次训练（load_pretrained_weights）路径：调用一次，让 routed 从 Qwen3 预训练 MLP
+          初始化（虽然 action mixture 没有预训练对应，但至少避免随机初始化的大梯度）。
+        - finetune 路径：在 ``_load_model_weights_only`` 之后调用，让 routed 从当前 action
+          MLP 权重出发，加速收敛。
+        - resume 路径：不要调用，因为 checkpoint 已经包含完整的 routed 权重。
+        """
+        cnt = 0
+        for m in self._iter_moe_modules():
+            m.init_routed_from_shared(noise_std=noise_std)
+            cnt += 1
+        if cnt > 0:
+            log.info(
+                f"Initialized routed experts from shared in {cnt} MoE modules "
+                f"(noise_std={noise_std})"
+            )
+
+    @property
+    def moe_router_parameters(self):
+        params = []
+        for m in self._iter_moe_modules():
+            params.extend(list(m.gate.parameters()))
+        return params
+
+    @property
+    def moe_routed_expert_parameters(self):
+        params = []
+        for m in self._iter_moe_modules():
+            params.extend(list(m.routed_experts.parameters()))
+        return params
+
+    @property
+    def moe_shared_expert_parameters(self):
+        params = []
+        for m in self._iter_moe_modules():
+            params.extend(list(m.shared_expert.parameters()))
+        return params
+    # ==================== /MoE 辅助方法 ====================
 
     def tie_action_proprio_weights(self):
         """technically more than just tying weights"""
@@ -1334,6 +1440,14 @@ class DrivePiZero(nn.Module, NoSyncBase):
             )
             loss = loss + aux_loss
             self._aux_labels = None  # 用完清除
+
+        # ===== MoE: 收集并累加各层 SharedExpertMoEMLP 的负载均衡 aux_loss =====
+        # 每个 MoE 模块的 forward 已经把 aux_loss 写到 ``_pending_aux_loss``，
+        # 这里统一收集后清空，避免下一次 forward 之前残留。
+        if self.has_moe():
+            moe_aux_loss = self._collect_moe_aux_loss()
+            if moe_aux_loss.requires_grad:
+                loss = loss + self.moe_aux_loss_coeff * moe_aux_loss
 
         return loss.to(v_psi.dtype)
 

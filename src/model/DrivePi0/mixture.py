@@ -84,9 +84,41 @@ class MixtureDecoderLayer(nn.Module):
         super().__init__()
         self.self_attn = MixtureAttention(config)
 
-        self.mlp = Qwen3MLP(
-            config, use_quantize=config.use_quantize, use_lora=config.use_lora
+        # ── MoE 切换 ─────────────────────────────────────────────────────
+        # 当 config.moe.action_expert.enable=True 时，把这条 mixture 的 MLP 替换为
+        # SharedExpertMoEMLP（1 shared + N routed top-k）。
+        # shared/routed expert 的具体初始化（用当前 checkpoint 权重 + 扰动）由
+        # DrivePiZero.__init__ 在替换之后统一处理，这里只负责构造模块结构。
+        # 注意：routed expert 默认强制关闭 LoRA / 量化，避免参数爆炸；如需细化可在
+        # SharedExpertMoEMLP 外层增加策略。
+        moe_cfg = config.get("moe", None)
+        action_moe_enable = bool(
+            moe_cfg
+            and moe_cfg.get("action_expert", None)
+            and moe_cfg.action_expert.get("enable", False)
         )
+        if action_moe_enable:
+            from src.model.DrivePi0.moe_mlp import SharedExpertMoEMLP
+            ae_cfg = moe_cfg.action_expert
+            self.mlp = SharedExpertMoEMLP(
+                mlp_class=Qwen3MLP,
+                config=config,
+                num_routed_experts=int(ae_cfg.get("num_routed_experts", 3)),
+                top_k=int(ae_cfg.get("top_k", 1)),
+                load_balance_coeff=float(ae_cfg.get("load_balance_coeff", 0.01)),
+                mlp_kwargs={
+                    "use_quantize": config.use_quantize,
+                    # routed expert 不再叠加 LoRA，避免与 inject_lora 的 LoRA 路径重复
+                    "use_lora": False,
+                },
+            )
+            self.is_moe_mlp = True
+        else:
+            self.mlp = Qwen3MLP(
+                config, use_quantize=config.use_quantize, use_lora=config.use_lora
+            )
+            self.is_moe_mlp = False
+        # ────────────────────────────────────────────────────────────────
 
         self.adaptive_mode = config.get("adaptive_mode", None)
         if self.adaptive_mode:

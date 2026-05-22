@@ -186,10 +186,21 @@ class DrivePiZeroTrainAgent:
             self._load_model_weights_only(cfg.finetune_checkpoint_path)
             if cfg.lora:
                 self.model.inject_lora(cfg)
+            # MoE finetune: shared_expert 已经从 checkpoint 重映射加载完毕，
+            # 用 shared_expert 当前权重 + 小扰动初始化 routed_expert，加速收敛。
+            if cfg.get("moe", None) is not None and self.model.has_moe():
+                noise_std = float(cfg.moe.get("routed_init_noise_std", 0.01))
+                self.model.init_routed_experts_from_shared(noise_std=noise_std)
         elif cfg.load_pretrained_weights:
             self.model.load_pretrained_weights()
             if cfg.lora:
                 self.model.inject_lora(cfg)
+            # MoE 首训：action mixture 本身是随机初始化，routed_expert 也是；
+            # 仍然做一次"从 shared 拷贝 + 扰动"，让 N 个 routed expert 起点一致，
+            # 避免初期被某个偶然初始化好的 expert 抢占所有 token。
+            if cfg.get("moe", None) is not None and self.model.has_moe():
+                noise_std = float(cfg.moe.get("routed_init_noise_std", 0.01))
+                self.model.init_routed_experts_from_shared(noise_std=noise_std)
         self.model.tie_action_proprio_weights()
         self.model.freeze_unused_weights()
         if cfg.lora:
@@ -197,6 +208,16 @@ class DrivePiZeroTrainAgent:
         # 如果不训练 VLM，则彻底冻结 VLM 相关权重（vision tower / projector / gemma）
         if not cfg.train_vlm:
             self.model.freeze_vlm_weights()
+        # MoE: 可选冻结 shared_expert，保护已训练的 action MLP 不被 routed expert
+        # 的梯度污染。默认开启，行为最稳。
+        if cfg.get("moe", None) is not None and self.model.has_moe():
+            if bool(cfg.moe.get("freeze_shared_expert", False)):
+                for p in self.model.moe_shared_expert_parameters:
+                    p.requires_grad = False
+                log.info(
+                    f"MoE: froze {len(self.model.moe_shared_expert_parameters)} "
+                    f"shared_expert parameters (freeze_shared_expert=True)"
+                )
         self.model.to(self.dtype)
         self.model.to(self.device)
         if cfg.get(
@@ -238,11 +259,18 @@ class DrivePiZeroTrainAgent:
             import torch.distributed as dist
             from torch.nn.parallel import DistributedDataParallel as DDP
 
+            # MoE 启用时打开 find_unused_parameters：当某个 routed expert 在当前
+            # batch 完全未被路由到时，其 grad 会是 None，DDP 会报错；模块内部已加
+            # dummy forward 作为保险，但 find_unused_parameters 仍是更稳的兜底。
+            moe_enabled_for_ddp = bool(
+                cfg.get("moe", None) is not None and self.model.has_moe()
+            )
             self.model = DDP(
                 self.model,
                 device_ids=[local_rank],
                 gradient_as_bucket_view=True,
                 static_graph=False,  # didn't see improvement with True
+                find_unused_parameters=moe_enabled_for_ddp,
             )
             model = self.model.module
             dist.barrier()
@@ -495,6 +523,74 @@ class DrivePiZeroTrainAgent:
             log.info(
                 f"Number of trained parameters (VLM): {get_num_params_in_billions(self.vlm_optimizer):.3f}B"
             )
+
+        # ===== MoE optimizer group =====
+        # router 用稍高 lr（默认 1e-4），routed_expert 与 action_lr 一致。
+        # shared_expert 不归这里：若 freeze_shared_expert=True 已经被冻结；否则
+        # 仍随 action_optimizer 用 action_lr 一起训练。
+        self.use_moe_optimizer = bool(
+            cfg.get("moe", None) is not None
+            and model.has_moe()
+        )
+        self.moe_router_params = []
+        self.moe_routed_expert_params = []
+        if self.use_moe_optimizer:
+            moe_cfg = cfg.moe
+            self.moe_router_params = list(model.moe_router_parameters)
+            self.moe_routed_expert_params = list(model.moe_routed_expert_parameters)
+            router_lr = float(moe_cfg.get("router_lr", 1e-4))
+            routed_expert_lr = float(moe_cfg.get("routed_expert_lr", cfg.action_lr))
+            router_wd = float(moe_cfg.get("router_weight_decay", 0.0))
+            routed_expert_wd = float(
+                moe_cfg.get("routed_expert_weight_decay", cfg.action_weight_decay)
+            )
+            moe_lr_scheduler_cfg = moe_cfg.get("lr_scheduler", {}) or {}
+            router_min_lr = float(
+                moe_lr_scheduler_cfg.get("router_min_lr", router_lr * 0.01)
+            )
+            routed_expert_min_lr = float(
+                moe_lr_scheduler_cfg.get(
+                    "routed_expert_min_lr", cfg.action_lr_scheduler.min_lr
+                )
+            )
+            self.moe_optimizer = bnb.optim.AdamW8bit(
+                [
+                    {
+                        "params": self.moe_router_params,
+                        "lr": router_lr,
+                        "weight_decay": router_wd,
+                    },
+                    {
+                        "params": self.moe_routed_expert_params,
+                        "lr": routed_expert_lr,
+                        "weight_decay": routed_expert_wd,
+                    },
+                ],
+                lr=routed_expert_lr,
+                weight_decay=routed_expert_wd,
+            )
+            self.moe_lr_scheduler = CosineAnnealingWarmupRestarts(
+                self.moe_optimizer,
+                first_cycle_steps=cfg.action_lr_scheduler.first_cycle_steps,
+                cycle_mult=1.0,
+                max_lr=[router_lr, routed_expert_lr],
+                min_lr=[router_min_lr, routed_expert_min_lr],
+                warmup_steps=cfg.action_lr_scheduler.warmup_steps,
+                gamma=1.0,
+            )
+            self.trained_parameters += (
+                self.moe_router_params + self.moe_routed_expert_params
+            )
+            log.info(
+                "MoE optimizer enabled: "
+                f"router_lr={router_lr:.2e}, routed_expert_lr={routed_expert_lr:.2e}, "
+                f"router_params={len(self.moe_router_params)}, "
+                f"routed_expert_params={len(self.moe_routed_expert_params)}"
+            )
+            log.info(
+                f"Number of trained parameters (MoE): {get_num_params_in_billions(self.moe_optimizer):.3f}B"
+            )
+
         if cfg.resume_checkpoint_path:
             self.load_optimizer(cfg.resume_checkpoint_path)
         # finetune 时不恢复优化器，使用全新的学习率调度
@@ -859,14 +955,24 @@ class DrivePiZeroTrainAgent:
                             self.vlm_trained_params,
                             max_norm=self.max_grad_norm,
                         )
+                    if self.use_moe_optimizer:
+                        torch.nn.utils.clip_grad_norm_(
+                            self.moe_router_params + self.moe_routed_expert_params,
+                            max_norm=self.max_grad_norm,
+                        )
                     self.action_optimizer.step()
                     self.action_lr_scheduler.step()
                     if self.train_vlm:
                         self.vlm_optimizer.step()
                         self.vlm_lr_scheduler.step()
+                    if self.use_moe_optimizer:
+                        self.moe_optimizer.step()
+                        self.moe_lr_scheduler.step()
                     self.action_optimizer.zero_grad(set_to_none=True)
                     if self.train_vlm:
                         self.vlm_optimizer.zero_grad(set_to_none=True)
+                    if self.use_moe_optimizer:
+                        self.moe_optimizer.zero_grad(set_to_none=True)
                     cnt_update += 1
 
                     # save model at the end of update, models just synced
@@ -1270,6 +1376,11 @@ class DrivePiZeroTrainAgent:
                     log_msg = f"Batch {cnt_batch} Update {cnt_update}: t {timer():8.4f} | vram {peak_vram:6.3f} | train loss {loss_train_metric:6.4f} | action lr {self.action_optimizer.param_groups[0]['lr']:10.8f} | eta {eta_str}"
                     if self.use_separate_hdmap_optimizer_group:
                         log_msg += f" | hdmap lr {self.action_optimizer.param_groups[1]['lr']:10.8f}"
+                    if self.use_moe_optimizer:
+                        log_msg += (
+                            f" | moe_router_lr {self.moe_optimizer.param_groups[0]['lr']:10.8f}"
+                            f" | moe_routed_lr {self.moe_optimizer.param_groups[1]['lr']:10.8f}"
+                        )
                     log.info(log_msg)
                     # 构建 metrics 字典
                     metrics = {
@@ -1281,6 +1392,27 @@ class DrivePiZeroTrainAgent:
                         metrics["train/hdmap_lr"] = self.action_optimizer.param_groups[1]["lr"]
                     if self.train_vlm:
                         metrics["vlm lr"] = self.vlm_optimizer.param_groups[0]["lr"]
+                    if self.use_moe_optimizer:
+                        metrics["train/moe_router_lr"] = self.moe_optimizer.param_groups[0]["lr"]
+                        metrics["train/moe_routed_expert_lr"] = self.moe_optimizer.param_groups[1]["lr"]
+                        # MoE 健康监控：aux_loss 和各 routed expert 的 token 占比
+                        try:
+                            ddp_inner = self.model.module if self.multi_gpu else self.model
+                            moe_modules = list(ddp_inner._iter_moe_modules())
+                            if moe_modules:
+                                aux_vals = [m.last_aux_loss_value() for m in moe_modules]
+                                usage_mat = torch.stack(
+                                    [m.last_expert_usage() for m in moe_modules], dim=0
+                                )
+                                metrics["train/moe_aux_loss_mean"] = float(np.mean(aux_vals))
+                                avg_usage = usage_mat.mean(dim=0).cpu().tolist()
+                                for i, u in enumerate(avg_usage):
+                                    metrics[f"train/moe_expert{i}_usage"] = float(u)
+                                metrics["train/moe_expert_usage_std"] = float(
+                                    usage_mat.std(dim=0).mean().item()
+                                )
+                        except Exception as e:
+                            log.debug(f"MoE metrics gathering failed: {e}")
                     
                     if new_eval_from_last_log:
                         metrics.update(eval_metrics_for_log)
@@ -1317,6 +1449,12 @@ class DrivePiZeroTrainAgent:
             "action_lr_scheduler": self.action_lr_scheduler.state_dict(),
             "vlm_lr_scheduler": self.vlm_lr_scheduler.state_dict()
             if self.train_vlm
+            else None,
+            "moe_optimizer": self.moe_optimizer.state_dict()
+            if self.use_moe_optimizer
+            else None,
+            "moe_lr_scheduler": self.moe_lr_scheduler.state_dict()
+            if self.use_moe_optimizer
             else None,
             # "wandb_id": wandb.run.id if self.use_wandb else None,
         }
@@ -1355,6 +1493,12 @@ class DrivePiZeroTrainAgent:
             self.vlm_optimizer.load_state_dict(data["vlm_optimizer"])
             optimizer_to(self.vlm_optimizer, self.device)
             self.vlm_lr_scheduler.load_state_dict(data["vlm_lr_scheduler"])
+        if self.use_moe_optimizer and data.get("moe_optimizer") is not None:
+            self.moe_optimizer.load_state_dict(data["moe_optimizer"])
+            optimizer_to(self.moe_optimizer, self.device)
+            if data.get("moe_lr_scheduler") is not None:
+                self.moe_lr_scheduler.load_state_dict(data["moe_lr_scheduler"])
+            log.info("Loaded MoE optimizer and scheduler states from checkpoint")
         log.info(f"Loaded optimizer and scheduler states from {path}")
 
     @log_execution_time()
@@ -1364,6 +1508,33 @@ class DrivePiZeroTrainAgent:
         ckpt = {
             k.replace("_orig_mod.", ""): v for k, v in data["model"].items()
         }
+
+        # ── MoE finetune 兼容：把 non-MoE checkpoint 中 mixtures.action.layers.{N}.mlp.<inner>
+        # 重映射到当前 MoE 模型的 mixtures.action.layers.{N}.mlp.shared_expert.<inner>，
+        # 让 shared_expert 从 finetune 起点出发，routed_expert 之后再从 shared 拷贝。
+        moe_cfg = self.config.get("moe", None)
+        action_moe_enable = bool(
+            moe_cfg
+            and moe_cfg.get("action_expert", None)
+            and moe_cfg.action_expert.get("enable", False)
+        )
+        if action_moe_enable:
+            import re as _re
+            remap = {}
+            pattern = _re.compile(r"^(.*mixtures\.action\.layers\.\d+\.mlp)\.(?!shared_expert\.|routed_experts\.|gate\.)(.+)$")
+            for k, v in ckpt.items():
+                m = pattern.match(k)
+                if m:
+                    new_k = f"{m.group(1)}.shared_expert.{m.group(2)}"
+                    remap[new_k] = v
+                else:
+                    remap[k] = v
+            ckpt = remap
+            log.info(
+                "Finetune (MoE enabled): remapped action MLP keys to "
+                "mlp.shared_expert.* before load."
+            )
+
         model_state = self.model.state_dict()
         filtered = {}
         skipped = []
