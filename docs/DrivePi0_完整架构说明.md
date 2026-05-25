@@ -195,6 +195,13 @@ action            ✓         ✓        ✓
 7. **计算输出**：`attn_output = attn_weights @ V`
 8. **分割回各 mixture**
 
+Q/K/V head 数说明：
+
+- Qwen3-VL 使用 GQA（Grouped Query Attention），例如 `num_attention_heads=16`、`num_key_value_heads=8`、`head_dim=128`。
+- VLM 的 Q 是 `2048 -> 16*128`，K/V 是 `2048 -> 8*128`，随后通过 `repeat_kv` 扩展到 16 个 head。这是预训练 Qwen3-VL 的原生结构，不会破坏预训练权重。
+- `proprio/action` 如果参与同一个 joint attention，需要和 VLM 对齐 `num_heads` 与 `head_dim`，否则无法沿 sequence 维拼接 Q/K/V。
+- 对 `hidden_size=1024` 的 `proprio/action`，配置为 `16 heads * 128` 时，Q/O 形状是 `1024 -> 2048 -> 1024`；这是合法的 attention inner dim 扩展，但加载旧 checkpoint 时要求 head 配置一致。
+
 ---
 
 ## 三、数据流和计算流程
@@ -417,4 +424,3 @@ Drive-π0 是一个基于 Mixture of Experts 架构的视觉-语言-动作模型
 
 **文档生成时间**：2024年
 **版本**：基于 DriveMoE 代码库
-

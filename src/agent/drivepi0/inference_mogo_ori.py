@@ -30,6 +30,7 @@ from src.agent.dataset import Bench2DriveDataset
 from src.model.DrivePi0.processing import VLAProcessor
 from src.utils.metric import get_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
+from src.utils.qwen3_vl import sync_qwen3_video_processor
 
 log = logging.getLogger(__name__)  # 保留用于 log_allocated_gpu_memory 等工具函数
 
@@ -65,6 +66,7 @@ class DrivePiZeroInferenceAgent:
             cfg.pretrained_model_path,
             trust_remote_code=True,
         )
+        self.processor = sync_qwen3_video_processor(self.processor)
         # 保存 padding 参数，确保推理时 input_ids 长度与 mask 一致
         self.max_seq_len = cfg.max_seq_len
         self.tokenizer_padding = cfg.get("tokenizer_padding", "max_length")

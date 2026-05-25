@@ -85,6 +85,7 @@ class TorchDataset(Dataset):
         nav_onehot: bool = False,
         use_his_trajectory: bool = False,
         state_frame_index: Optional[int] = None,
+        temporal_image_offsets: Optional[list[int]] = None,
     ):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
@@ -95,6 +96,8 @@ class TorchDataset(Dataset):
         self.nav_onehot = nav_onehot
         self.use_his_trajectory = use_his_trajectory
         self.state_frame_index = state_frame_index
+        offsets = temporal_image_offsets if temporal_image_offsets is not None else [1, 0]
+        self.temporal_image_offsets = tuple(int(offset) for offset in offsets)
         self.list_data_dict = [f for f in os.listdir(self.data_path) if f.endswith('.pkl')]
 
     def __len__(self):
@@ -174,6 +177,19 @@ class TorchDataset(Dataset):
                     return path
         return None
 
+    def _load_temporal_camera_frames(self, all_data, cam_name):
+        frames = []
+        for offset in self.temporal_image_offsets:
+            if offset == 0:
+                key = f"cam_{cam_name}"
+            else:
+                key = f"cam_{cam_name}_prev_{offset}"
+            path = self._pick_image_path(all_data, key)
+            if not path:
+                return None
+            frames.append(image_normalization(path, (224, 224)))
+        return frames
+
     def __getitem__(self, i):
         data_dict = {}
         pkl_data_path = os.path.join(self.data_path, self.list_data_dict[i])
@@ -193,19 +209,16 @@ class TorchDataset(Dataset):
             data_dict['state'] = state
 
             if 'cam_front' in all_data:
-                cam_key_map = {
-                    'front': ('cam_front', 'cam_front_prev_1'),
-                    'right': ('cam_right', 'cam_right_prev_1'),
-                    'left': ('cam_left', 'cam_left_prev_1'),
-                    'back': ('cam_back', 'cam_back_prev_1'),
-                }
-                for cam_name, (current_key, history_key) in cam_key_map.items():
-                    path = self._pick_image_path(all_data, current_key)
-                    path_time = self._pick_image_path(all_data, history_key)
-                    if not path or not path_time:
+                for cam_name in ['front', 'right', 'left', 'back']:
+                    frames = self._load_temporal_camera_frames(all_data, cam_name)
+                    if frames is None:
                         return self.__getitem__((i + 1) % len(self))
-                    data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224))
-                    data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224))
+                    data_dict[f'image_{cam_name}_frames'] = np.stack(frames, axis=0)
+                    data_dict[f'image_{cam_name}'] = frames[-1]
+                    if len(frames) >= 2:
+                        data_dict[f'image_{cam_name}_time'] = frames[-2]
+                    if len(frames) >= 3:
+                        data_dict[f'image_{cam_name}_time2'] = frames[-3]
             elif 'cam_id' not in all_data.keys():
                 for cam_name in ['front', 'right', 'left', 'back']:
                     cam_key = f'his_cam_{cam_name}'
@@ -269,6 +282,7 @@ def prepare_b2d_dataset(
     nav_onehot: bool = False,
     use_his_trajectory: bool = False,
     state_frame_index: Optional[int] = None,
+    temporal_image_offsets: Optional[list[int]] = None,
 ):
     if use_fixed_images:
         data_path = os.path.join(work_dir, fixed_dir_name)
@@ -281,6 +295,7 @@ def prepare_b2d_dataset(
             nav_onehot=nav_onehot,
             use_his_trajectory=use_his_trajectory,
             state_frame_index=state_frame_index,
+            temporal_image_offsets=temporal_image_offsets,
         )
     data_path = os.path.join(work_dir, dynamic_dir_name)
     if split == 'train':
@@ -294,6 +309,7 @@ def prepare_b2d_dataset(
             nav_onehot=nav_onehot,
             use_his_trajectory=use_his_trajectory,
             state_frame_index=state_frame_index,
+            temporal_image_offsets=temporal_image_offsets,
         )
     if split == 'val':
         val_data_path = os.path.join(data_path, 'val')
@@ -306,5 +322,6 @@ def prepare_b2d_dataset(
             nav_onehot=nav_onehot,
             use_his_trajectory=use_his_trajectory,
             state_frame_index=state_frame_index,
+            temporal_image_offsets=temporal_image_offsets,
         )
     raise ValueError("split type must be 'train' or 'val'")

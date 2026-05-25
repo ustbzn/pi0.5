@@ -1,4 +1,4 @@
-export PYTHONPATH="/pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo:$PYTHONPATH"
+export PYTHONPATH="/pcpt/pcpt/project/lijun/.code/qw3/Drive_pi:$PYTHONPATH"
 
 # ============================================================
 # 多卡并行推理：4 张 GPU 各自处理 1/4 的数据
@@ -6,12 +6,12 @@ export PYTHONPATH="/pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo:$PYTHON
 # --rank 指定当前进程编号（0-indexed），--world_size 为总 GPU 数
 # ============================================================
 
-WORLD_SIZE=4
+WORLD_SIZE=1
 VAL_DATA_DIR=/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/val
-CONFIG_PATH=config/inference/DrivePi0/qwen_mogo_havetrain.yaml
+CONFIG_PATH=config/inference/DrivePi0/qwen_mogo_havetrain_vlm.yaml
 STATISTIC_PATH=/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2/statistics_9dim.json
-OUTPUT_DIR=inference_out/mogo-2503/inference/no_VLM_0415
-LOG_DIR=inference_out/mogo-2503/logs/no_VLM_0415
+OUTPUT_DIR=inference_out/mogo-2503/inference/no_VLM_0423
+LOG_DIR=inference_out/mogo-2503/logs/no_VLM_0423
 
 mkdir -p ${OUTPUT_DIR}
 mkdir -p ${LOG_DIR}

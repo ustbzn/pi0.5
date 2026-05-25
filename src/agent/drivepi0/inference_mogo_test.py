@@ -30,6 +30,7 @@ from src.agent.dataset import Bench2DriveDataset
 from src.model.DrivePi0.processing import VLAProcessor
 from src.utils.metric import get_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
+from src.utils.qwen3_vl import sync_qwen3_video_processor
 
 log = logging.getLogger(__name__)  # 保留用于 log_allocated_gpu_memory 等工具函数
 
@@ -75,6 +76,7 @@ class DrivePiZeroInferenceAgent:
                 cfg.pretrained_model_path,
                 trust_remote_code=True,
             )
+            self.processor = sync_qwen3_video_processor(self.processor)
             # 保存 padding 参数，确保推理时 input_ids 长度与 mask 一致
             self.max_seq_len = cfg.max_seq_len
             self.tokenizer_padding = cfg.get("tokenizer_padding", "max_length")
@@ -83,7 +85,23 @@ class DrivePiZeroInferenceAgent:
         self.nav_onehot = cfg.data.get("nav_onehot", False)
         self.use_his_trajectory = cfg.data.get("use_his_trajectory", False)
         self.state_frame_index = cfg.data.get("state_frame_index", None)
+        self.video_frame_offsets = list(cfg.get("video_frame_offsets", [1, 0]))
         print('Agent done')
+
+    def _frame_key_for_offset(self, cam_name, offset):
+        if offset == 0:
+            return f"cam_{cam_name}"
+        return f"cam_{cam_name}_prev_{offset}"
+
+    def _load_temporal_frames_from_all_data(self, all_data, cam_name, extract_image_path):
+        frames = []
+        for offset in self.video_frame_offsets:
+            key = self._frame_key_for_offset(cam_name, offset)
+            if key not in all_data:
+                return None
+            cam_path = extract_image_path(all_data[key])
+            frames.append(image_normalization(cam_path, (224, 224)))
+        return frames
     
     
     def run(self, data_dict):
@@ -121,47 +139,43 @@ class DrivePiZeroInferenceAgent:
             trajectory = self.model.infer_action(**inputs)
             return trajectory
 
-        # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
+        # 4 cameras, each camera is one temporal clip ordered from oldest to newest.
         cam_names = ['front', 'right', 'left', 'back']
         cam_labels = [
-            'current front view', 'current right view',
-            'current left view', 'current rear view',
-            'previous front view', 'previous right view',
-            'previous left view', 'previous rear view',
+            'front camera temporal sequence',
+            'right camera temporal sequence',
+            'left camera temporal sequence',
+            'rear camera temporal sequence',
         ]
-
-        image_list = []
-        for cam in cam_names:
-            img = data_dict[f"image_{cam}"].unsqueeze(0)  # [1, H, W, C]
-            img = einops.rearrange(img, "B H W C -> B C H W")
-            image_list.append(img.unsqueeze(1))  # [1, 1, C, H, W]
-        for cam in cam_names:
-            img = data_dict[f"image_{cam}_time"].unsqueeze(0)  # [1, H, W, C]
-            img = einops.rearrange(img, "B H W C -> B C H W")
-            image_list.append(img.unsqueeze(1))  # [1, 1, C, H, W]
-
-        images = torch.cat(image_list, dim=1)  # [1, 8, C, H, W]
         texts = [data_dict["language_instruction"]]
 
-        batch_size = images.shape[0]
-        num_images_per_sample = images.shape[1]  # 8
-
-        # 转换为 PIL Image 列表（Qwen3VLProcessor 需要）
-        pil_images = []
-        for i in range(batch_size):
-            for j in range(num_images_per_sample):
-                img = Image.fromarray(
-                    images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
+        # 转换为 4 个多帧 video clip（Qwen3VLProcessor 需要）
+        video_clips = []
+        for cam in cam_names:
+            if f"image_{cam}_frames" in data_dict:
+                frame_tensor = data_dict[f"image_{cam}_frames"]
+            else:
+                frame_tensor = torch.stack(
+                    [data_dict[f"image_{cam}_time"], data_dict[f"image_{cam}"]],
+                    dim=0,
                 )
-                pil_images.append(img)
+            clip_frames = [
+                Image.fromarray(frame.cpu().numpy().astype(np.uint8)).resize(
+                    (256, 256), Image.BICUBIC
+                )
+                for frame in frame_tensor
+            ]
+            video_clips.append(clip_frames)
 
-        # 构建 Qwen3VL 聊天格式（与训练一致，每张图像带语义标签）
+        # 构建 Qwen3VL 聊天格式（与训练一致，每个相机序列是一个 video slot）
         chat_texts = []
-        for i, text in enumerate(texts):
+        for text in texts:
             content = []
             for label in cam_labels:
-                content.append({"type": "text", "text": f"{label}:"})
-                content.append({"type": "image"})
+                content.append(
+                    {"type": "text", "text": f"{label} (chronological frames oldest to newest):"}
+                )
+                content.append({"type": "video"})
             content.append({"type": "text", "text": text})
             messages = [{"role": "user", "content": content}]
             chat_text = self.processor.apply_chat_template(
@@ -171,7 +185,7 @@ class DrivePiZeroInferenceAgent:
 
         model_inputs = self.processor(
             text=chat_texts,
-            images=pil_images,
+            videos=video_clips,
             return_tensors="pt",
             padding=self.tokenizer_padding,
             max_length=self.max_seq_len,
@@ -187,8 +201,8 @@ class DrivePiZeroInferenceAgent:
 
         inputs = {
             "input_ids": model_inputs["input_ids"],
-            "pixel_values": model_inputs["pixel_values"].to(self.dtype),
-            "image_grid_thw": model_inputs["image_grid_thw"],
+            "pixel_values": model_inputs["pixel_values_videos"].to(self.dtype),
+            "image_grid_thw": model_inputs["video_grid_thw"],
             "vlm_position_ids": vlm_position_ids,
             "proprio_position_ids": state_position_ids,
             "action_position_ids": action_position_ids,
@@ -390,20 +404,21 @@ class DrivePiZeroInferenceAgent:
                     )
 
                     data_dict = {}
-                    # 4 cameras x 2 time steps = 8 images（与训练一致）
-                    # 新数据格式：当前帧 cam_front / cam_left / cam_right / cam_back
-                    #             上一帧  cam_front_prev_1 / cam_left_prev_1 / cam_right_prev_1 / cam_back_prev_1
-                    cam_key_map = {
-                        'front': ('cam_front',      'cam_front_prev_1'),
-                        'right': ('cam_right',      'cam_right_prev_1'),
-                        'left':  ('cam_left',       'cam_left_prev_1'),
-                        'back':  ('cam_back',       'cam_back_prev_1'),
-                    }
-                    for cam_name, (cur_key, prev_key) in cam_key_map.items():
-                        cam_path = extract_image_path(all_data[cur_key])
-                        data_dict[f'image_{cam_name}'] = image_normalization(cam_path, (224, 224))
-                        cam_time_path = extract_image_path(all_data[prev_key])
-                        data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, (224, 224))
+                    for cam_name in ['front', 'right', 'left', 'back']:
+                        frames = self._load_temporal_frames_from_all_data(
+                            all_data, cam_name, extract_image_path
+                        )
+                        if frames is None:
+                            raise KeyError(
+                                f"Missing temporal frames for camera {cam_name} with offsets "
+                                f"{self.video_frame_offsets}"
+                            )
+                        data_dict[f'image_{cam_name}_frames'] = torch.from_numpy(
+                            np.stack(frames, axis=0)
+                        )
+                        data_dict[f'image_{cam_name}'] = data_dict[f'image_{cam_name}_frames'][-1]
+                        if len(frames) >= 2:
+                            data_dict[f'image_{cam_name}_time'] = data_dict[f'image_{cam_name}_frames'][-2]
                     nav_desc = all_data.get('navigation_command_descreption')
                     if nav_desc is not None:
                         nav_desc = np.asarray(nav_desc).reshape(-1)
@@ -667,12 +682,17 @@ if __name__ == '__main__':
             )
 
             data_dict = {}
-            # 4 cameras x 2 time steps = 8 images（与训练一致）
             for cam_name in ['front', 'right', 'left', 'back']:
-                cam_path = extract_image_path(all_data[f'his_cam_{cam_name}'])
-                data_dict[f'image_{cam_name}'] = image_normalization(cam_path, (224, 224))
-                cam_time_path = extract_image_path(all_data[f'his_cam_{cam_name}_time'])
-                data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, (224, 224))
+                current = image_normalization(
+                    extract_image_path(all_data[f'his_cam_{cam_name}']), (224, 224)
+                )
+                history = image_normalization(
+                    extract_image_path(all_data[f'his_cam_{cam_name}_time']), (224, 224)
+                )
+                frames = np.stack([history, current], axis=0)
+                data_dict[f'image_{cam_name}_frames'] = torch.from_numpy(frames)
+                data_dict[f'image_{cam_name}'] = data_dict[f'image_{cam_name}_frames'][-1]
+                data_dict[f'image_{cam_name}_time'] = data_dict[f'image_{cam_name}_frames'][-2]
             data_dict["language_instruction"] = "predict trajectory"
             data_dict['state'] = state
             

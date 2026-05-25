@@ -23,6 +23,7 @@ class Bench2DriveDataset:
             nav_onehot=config.get("nav_onehot", False),
             use_his_trajectory=config.get("use_his_trajectory", False),
             state_frame_index=config.get("state_frame_index", None),
+            temporal_image_offsets=config.get("temporal_image_offsets", None),
         )
         self.dataset = dataset
 

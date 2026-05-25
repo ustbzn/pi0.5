@@ -23,6 +23,7 @@ from src.model.DrivePi0.processing import VLAProcessor
 from src.utils.metric import get_action_accuracy
 from src.utils.monitor import Timer, log_allocated_gpu_memory, log_execution_time
 from src.utils.optim import CosineAnnealingWarmupRestarts, get_num_params_in_billions
+from src.utils.qwen3_vl import sync_qwen3_video_processor
 
 log = logging.getLogger(__name__)
 
@@ -183,12 +184,21 @@ class DrivePiZeroTrainAgent:
             self.model.load_pretrained_weights()
             if cfg.lora:
                 self.model.inject_lora(cfg)
+        effective_train_vlm = bool(cfg.train_vlm) and not bool(
+            cfg.get("state_only_for_action", False)
+        )
+        if cfg.train_vlm and not effective_train_vlm:
+            log.warning(
+                "state_only_for_action=True disables the VLM path during training; "
+                "forcing train_vlm=False and freezing all VLM/vision parameters."
+            )
+
         self.model.tie_action_proprio_weights()
         self.model.freeze_unused_weights()
         if cfg.lora:
             self.model.freeze_non_lora_weights_in_vlm()
-        # 如果不训练 VLM，则彻底冻结 VLM 相关权重（vision tower / projector / gemma）
-        if not cfg.train_vlm:
+        # state-only 训练不会使用任何 VLM 参数；或者显式关闭 train_vlm 时，也应全部冻结。
+        if not effective_train_vlm:
             self.model.freeze_vlm_weights()
         self.model.to(self.dtype)
         self.model.to(self.device)
@@ -357,7 +367,7 @@ class DrivePiZeroTrainAgent:
 
         # optimizer - trajectory only: 0.315B (0.333B with adaLN and time_dim=256),
         # rest: 2.291B (0.109B with lora rank 64, 0.055B with rank 32)
-        self.train_vlm = cfg.train_vlm
+        self.train_vlm = effective_train_vlm
         self.state_only_for_action = cfg.get("state_only_for_action", False)
         self.action_expert_params = model.action_expert_parameters
         self.trained_parameters = list(self.action_expert_params)
@@ -439,6 +449,7 @@ class DrivePiZeroTrainAgent:
                 cfg.pretrained_model_path,
                 trust_remote_code=True,
             )
+            self.processor = sync_qwen3_video_processor(self.processor)
             # 单独保存，供调用时使用
             self.processor_padding = cfg.tokenizer_padding
             self.processor_max_length = cfg.max_seq_len
@@ -482,6 +493,12 @@ class DrivePiZeroTrainAgent:
             state = batch["state"]
             trajectory = batch["trajectory"].squeeze(1)
             texts = batch["language_instruction"]
+            video_frame_offsets = list(
+                self.config.get(
+                    "video_frame_offsets",
+                    self.config.data.train.get("temporal_image_offsets", [1, 0]),
+                )
+            )
 
             if self.state_only_for_action:
                 batch_size = state.shape[0]
@@ -522,45 +539,56 @@ class DrivePiZeroTrainAgent:
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
                 return inputs
 
-            # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
+            # 4 cameras, each camera is one temporal video clip ordered from
+            # oldest to newest frame.
             cam_names = ['front', 'right', 'left', 'back']
-            # 图像语义标签：与 image_list 顺序严格对应
             cam_labels = [
-                'current front view', 'current right view',
-                'current left view', 'current rear view',
-                'previous front view', 'previous right view',
-                'previous left view', 'previous rear view',
+                'front camera temporal sequence',
+                'right camera temporal sequence',
+                'left camera temporal sequence',
+                'rear camera temporal sequence',
             ]
-            image_list = []
-            for cam in cam_names:
-                img = batch[f"image_{cam}"]  # [B, H, W, C]
-                img = einops.rearrange(img, "B H W C -> B C H W")
-                image_list.append(img.unsqueeze(1))  # [B, 1, C, H, W]
-            for cam in cam_names:
-                img = batch[f"image_{cam}_time"]  # [B, H, W, C]
-                img = einops.rearrange(img, "B H W C -> B C H W")
-                image_list.append(img.unsqueeze(1))  # [B, 1, C, H, W]
+            batch_size = batch["image_front"].shape[0]
 
-            images = torch.cat(image_list, dim=1)  # [B, 8, C, H, W]
-            batch_size = images.shape[0]
-            num_images_per_sample = images.shape[1]  # 8
-
-            # convert to PIL images for Qwen3VLProcessor
-            pil_images = []
+            # Convert to video clips for Qwen3VLProcessor.
+            video_clips = []
             for i in range(batch_size):
-                for j in range(num_images_per_sample):
-                    img = Image.fromarray(
-                        images[i, j].cpu().numpy().astype(np.uint8).transpose(1, 2, 0)
-                    )
-                    pil_images.append(img)
+                for cam in cam_names:
+                    if f"image_{cam}_frames" in batch:
+                        frame_tensor = batch[f"image_{cam}_frames"][i]
+                    else:
+                        frame_tensor = torch.stack(
+                            [
+                                batch[f"image_{cam}_time"][i],
+                                batch[f"image_{cam}"][i],
+                            ],
+                            dim=0,
+                        )
+                    clip_frames = [
+                        Image.fromarray(frame.cpu().numpy().astype(np.uint8)).resize(
+                            (256, 256), Image.BICUBIC
+                        )
+                        for frame in frame_tensor
+                    ]
+                    video_clips.append(clip_frames)
 
-            # build Qwen3VL chat format: each image with semantic label
+            # build Qwen3VL chat format: each camera sequence is one video slot
             chat_texts = []
-            for i, text in enumerate(texts):
+            for text in texts:
                 content = []
                 for label in cam_labels:
-                    content.append({"type": "text", "text": f"{label}:"})
-                    content.append({"type": "image"})
+                    content.append(
+                        {
+                            "type": "text",
+                            "text": (
+                                f"{label} (chronological frames "
+                                f"{video_frame_offsets} -> current):"
+                                if video_frame_offsets[-1] != 0
+                                else f"{label} (chronological frames oldest to newest):"
+                            ),
+                        }
+                    )
+                    content.append({"type": "video"})
                 content.append({"type": "text", "text": text})
 
                 messages = [{"role": "user", "content": content}]
@@ -573,16 +601,16 @@ class DrivePiZeroTrainAgent:
             
             model_inputs = self.processor(
                 text=chat_texts,  # ✅ 传入修改后的聊天文本列表
-                images=pil_images,
+                videos=video_clips,
                 return_tensors="pt",
                 padding=self.processor_padding,
                 max_length=self.processor_max_length,
                 truncation=True,
             ).to(self.device)
             
-            # 验证图像token数量（对应正确调用代码中的验证逻辑）
-            num_image_tokens = (model_inputs["input_ids"] == self.processor.image_token_id).sum().item()
-            # print(f"input_ids 中图像token数量: {num_image_tokens}, pixel_values shape: {model_inputs['pixel_values'].shape}")
+            # 验证视频 token 数量（对应正确调用代码中的验证逻辑）
+            num_video_tokens = (model_inputs["input_ids"] == self.processor.video_token_id).sum().item()
+            # print(f"input_ids 中视频token数量: {num_video_tokens}, pixel_values_videos shape: {model_inputs['pixel_values_videos'].shape}, video_grid_thw: {model_inputs['video_grid_thw'].shape}")
 
             # build causal mask and position ids for trajectory
             causal_mask, vlm_position_ids, state_position_ids, action_position_ids = (
@@ -593,8 +621,8 @@ class DrivePiZeroTrainAgent:
 
             inputs = {
                 "input_ids": model_inputs["input_ids"],
-                "pixel_values": model_inputs["pixel_values"].to(self.dtype),
-                "image_grid_thw": model_inputs["image_grid_thw"],
+                "pixel_values": model_inputs["pixel_values_videos"].to(self.dtype),
+                "image_grid_thw": model_inputs["video_grid_thw"],
                 # "vlm_causal_mask": vlm_causal_mask,
                 "vlm_position_ids": vlm_position_ids,
                 "proprio_position_ids": state_position_ids,
@@ -877,6 +905,16 @@ class DrivePiZeroTrainAgent:
         real_skipped = [s for s in skipped if "mixtures.proprio" not in s]
         if real_skipped:
             log.warning(f"Finetune: skipped {len(real_skipped)} keys: {real_skipped[:5]}")
+
+        if self.config.get("allow_mismatched_visual_patch_embed", False):
+            mismatched_patch_embed = any(
+                isinstance(item, str) and "vision_tower.patch_embed.proj." in item
+                for item in skipped
+            )
+            if mismatched_patch_embed:
+                self.model.enable_visual_patch_embed_full_finetune(
+                    reason="finetune checkpoint mismatch"
+                )
 
         missing, _ = self.model.load_state_dict(filtered, strict=False)
         if missing:

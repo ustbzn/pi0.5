@@ -42,6 +42,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self.vocab_size = cfg.vocab_size
         self.pad_token_id = cfg.pad_token_id
         self.image_token_index = cfg.image_token_index
+        self.video_token_id = cfg.get("video_token_id", None)
         self.use_lm_head = cfg.get("use_lm_head", False)
 
         self.max_image_text_tokens = cfg.max_image_text_tokens
@@ -73,6 +74,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self.lambda_accel = traj_loss_cfg.get("lambda_accel", 0.0)
         self.endpoint_weight_mode = traj_loss_cfg.get("endpoint_weight_mode", "none")
         self.endpoint_weight_max = traj_loss_cfg.get("endpoint_weight_max", 3.0)
+        self._extra_trainable_vlm_param_ids = set()
 
         # text input only
         self.embed_tokens = nn.Embedding(
@@ -82,11 +84,15 @@ class DrivePiZero(nn.Module, NoSyncBase):
         )  # 0.527B parameters
 
         # Vision + Language：从 Qwen3-VL 构建子模块
-        vision_tower, language_model = self._build_qwen3_modules(
-            cfg.pretrained_model_path, load_pretrained
+        vision_tower, language_model, mismatched_pretrained_keys = self._build_qwen3_modules(
+            cfg, load_pretrained
         )
         self.vision_tower = vision_tower
         self.multi_modal_projector = None
+        if mismatched_pretrained_keys:
+            self.enable_visual_patch_embed_full_finetune(
+                reason=f"pretrained mismatch: {mismatched_pretrained_keys}"
+            )
 
         # JointModel 直接接收 language_model
         from src.model.DrivePi0.joint_model import JointModel
@@ -132,7 +138,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
             self.lm_head.weight = self.embed_tokens.weight  # tie weights
 
     @staticmethod
-    def _build_qwen3_modules(model_path: str, load_pretrained: bool):
+    def _build_qwen3_modules(cfg, load_pretrained: bool):
         """
         从 Qwen3-VL 构建 vision_tower 和 language_model。
 
@@ -140,12 +146,53 @@ class DrivePiZero(nn.Module, NoSyncBase):
         load_pretrained=False → AutoConfig + 空模型，仅创建架构（权重由 checkpoint 提供）
         """
         from transformers import Qwen3VLForConditionalGeneration, AutoConfig
+        model_path = cfg.pretrained_model_path
+        allow_patch_embed_mismatch = cfg.get(
+            "allow_mismatched_visual_patch_embed", False
+        )
+        allowed_mismatched_keys = set(
+            cfg.get(
+                "allowed_mismatched_pretrained_keys",
+                [
+                    "model.visual.patch_embed.proj.weight",
+                    "model.visual.patch_embed.proj.bias",
+                ],
+            )
+        )
+        mismatched_keys = []
 
         if load_pretrained:
-            full_model = Qwen3VLForConditionalGeneration.from_pretrained(
-                model_path, trust_remote_code=True, dtype=torch.bfloat16,
-            )
-            log.info("Loaded Qwen3-VL pretrained weights")
+            if allow_patch_embed_mismatch:
+                full_model, loading_info = Qwen3VLForConditionalGeneration.from_pretrained(
+                    model_path,
+                    trust_remote_code=True,
+                    dtype=torch.bfloat16,
+                    ignore_mismatched_sizes=True,
+                    output_loading_info=True,
+                )
+                mismatched_keys = list(loading_info.get("mismatched_keys", []))
+                unsupported_keys = [
+                    key for key in mismatched_keys if key not in allowed_mismatched_keys
+                ]
+                if unsupported_keys:
+                    raise RuntimeError(
+                        "Unsupported pretrained weight mismatches detected: "
+                        f"{unsupported_keys}. Allowed mismatches: "
+                        f"{sorted(allowed_mismatched_keys)}"
+                    )
+                if mismatched_keys:
+                    patch_embed = full_model.model.visual.patch_embed.proj
+                    patch_embed.reset_parameters()
+                    log.warning(
+                        "Skipped mismatched pretrained visual patch embed weights and "
+                        f"reinitialized them randomly: {mismatched_keys}"
+                    )
+                log.info("Loaded Qwen3-VL pretrained weights with mismatch allowlist")
+            else:
+                full_model = Qwen3VLForConditionalGeneration.from_pretrained(
+                    model_path, trust_remote_code=True, dtype=torch.bfloat16,
+                )
+                log.info("Loaded Qwen3-VL pretrained weights")
         else:
             config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
             full_model = Qwen3VLForConditionalGeneration(config)
@@ -156,7 +203,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         # full_model 的其他部分（lm_head 等）不再需要，释放引用
         del full_model
         torch.cuda.empty_cache()
-        return vision_tower, language_model
+        return vision_tower, language_model, mismatched_keys
 
     @property
     def action_expert_parameters(self):
@@ -179,7 +226,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
     def lora_trainable_vlm_parameters(self):
         params = []
         for name, param in self.vision_tower.named_parameters():
-            if "lora_" in name:
+            if "lora_" in name or id(param) in self._extra_trainable_vlm_param_ids:
                 params.append(param)
         # 去掉 multi_modal_projector，已集成在 vision_tower 内
         # for name, param in self.multi_modal_projector.named_parameters():
@@ -381,10 +428,28 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
         log.info(f"LoRA injection complete: {total} total layers (r={r}, alpha={lora_alpha})")
 
+    def enable_visual_patch_embed_full_finetune(self, reason: Optional[str] = None):
+        patch_embed = getattr(self.vision_tower, "patch_embed", None)
+        proj = getattr(patch_embed, "proj", None)
+        if proj is None:
+            raise RuntimeError("vision_tower.patch_embed.proj not found")
+
+        enabled = []
+        for name, param in proj.named_parameters():
+            self._extra_trainable_vlm_param_ids.add(id(param))
+            enabled.append(f"patch_embed.proj.{name}")
+        log.warning(
+            "Enabled full finetuning for visual patch embed params%s: %s",
+            f" ({reason})" if reason else "",
+            enabled,
+        )
+
     def freeze_non_lora_weights_in_vlm(self):
         """Keep all bias frozen"""
         for name, param in self.vision_tower.named_parameters():
-            param.requires_grad = True if "lora_" in name else False
+            param.requires_grad = True if (
+                "lora_" in name or id(param) in self._extra_trainable_vlm_param_ids
+            ) else False
         log.info("Froze non-lora weights in vision tower")
 
         # for name, param in self.multi_modal_projector.named_parameters():
@@ -678,17 +743,20 @@ class DrivePiZero(nn.Module, NoSyncBase):
             image_features = vision_output[0]
             image_features = image_features.to(dtype)
 
-            # 3. 替换 <|image_pad|> 位置
-            image_token_mask = (input_ids == self.image_token_index)
-            num_masked = image_token_mask.sum().item()
+            # 3. 替换视觉 token 位置。Qwen3-VL 的图片和视频分别使用
+            # <|image_pad|> / <|video_pad|>，两者都由同一个 visual tower 编码。
+            visual_token_mask = (input_ids == self.image_token_index)
+            if self.video_token_id is not None:
+                visual_token_mask = visual_token_mask | (input_ids == self.video_token_id)
+            num_masked = visual_token_mask.sum().item()
             num_features = image_features.shape[0]
 
             if num_masked != num_features:
                 raise ValueError(
-                    f"<|image_pad|> token数 ({num_masked}) 与视觉特征数 ({num_features}) 不匹配"
+                    f"视觉 token 数 ({num_masked}) 与视觉特征数 ({num_features}) 不匹配"
                 )
 
-            final_embedding[image_token_mask] = image_features.to(dtype)
+            final_embedding[visual_token_mask] = image_features.to(dtype)
 
         return final_embedding
 

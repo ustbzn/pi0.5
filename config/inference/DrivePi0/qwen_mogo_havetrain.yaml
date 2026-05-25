@@ -5,7 +5,7 @@ hydra:
     dir: ${log_dir}
 _target_: src.agent.drivepi0.eval.DrivePiZeroEvalAgent
 
-current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo  # You need to set path
+current_dir: /pcpt/pcpt/project/lijun/.code/qw3/Drive_pi  # You need to set path
 log_dir: ${oc.env:LOG_DIR}/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
 name: drive-pi0
 device: cuda
@@ -17,8 +17,8 @@ quantize: False
 lora: False
 lora_r: 32
 lora_dropout: 0.0
-pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct  # You need to set path
-checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_mogo/logs/train/drive-pi0/2026-04-22_16-14_mogo_naviv2_9dim_smoothLoss_noHisTraj_4gpu/checkpoint/step24920.pt # You need to set path
+pretrained_model_path: /pcpt/pcpt/project/lijun/.code/Qwen3-VL-2B-Instruct  # You need to set path
+checkpoint_path: /pcpt/pcpt/project/lijun/.code/qw3/Drive_pi/logs/train/drive-pi0/2026-04-23_19-47_mogo_naviv2_9dim_smoothLoss_lora_vlm_1gpu_local/checkpoint/step24920.pt # You need to set path
 # 归一化方法: percentile_clip, percentile, minmax
 norm_mode: minmax
 
@@ -122,7 +122,7 @@ pad_token_id: 0
 joint:
   _target_: src.model.DrivePi0.joint_model.JointModel
   config:
-    pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+    pretrained_model_path: /pcpt/pcpt/project/lijun/.code/Qwen3-VL-2B-Instruct
     action_expert_adaptive_mode: ${action_expert_adaptive_mode}
     time_hidden_size: ${time_hidden_size}
     mixture: ${mixture}
