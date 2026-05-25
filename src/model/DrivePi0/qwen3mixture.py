@@ -8,13 +8,49 @@ class VLMMixtureAdapter(nn.Module):
     将 Qwen3VLTextModel 包装成与 Mixture 相同的 layer_func/attn_func 接口，
     使其能参与 forward_mixture_layers 的联合注意力计算。
     """
-    def __init__(self, vlm_text_model: nn.Module):
+    def __init__(self, vlm_text_model: nn.Module, moe_config=None):
         super().__init__()
         self.model = vlm_text_model
         cfg = vlm_text_model.config
         self._head_dim     = cfg.hidden_size // cfg.num_attention_heads
         self._num_heads    = cfg.num_attention_heads
         self._num_kv_heads = cfg.num_key_value_heads
+        self._moe_layer_indices = set()
+
+        # 注意: moe_config 由 JointModel 经 OmegaConf.to_container 转成普通 dict
+        # 后传入,因此这里只能用 dict 索引/.get() 访问,不能用属性访问 (moe_config.image_expert
+        # 会抛 AttributeError)。
+        if moe_config and moe_config.get("image_expert", {}).get("enable", False):
+            from src.model.DrivePi0.moe_mlp import SharedExpertMoEMLP
+            ie = moe_config["image_expert"]
+            num_layers = len(self.model.layers)
+            target_indices = self._resolve_target_layers(
+                num_layers, ie.get("apply_to_layers", "even_mid")
+            )
+            for layer_idx in target_indices:
+                original_mlp = self.model.layers[layer_idx].mlp
+                mlp_class = type(original_mlp)
+                moe_mlp = SharedExpertMoEMLP(
+                    mlp_class=mlp_class,
+                    config=cfg,
+                    num_routed_experts=int(ie.get("num_routed_experts", 3)),
+                    top_k=int(ie.get("top_k", 1)),
+                    load_balance_coeff=float(ie.get("load_balance_coeff", 0.01)),
+                    mlp_kwargs={},
+                )
+                moe_mlp.init_shared_from_state_dict(original_mlp.state_dict())
+                self.model.layers[layer_idx].mlp = moe_mlp
+                self._moe_layer_indices.add(layer_idx)
+
+    @staticmethod
+    def _resolve_target_layers(num_layers: int, apply_to: str) -> List[int]:
+        if apply_to == "even":
+            return [i for i in range(num_layers) if i % 2 == 0]
+        if apply_to == "even_mid":
+            return [i for i in range(num_layers) if i % 2 == 0 and 14 <= i <= 26]
+        if apply_to == "all":
+            return list(range(num_layers))
+        raise ValueError(f"Unknown apply_to_layers: {apply_to}")
 
     # ── 供 forward_mixture_attn 读取 ──────────────────────────────────
     @property

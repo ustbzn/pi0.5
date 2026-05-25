@@ -358,13 +358,31 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
     @property
     def trainable_qwen_parameters(self):
-        """获取可训练的Qwen参数"""
+        """获取可训练的Qwen参数（排除 VLM MoE routed/router 参数，它们归 moe_optimizer）"""
+        # 收集 VLM 侧 MoE 的 routed/router 参数 id，用于排除
+        moe_excluded_ids = set()
+        moe_cfg = self.cfg.get("moe", None)
+        image_moe_enable = bool(
+            moe_cfg
+            and moe_cfg.get("image_expert", None)
+            and moe_cfg.image_expert.get("enable", False)
+        )
+        if image_moe_enable:
+            for p in self.moe_router_parameters:
+                moe_excluded_ids.add(id(p))
+            for p in self.moe_routed_expert_parameters:
+                moe_excluded_ids.add(id(p))
+            if bool(moe_cfg.get("freeze_vlm_shared_expert", moe_cfg.get("freeze_shared_expert", False))):
+                for p in self.vlm_moe_shared_expert_parameters:
+                    moe_excluded_ids.add(id(p))
+
         trainable_params = []
         for name, param in self.joint_model.named_parameters():
             if (
                 param.requires_grad
                 and "mixtures.vlm" in name
                 and not self._check_qwen_unused_parameter_by_name(name)
+                and id(param) not in moe_excluded_ids
             ):
                 trainable_params.append(param)
         return trainable_params
@@ -643,15 +661,22 @@ class DrivePiZero(nn.Module, NoSyncBase):
         - finetune 路径：在 ``_load_model_weights_only`` 之后调用，让 routed 从当前 action
           MLP 权重出发，加速收敛。
         - resume 路径：不要调用，因为 checkpoint 已经包含完整的 routed 权重。
+
+        跳过已从 checkpoint 加载的模块：gate.weight 在 __init__ 中被零初始化，
+        若 gate.weight 非零则说明该模块已从 checkpoint 恢复，不应覆盖。
         """
         cnt = 0
+        skipped = 0
         for m in self._iter_moe_modules():
+            if m.gate.weight.abs().sum().item() > 0:
+                skipped += 1
+                continue
             m.init_routed_from_shared(noise_std=noise_std)
             cnt += 1
-        if cnt > 0:
+        if cnt > 0 or skipped > 0:
             log.info(
                 f"Initialized routed experts from shared in {cnt} MoE modules "
-                f"(noise_std={noise_std})"
+                f"(noise_std={noise_std}), skipped {skipped} already-loaded modules"
             )
 
     @property
@@ -673,6 +698,23 @@ class DrivePiZero(nn.Module, NoSyncBase):
         params = []
         for m in self._iter_moe_modules():
             params.extend(list(m.shared_expert.parameters()))
+        return params
+
+    @property
+    def vlm_moe_shared_expert_parameters(self):
+        """仅返回 VLM 侧 MoE 模块的 shared_expert 参数（不含 action MoE）。"""
+        from src.model.DrivePi0.moe_mlp import SharedExpertMoEMLP
+        params = []
+        # 注意: nn.ModuleDict 不支持 .get(),用 in 判断后再 [] 取
+        vlm_adapter = (
+            self.joint_model.mixtures["vlm"]
+            if "vlm" in self.joint_model.mixtures
+            else None
+        )
+        if vlm_adapter is not None:
+            for m in vlm_adapter.modules():
+                if isinstance(m, SharedExpertMoEMLP):
+                    params.extend(list(m.shared_expert.parameters()))
         return params
     # ==================== /MoE 辅助方法 ====================
 

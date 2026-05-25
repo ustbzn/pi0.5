@@ -208,16 +208,41 @@ class DrivePiZeroTrainAgent:
         # 如果不训练 VLM，则彻底冻结 VLM 相关权重（vision tower / projector / gemma）
         if not cfg.train_vlm:
             self.model.freeze_vlm_weights()
-        # MoE: 可选冻结 shared_expert，保护已训练的 action MLP 不被 routed expert
-        # 的梯度污染。默认开启，行为最稳。
+        # MoE: 可选冻结 shared_expert，保护已训练的 MLP 不被 routed expert
+        # 的梯度污染。freeze_shared_expert 控制 action MoE，
+        # freeze_vlm_shared_expert 控制 VLM MoE（默认跟随 freeze_shared_expert）。
         if cfg.get("moe", None) is not None and self.model.has_moe():
             if bool(cfg.moe.get("freeze_shared_expert", False)):
-                for p in self.model.moe_shared_expert_parameters:
+                from src.model.DrivePi0.moe_mlp import SharedExpertMoEMLP
+                action_shared_params = []
+                # 注意: nn.ModuleDict 不支持 .get(),用 in 判断后再 [] 取
+                action_mixture = (
+                    self.model.joint_model.mixtures["action"]
+                    if "action" in self.model.joint_model.mixtures
+                    else None
+                )
+                if action_mixture is not None:
+                    for m in action_mixture.modules():
+                        if isinstance(m, SharedExpertMoEMLP):
+                            action_shared_params.extend(list(m.shared_expert.parameters()))
+                for p in action_shared_params:
                     p.requires_grad = False
                 log.info(
-                    f"MoE: froze {len(self.model.moe_shared_expert_parameters)} "
-                    f"shared_expert parameters (freeze_shared_expert=True)"
+                    f"MoE: froze {len(action_shared_params)} "
+                    f"action shared_expert parameters (freeze_shared_expert=True)"
                 )
+            freeze_vlm_shared = bool(
+                cfg.moe.get("freeze_vlm_shared_expert", cfg.moe.get("freeze_shared_expert", False))
+            )
+            if freeze_vlm_shared:
+                vlm_shared_params = self.model.vlm_moe_shared_expert_parameters
+                for p in vlm_shared_params:
+                    p.requires_grad = False
+                if vlm_shared_params:
+                    log.info(
+                        f"MoE: froze {len(vlm_shared_params)} "
+                        f"VLM shared_expert parameters (freeze_vlm_shared_expert=True)"
+                    )
         self.model.to(self.dtype)
         self.model.to(self.device)
         if cfg.get(
@@ -1533,6 +1558,40 @@ class DrivePiZeroTrainAgent:
             log.info(
                 "Finetune (MoE enabled): remapped action MLP keys to "
                 "mlp.shared_expert.* before load."
+            )
+
+        # Image MoE finetune 兼容：把 non-MoE checkpoint 中 VLM 层的 mlp.<inner>
+        # 重映射到 mlp.shared_expert.<inner>，仅对 MoE 启用的层做重映射，
+        # 非 MoE 层保持原始 key 不变，否则会丢失权重。
+        image_moe_enable = bool(
+            moe_cfg
+            and moe_cfg.get("image_expert", None)
+            and moe_cfg.image_expert.get("enable", False)
+        )
+        if image_moe_enable:
+            import re as _re
+            from src.model.DrivePi0.qwen3mixture import VLMMixtureAdapter
+            ie_cfg = moe_cfg.image_expert
+            apply_to = ie_cfg.get("apply_to_layers", "even_mid")
+            num_vlm_layers = self.config.joint.config.num_hidden_layers
+            moe_layer_indices = set(
+                VLMMixtureAdapter._resolve_target_layers(num_vlm_layers, apply_to)
+            )
+            remap = {}
+            pattern = _re.compile(
+                r"^(.*mixtures\.vlm\.model\.layers\.(\d+)\.mlp)\.(?!shared_expert\.|routed_experts\.|gate\.)(.+)$"
+            )
+            for k, v in ckpt.items():
+                m = pattern.match(k)
+                if m and int(m.group(2)) in moe_layer_indices:
+                    new_k = f"{m.group(1)}.shared_expert.{m.group(3)}"
+                    remap[new_k] = v
+                else:
+                    remap[k] = v
+            ckpt = remap
+            log.info(
+                f"Finetune (Image MoE enabled): remapped VLM MLP keys for layers "
+                f"{sorted(moe_layer_indices)} to mlp.shared_expert.* before load."
             )
 
         model_state = self.model.state_dict()

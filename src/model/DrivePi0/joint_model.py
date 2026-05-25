@@ -445,7 +445,8 @@ class JointModel(nn.Module):
         assert pretrained_language_model is not None, (
             "pretrained_language_model must be provided by DrivePiZero._build_qwen3_modules"
         )
-        self.mixtures["vlm"] = VLMMixtureAdapter(pretrained_language_model)
+        moe_config = OmegaConf.to_container(config.moe, resolve=True) if hasattr(config, "moe") and config.get("moe", None) is not None else None
+        self.mixtures["vlm"] = VLMMixtureAdapter(pretrained_language_model, moe_config=moe_config)
         self.mixture_names = list(config.mixture.keys())
 
     def build_mixture_caches(self):
