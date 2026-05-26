@@ -367,8 +367,8 @@ class DrivePiZeroInferenceAgent:
                     file_num = int(match_num.group(1))
                     pkl_files.append((file_num, pkl_file))
                 else:
-                    # 尝试匹配时间戳_stepN格式（如 20251210141637_step1.pkl）
-                    match_timestamp = re.match(r"(\d+)_step(\d+)\.pkl$", pkl_file.name)
+                    # 尝试匹配时间戳_stepN格式（如 20251210141637_step1.pkl 或 RBS-242768_step1.pkl）
+                    match_timestamp = re.match(r"(.+)_step(\d+)\.pkl$", pkl_file.name)
                     if match_timestamp:
                         step_num = int(match_timestamp.group(2))
                         pkl_files.append((step_num, pkl_file))
@@ -574,8 +574,8 @@ class DrivePiZeroInferenceAgent:
             # 按时间戳前缀分组（如果有多个时间戳）
             timestamp_groups = {}
             for pkl_file in pkl_files_in_dir:
-                # 尝试匹配时间戳_stepN格式
-                match = re.match(r"(\d+)_step(\d+)\.pkl$", pkl_file.name)
+                # 尝试匹配时间戳_stepN格式（支持纯数字或带字母/连字符的前缀，如 RBS-242768_step1.pkl）
+                match = re.match(r"(.+)_step(\d+)\.pkl$", pkl_file.name)
                 if match:
                     timestamp = match.group(1)
                     if timestamp not in timestamp_groups:

@@ -46,10 +46,12 @@ CHECKPOINT_PATH="${CHECKPOINT_PATH:-${PROJECT_DIR}/logs/train/drive-pi0/2026-05-
 CONFIG_PATH="${CONFIG_PATH:-${PROJECT_DIR}/config/inference/DrivePi0/0514_qwen3_hdmap_all_features_8gpu.yaml}"
 
 # MOGO naviv2 val 数据目录；inference_mogo_test.py 会遍历其中的 pkl。
-VAL_DATA_DIR="${VAL_DATA_DIR:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_0509/val}"
+VAL_DATA_DIR="${VAL_DATA_DIR:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_worldsim/val}"
 
 # 与 0514 训练一致的 statistics 文件，用于 state/trajectory 的归一化和反归一化。
-STATISTIC_PATH="${STATISTIC_PATH:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_0509/statistics.json}"
+# 注意：必须使用训练时同一份 statistics（训练数据集目录 mogo_dataset_navi_hdmap），
+# 否则 fur_x/fur_y 的 minmax 不一致，反归一化会引入恒定坐标偏置。
+STATISTIC_PATH="${STATISTIC_PATH:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap/statistics.json}"
 
 # 评测输出根目录。每次运行会在下面创建一个带 checkpoint 名称的 RUN_DIR。
 EVAL_ROOT="${EVAL_ROOT:-${PROJECT_DIR}/logs/eval/drive-pi0/mogo_action_avg_l2}"

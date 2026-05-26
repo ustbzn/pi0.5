@@ -36,8 +36,8 @@ import argparse
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
-from typing import Optional, Tuple, List, Dict
+from matplotlib.patches import Patch, Polygon
+from typing import Optional, Tuple, List, Dict, Set
 import cv2
 from tqdm import tqdm
 import os
@@ -66,6 +66,18 @@ HDMAP_CHANNEL_STYLES = (
     (1, "lane_links", (0.10, 0.55, 0.25), 0.45),
     (2, "lane_boundaries", (0.05, 0.30, 0.85), 0.70),
 )
+
+OBJECT_BOX_ALPHA = 0.28
+OBJECT_BOX_LINEWIDTH = 1.4
+OBJECT_HEADING_LENGTH = 2.5
+OBJECT_CLASS_STYLES = {
+    0: ("car", "#ff7f0e"),
+    1: ("pedestrian", "#9467bd"),
+    2: ("bus/truck", "#8c564b"),
+    3: ("rider", "#17becf"),
+    4: ("tricycle", "#bcbd22"),
+    5: ("unknown", "#7f7f7f"),
+}
 
 # navigation_id -> 映射前的导航指令文本（与 json_to_pkl_py3.py 中 NAVIGATION_COMMAND_MAP 反向对应）
 NAVIGATION_ID_TO_TEXT = {
@@ -125,8 +137,8 @@ class MOGOTrajectoryAnalyzer:
             timestamp_groups: Dict[str, List[Tuple[int, Path]]] = {}
             
             for pkl_file in pkl_files_in_root:
-                # 尝试匹配时间戳_stepN格式：20251210141637_step1.pkl
-                match_timestamp = re.match(r'(\d+)_step(\d+)\.pkl$', pkl_file.name)
+                # 尝试匹配时间戳_stepN格式（支持纯数字或带字母/连字符的前缀，如 RBS-242768_step1.pkl）
+                match_timestamp = re.match(r'(.+)_step(\d+)\.pkl$', pkl_file.name)
                 if match_timestamp:
                     timestamp = match_timestamp.group(1)
                     step_num = int(match_timestamp.group(2))
@@ -164,8 +176,8 @@ class MOGOTrajectoryAnalyzer:
                 # 2. 时间戳_step格式：20251210141637_step1.pkl
                 pkl_files = []
                 for pkl_file in drivepi_dir.glob("*.pkl"):
-                    # 首先尝试匹配时间戳_step格式
-                    match_timestamp = re.match(r'(\d+)_step(\d+)\.pkl$', pkl_file.name)
+                    # 首先尝试匹配时间戳_step格式（支持纯数字或带字母/连字符的前缀）
+                    match_timestamp = re.match(r'(.+)_step(\d+)\.pkl$', pkl_file.name)
                     if match_timestamp:
                         # 提取时间戳和step编号
                         file_timestamp = match_timestamp.group(1)
@@ -284,7 +296,7 @@ class MOGOTrajectoryAnalyzer:
             pkl_files_in_root = list(self.pkl_root_dir.glob("*.pkl"))
             if pkl_files_in_root:
                 for pkl_file in pkl_files_in_root:
-                    m = re.match(r'(\d+)_step(\d+)\.pkl$', pkl_file.name)
+                    m = re.match(r'(.+)_step(\d+)\.pkl$', pkl_file.name)
                     if m:
                         ts, step = m.group(1), int(m.group(2))
                         timestamp_pkl_map.setdefault(ts, []).append((step, pkl_file))
@@ -296,7 +308,7 @@ class MOGOTrajectoryAnalyzer:
                     drivepi_dir = ts_dir / "drivepi"
                     search_dir = drivepi_dir if drivepi_dir.exists() else ts_dir
                     for pkl_file in search_dir.glob("*.pkl"):
-                        m = re.match(r'(\d+)_step(\d+)\.pkl$', pkl_file.name)
+                        m = re.match(r'(.+)_step(\d+)\.pkl$', pkl_file.name)
                         if m and m.group(1) == ts:
                             timestamp_pkl_map.setdefault(ts, []).append((int(m.group(2)), pkl_file))
                             continue
@@ -516,18 +528,67 @@ class MOGOTrajectoryAnalyzer:
             "norm_mode": normalize.norm_mode,
         }
     
+    @staticmethod
+    def _extract_object_annotations(data: Dict) -> Optional[Dict[str, object]]:
+        """从 pkl 字典中提取当前帧障碍物框绘制所需字段。"""
+        required_keys = ("boxes_wh", "classes_type", "agent_centers", "agent_rotate_angles")
+        if any(key not in data for key in required_keys):
+            return None
+
+        boxes_wh = np.asarray(data["boxes_wh"], dtype=np.float32)
+        classes_type = np.asarray(data["classes_type"], dtype=np.int32).reshape(-1)
+        agent_centers = np.asarray(data["agent_centers"], dtype=np.float32)
+        agent_rotate_angles = np.asarray(data["agent_rotate_angles"], dtype=np.float32).reshape(-1)
+        ids = np.asarray(data.get("ids", np.arange(len(classes_type))), dtype=np.int64).reshape(-1)
+
+        if boxes_wh.ndim != 2 or boxes_wh.shape[1] != 2:
+            return None
+        if agent_centers.ndim != 2 or agent_centers.shape[1] != 2:
+            return None
+
+        num_agents = min(
+            len(ids),
+            len(boxes_wh),
+            len(classes_type),
+            len(agent_centers),
+            len(agent_rotate_angles),
+        )
+        if num_agents == 0:
+            return None
+
+        def _scalar_int(value, default: int = -1) -> int:
+            if value is None:
+                return default
+            try:
+                arr = np.asarray(value)
+                if arr.size == 0:
+                    return default
+                return int(arr.reshape(-1)[0])
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "ids": ids[:num_agents],
+            "boxes_wh": boxes_wh[:num_agents],
+            "classes_type": classes_type[:num_agents],
+            "agent_centers": agent_centers[:num_agents],
+            "agent_rotate_angles": agent_rotate_angles[:num_agents],
+            "agent_idx": _scalar_int(data.get("agent_idx")),
+            "av_idx": _scalar_int(data.get("av_idx")),
+        }
+
     def _load_images_from_pkl(
         self, sample_idx: int
-    ) -> Optional[Tuple[dict, Optional[str], Optional[np.ndarray], Optional[str]]]:
+    ) -> Optional[Tuple[dict, Optional[str], Optional[np.ndarray], Optional[str], Optional[Dict[str, object]]]]:
         """从pkl加载4路摄像头图像（当前帧）、导航指令文本和历史轨迹
 
         Returns:
-            (imgs, nav_text, his_traj, hdmap_bev_path)，其中 imgs 是 {'front': ndarray, 'right': ndarray,
-            'left': ndarray, 'back': ndarray}（RGB格式，缺失的摄像头为 None），
-            nav_text 为映射前的导航指令文本（如 "straight"），his_traj 为
-            历史轨迹，坐标格式与 gt/pred 保持一致，均为 [x, y]，hdmap_bev_path
-            是高精地图 BEV npz 路径。
-            加载完全失败时返回 None。
+            (imgs, nav_text, his_traj, hdmap_bev_path, object_annotations)，其中 imgs 是
+            {'front': ndarray, 'right': ndarray, 'left': ndarray, 'back': ndarray}
+            （RGB格式，缺失的摄像头为 None），nav_text 为映射前的导航指令文本
+            （如 "straight"），his_traj 为历史轨迹，坐标格式与 gt/pred 保持一致，
+            均为 [x, y]，hdmap_bev_path 是高精地图 BEV npz 路径，
+            object_annotations 为当前帧障碍物框信息。加载完全失败时返回 None。
         """
         if self.pkl_root_dir is None:
             print("错误: 未指定pkl文件根目录")
@@ -625,8 +686,9 @@ class MOGOTrajectoryAnalyzer:
                     his_traj = np.stack([his_traj_arr[:, 1], his_traj_arr[:, 0]], axis=-1)
 
             hdmap_bev_path = _decode_img_ref(data.get("hdmap_bev"))
+            object_annotations = self._extract_object_annotations(data)
 
-            return imgs, nav_text, his_traj, hdmap_bev_path
+            return imgs, nav_text, his_traj, hdmap_bev_path, object_annotations
         except Exception as e:
             print(f"加载pkl失败 {pkl_path}: {e}")
             import traceback
@@ -638,7 +700,7 @@ class MOGOTrajectoryAnalyzer:
         result = self._load_images_from_pkl(sample_idx)
         if result is None:
             return None
-        imgs, nav_text, _, _ = result
+        imgs, nav_text, _, _, _ = result
         return imgs['front'], nav_text
 
     def _warn_hdmap_once(self, hdmap_path: str, message: str):
@@ -708,6 +770,114 @@ class MOGOTrajectoryAnalyzer:
             Patch(facecolor=rgb_color, edgecolor="none", alpha=channel_alpha, label=label)
             for _channel_idx, label, rgb_color, channel_alpha in HDMAP_CHANNEL_STYLES
         ]
+
+    @staticmethod
+    def _object_legend_handles(class_ids: Set[int]) -> List[Patch]:
+        """构造障碍物类别图例句柄。"""
+        handles = []
+        for class_id in sorted(class_ids):
+            label, color = OBJECT_CLASS_STYLES.get(class_id, OBJECT_CLASS_STYLES[5])
+            handles.append(
+                Patch(
+                    facecolor=color,
+                    edgecolor=color,
+                    alpha=OBJECT_BOX_ALPHA,
+                    label=f"obj:{label}",
+                )
+            )
+        return handles
+
+    @staticmethod
+    def _oriented_box_corners(
+        center: np.ndarray,
+        size: np.ndarray,
+        yaw: float,
+    ) -> np.ndarray:
+        """根据中心点、长宽和航向角生成 BEV 框角点，坐标格式为 [x_forward, y_left]。"""
+        length, width = float(size[0]), float(size[1])
+        local_corners = np.array(
+            [
+                [-length / 2.0, -width / 2.0],
+                [ length / 2.0, -width / 2.0],
+                [ length / 2.0,  width / 2.0],
+                [-length / 2.0,  width / 2.0],
+            ],
+            dtype=np.float32,
+        )
+        cos_yaw = np.cos(yaw)
+        sin_yaw = np.sin(yaw)
+        rotation = np.array(
+            [
+                [cos_yaw, -sin_yaw],
+                [sin_yaw,  cos_yaw],
+            ],
+            dtype=np.float32,
+        )
+        return local_corners @ rotation.T + center.astype(np.float32)
+
+    def _draw_object_boxes(
+        self,
+        ax,
+        object_annotations: Optional[Dict[str, object]],
+    ) -> Set[int]:
+        """在 BEV 坐标系中绘制当前帧障碍物框，返回实际绘制到的类别。"""
+        if object_annotations is None:
+            return set()
+
+        boxes_wh = object_annotations["boxes_wh"]
+        classes_type = object_annotations["classes_type"]
+        agent_centers = object_annotations["agent_centers"]
+        agent_rotate_angles = object_annotations["agent_rotate_angles"]
+        av_idx = int(object_annotations.get("av_idx", -1))
+        drawn_classes: Set[int] = set()
+
+        for idx, (center, size, yaw, class_id) in enumerate(
+            zip(agent_centers, boxes_wh, agent_rotate_angles, classes_type)
+        ):
+            if idx == av_idx:
+                continue
+            if not (
+                np.all(np.isfinite(center))
+                and np.all(np.isfinite(size))
+                and np.isfinite(yaw)
+            ):
+                continue
+            if size[0] <= 0.0 or size[1] <= 0.0:
+                continue
+
+            class_id = int(class_id)
+            _label, color = OBJECT_CLASS_STYLES.get(class_id, OBJECT_CLASS_STYLES[5])
+            corners = self._oriented_box_corners(center, size, float(yaw))
+            # 障碍物字段横向坐标为左正；当前 BEV 横轴为右正，绘制前需取反。
+            plot_corners = np.column_stack([-corners[:, 1], corners[:, 0]])
+            patch = Polygon(
+                plot_corners,
+                closed=True,
+                facecolor=color,
+                edgecolor=color,
+                linewidth=OBJECT_BOX_LINEWIDTH,
+                alpha=OBJECT_BOX_ALPHA,
+                zorder=2,
+            )
+            ax.add_patch(patch)
+
+            heading_len = min(OBJECT_HEADING_LENGTH, max(float(size[0]) * 0.5, 0.8))
+            ax.arrow(
+                float(-center[1]),
+                float(center[0]),
+                float(-np.sin(yaw) * heading_len),
+                float(np.cos(yaw) * heading_len),
+                color=color,
+                width=0.04,
+                head_width=0.45,
+                head_length=0.6,
+                alpha=0.85,
+                length_includes_head=True,
+                zorder=2.2,
+            )
+            drawn_classes.add(class_id if class_id in OBJECT_CLASS_STYLES else 5)
+
+        return drawn_classes
 
     @staticmethod
     def _infer_hdmap_bev_layout(
@@ -796,6 +966,7 @@ class MOGOTrajectoryAnalyzer:
         bev_xlim: Optional[Tuple[float, float]] = None,
         bev_ylim: Optional[Tuple[float, float]] = None,
         show_hdmap: bool = True,
+        show_objects: bool = False,
         hdmap_point_cloud_range: Tuple[float, float, float, float, float, float] = DEFAULT_HDMAP_POINT_CLOUD_RANGE,
         hdmap_voxel_size: Tuple[float, float, float] = DEFAULT_HDMAP_VOXEL_SIZE,
         hdmap_alpha: float = DEFAULT_HDMAP_ALPHA,
@@ -816,7 +987,7 @@ class MOGOTrajectoryAnalyzer:
         result = self._load_images_from_pkl(sample_idx)
         if result is None:
             return
-        imgs, nav_text, his_traj, hdmap_bev_path = result
+        imgs, nav_text, his_traj, hdmap_bev_path, object_annotations = result
 
         # 获取场景信息
         scene_info = self.get_scene_info(sample_idx)
@@ -900,6 +1071,10 @@ class MOGOTrajectoryAnalyzer:
                 alpha=hdmap_alpha,
             )
 
+        object_classes_drawn: Set[int] = set()
+        if show_objects:
+            object_classes_drawn = self._draw_object_boxes(ax_bev, object_annotations)
+
         # 从原点 (0,0) 开始连线到轨迹各点
         origin = np.array([[0.0, 0.0]])
         gt_traj_with_origin = np.concatenate([origin, gt_traj], axis=0)
@@ -962,8 +1137,15 @@ class MOGOTrajectoryAnalyzer:
         legend_handles, _ = ax_bev.get_legend_handles_labels()
         if hdmap_drawn:
             legend_handles.extend(self._hdmap_legend_handles())
+        if object_classes_drawn:
+            legend_handles.extend(self._object_legend_handles(object_classes_drawn))
         ax_bev.legend(legend_handles, [h.get_label() for h in legend_handles], loc='lower left', bbox_to_anchor=(1.02, 0.0), fontsize=7)
-        ax_bev.set_title("BEV Trajectory + HDMap" if hdmap_drawn else "BEV Trajectory", fontsize=10, pad=3)
+        title_parts = ["BEV Trajectory"]
+        if hdmap_drawn:
+            title_parts.append("HDMap")
+        if object_classes_drawn:
+            title_parts.append("Objects")
+        ax_bev.set_title(" + ".join(title_parts), fontsize=10, pad=3)
 
         # 在 BEV 内部展示坐标，避免额外文本列造成模块松散。
         history_lines = []
@@ -1001,6 +1183,7 @@ class MOGOTrajectoryAnalyzer:
         bev_ylim: Optional[Tuple[float, float]],
         max_scenes: Optional[int] = None,
         show_hdmap: bool = True,
+        show_objects: bool = False,
         hdmap_point_cloud_range: Tuple[float, float, float, float, float, float] = DEFAULT_HDMAP_POINT_CLOUD_RANGE,
         hdmap_voxel_size: Tuple[float, float, float] = DEFAULT_HDMAP_VOXEL_SIZE,
         hdmap_alpha: float = DEFAULT_HDMAP_ALPHA,
@@ -1064,6 +1247,7 @@ class MOGOTrajectoryAnalyzer:
                 bev_xlim=bev_xlim,
                 bev_ylim=bev_ylim,
                 show_hdmap=show_hdmap,
+                show_objects=show_objects,
                 hdmap_point_cloud_range=hdmap_point_cloud_range,
                 hdmap_voxel_size=hdmap_voxel_size,
                 hdmap_alpha=hdmap_alpha,
@@ -1232,6 +1416,11 @@ def main():
         help="dual 模式下不在 BEV 轨迹图中叠加 HDMap"
     )
     parser.add_argument(
+        "--show_objects",
+        action="store_true",
+        help="dual 模式下根据 pkl 障碍物字段在 BEV 轨迹图中绘制目标框"
+    )
+    parser.add_argument(
         "--hdmap_point_cloud_range",
         type=float,
         nargs=6,
@@ -1308,6 +1497,7 @@ def main():
             bev_ylim=tuple(args.bev_ylim) if args.bev_ylim else None,
             max_scenes=args.num_scenes,
             show_hdmap=not args.no_hdmap,
+            show_objects=args.show_objects,
             hdmap_point_cloud_range=tuple(args.hdmap_point_cloud_range),
             hdmap_voxel_size=tuple(args.hdmap_voxel_size),
             hdmap_alpha=args.hdmap_alpha,
