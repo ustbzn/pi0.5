@@ -36,6 +36,7 @@ import argparse
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from typing import Optional, Tuple, List, Dict
 import cv2
 from tqdm import tqdm
@@ -45,6 +46,26 @@ import torch
 
 from src.utils.metric import get_action_accuracy
 from src.data.utils.normalization import Normalize
+
+DEFAULT_HDMAP_POINT_CLOUD_RANGE = (-48.0, -81.6, -1.0, 48.0, 97.6, 3.0)
+DEFAULT_HDMAP_VOXEL_SIZE = (0.1, 0.1, 0.2)
+DEFAULT_BEV_XLIM = (-30.0, 60.0)
+DEFAULT_BEV_YLIM = (-40.0, 40.0)
+DEFAULT_HDMAP_ALPHA = 1.0
+DUAL_VIEW_FIGSIZE = (18, 7.2)
+DUAL_VIEW_DPI = 150
+
+# 元组结构: (channel_idx, label, rgb_color, channel_alpha)
+# channel_idx 对应 BEV npz 中的物理通道下标 (0=lanes, 1=lane_links,
+# 2=lane_boundaries, 3=junctions)，与列表顺序解耦。
+# 列表内的顺序决定**绘制先后**：靠前的先画、被靠后的覆盖在上面。
+# 想让 junctions 不挡住车道线，把它放在前面 + 保持低 alpha 即可。
+HDMAP_CHANNEL_STYLES = (
+    (3, "junctions", (1.00, 0.78, 0.20), 0.12),
+    (0, "lanes", (0.02, 0.02, 0.02), 0.35),
+    (1, "lane_links", (0.10, 0.55, 0.25), 0.45),
+    (2, "lane_boundaries", (0.05, 0.30, 0.85), 0.70),
+)
 
 # navigation_id -> 映射前的导航指令文本（与 json_to_pkl_py3.py 中 NAVIGATION_COMMAND_MAP 反向对应）
 NAVIGATION_ID_TO_TEXT = {
@@ -84,6 +105,7 @@ class MOGOTrajectoryAnalyzer:
         # pkl文件映射：用于dual视图时根据sample_idx找到对应的pkl文件
         # 格式：{sample_idx: (timestamp, pkl_path)}
         self.pkl_file_map: Dict[int, Tuple[str, Path]] = {}
+        self._warned_hdmap_paths = set()
         if self.pkl_root_dir and self.pkl_root_dir.exists():
             self._build_pkl_file_map()
     
@@ -496,14 +518,15 @@ class MOGOTrajectoryAnalyzer:
     
     def _load_images_from_pkl(
         self, sample_idx: int
-    ) -> Optional[Tuple[dict, Optional[str], Optional[np.ndarray]]]:
+    ) -> Optional[Tuple[dict, Optional[str], Optional[np.ndarray], Optional[str]]]:
         """从pkl加载4路摄像头图像（当前帧）、导航指令文本和历史轨迹
 
         Returns:
-            (imgs, nav_text)，其中 imgs 是 {'front': ndarray, 'right': ndarray,
+            (imgs, nav_text, his_traj, hdmap_bev_path)，其中 imgs 是 {'front': ndarray, 'right': ndarray,
             'left': ndarray, 'back': ndarray}（RGB格式，缺失的摄像头为 None），
             nav_text 为映射前的导航指令文本（如 "straight"），his_traj 为
-            历史轨迹，坐标格式与 gt/pred 保持一致，均为 [x, y]。
+            历史轨迹，坐标格式与 gt/pred 保持一致，均为 [x, y]，hdmap_bev_path
+            是高精地图 BEV npz 路径。
             加载完全失败时返回 None。
         """
         if self.pkl_root_dir is None:
@@ -526,6 +549,14 @@ class MOGOTrajectoryAnalyzer:
                     img_ref = img_ref.get("_bytes_value", b"")
                 if hasattr(img_ref, "numpy"):
                     img_ref = img_ref.numpy()
+                if isinstance(img_ref, np.ndarray):
+                    if img_ref.size == 0:
+                        return None
+                    img_ref = img_ref.reshape(-1)[0]
+                if isinstance(img_ref, (list, tuple)):
+                    if len(img_ref) == 0:
+                        return None
+                    img_ref = img_ref[0]
                 if isinstance(img_ref, bytes):
                     return img_ref.decode("utf-8")
                 elif isinstance(img_ref, str):
@@ -593,7 +624,9 @@ class MOGOTrajectoryAnalyzer:
                     # 与当前训练 / 统计脚本保持一致：将存储中的 [y, x] 转为 [x, y]
                     his_traj = np.stack([his_traj_arr[:, 1], his_traj_arr[:, 0]], axis=-1)
 
-            return imgs, nav_text, his_traj
+            hdmap_bev_path = _decode_img_ref(data.get("hdmap_bev"))
+
+            return imgs, nav_text, his_traj, hdmap_bev_path
         except Exception as e:
             print(f"加载pkl失败 {pkl_path}: {e}")
             import traceback
@@ -605,8 +638,144 @@ class MOGOTrajectoryAnalyzer:
         result = self._load_images_from_pkl(sample_idx)
         if result is None:
             return None
-        imgs, nav_text, _ = result
+        imgs, nav_text, _, _ = result
         return imgs['front'], nav_text
+
+    def _warn_hdmap_once(self, hdmap_path: str, message: str):
+        """避免批量可视化时对同一个 HDMap 问题重复刷屏。"""
+        warn_key = (hdmap_path, message)
+        if warn_key in self._warned_hdmap_paths:
+            return
+        self._warned_hdmap_paths.add(warn_key)
+        print(f"警告: {message}: {hdmap_path}")
+
+    @staticmethod
+    def _load_hdmap_bev_npz(hdmap_path: Optional[str]) -> Optional[np.ndarray]:
+        """读取 pkl 中 hdmap_bev 指向的 4 通道 BEV npz。"""
+        if not hdmap_path:
+            return None
+
+        npz_path = Path(hdmap_path)
+        if not npz_path.is_file():
+            raise FileNotFoundError(f"HDMap npz 不存在: {npz_path}")
+
+        with np.load(npz_path) as npz_data:
+            if "hdmap_bev" in npz_data:
+                bev = np.array(npz_data["hdmap_bev"], dtype=np.float32)
+            elif len(npz_data.files) == 1:
+                bev = np.array(npz_data[npz_data.files[0]], dtype=np.float32)
+            else:
+                raise KeyError(f"未找到 hdmap_bev，可用 keys: {npz_data.files}")
+
+        if bev.ndim != 3 or bev.shape[0] != 4:
+            raise ValueError(f"期望 HDMap BEV shape 为 (4, H, W)，实际得到 {bev.shape}")
+        return bev
+
+    @staticmethod
+    def _build_hdmap_rgba_overlay(bev: np.ndarray, alpha_scale: float) -> np.ndarray:
+        """生成透明背景 HDMap 叠加层，使用 alpha over 合成保证多层互不抹除。"""
+        rgba = np.zeros((bev.shape[1], bev.shape[2], 4), dtype=np.float32)
+        alpha_scale = float(np.clip(alpha_scale, 0.0, 1.0))
+
+        for channel_idx, _label, rgb_color, channel_alpha in HDMAP_CHANNEL_STYLES:
+            mask = np.clip(bev[channel_idx], 0.0, 1.0)
+            src_a = mask * channel_alpha * alpha_scale
+            update_mask = src_a > 0.0
+            if not np.any(update_mask):
+                continue
+
+            sa = src_a[update_mask].astype(np.float32)
+            da = rgba[update_mask, 3].astype(np.float32)
+            out_a = sa + da * (1.0 - sa)
+            safe_oa = np.where(out_a > 0.0, out_a, 1.0)
+
+            src_rgb = np.asarray(rgb_color, dtype=np.float32)
+            dst_rgb = rgba[update_mask, :3]
+            new_rgb = (
+                src_rgb[None, :] * sa[:, None]
+                + dst_rgb * da[:, None] * (1.0 - sa[:, None])
+            ) / safe_oa[:, None]
+
+            rgba[update_mask, :3] = new_rgb
+            rgba[update_mask, 3] = out_a
+
+        return rgba
+
+    @staticmethod
+    def _hdmap_legend_handles() -> List[Patch]:
+        """构造 HDMap 图例句柄。"""
+        return [
+            Patch(facecolor=rgb_color, edgecolor="none", alpha=channel_alpha, label=label)
+            for _channel_idx, label, rgb_color, channel_alpha in HDMAP_CHANNEL_STYLES
+        ]
+
+    @staticmethod
+    def _infer_hdmap_bev_layout(
+        bev: np.ndarray,
+        point_cloud_range: Tuple[float, float, float, float, float, float],
+        voxel_size: Tuple[float, float, float],
+    ) -> str:
+        """推断 BEV 空间维度是 (right, forward) 还是 (forward, right)。"""
+        right_bins = int(round((point_cloud_range[3] - point_cloud_range[0]) / voxel_size[0]))
+        forward_bins = int(round((point_cloud_range[4] - point_cloud_range[1]) / voxel_size[1]))
+
+        if bev.shape[1:] == (right_bins, forward_bins):
+            return "xy"
+        if bev.shape[1:] == (forward_bins, right_bins):
+            return "yx"
+
+        raise ValueError(
+            "无法根据 point_cloud_range/voxel_size 推断 HDMap BEV 布局，"
+            f"bev.shape={bev.shape}, 期望 spatial 为 "
+            f"({right_bins}, {forward_bins}) 或 ({forward_bins}, {right_bins})"
+        )
+
+    @staticmethod
+    def _to_hdmap_display_image(image: np.ndarray, bev_layout: str) -> np.ndarray:
+        """转换为 imshow 使用的 (forward, right, channel) 显示布局。"""
+        if bev_layout == "xy":
+            return image.transpose(1, 0, 2)
+        if bev_layout == "yx":
+            return image
+        raise ValueError(f"未知 HDMap BEV 布局: {bev_layout}")
+
+    def _draw_hdmap_bev_background(
+        self,
+        ax,
+        hdmap_path: Optional[str],
+        point_cloud_range: Tuple[float, float, float, float, float, float],
+        voxel_size: Tuple[float, float, float],
+        alpha: float,
+    ) -> bool:
+        """在当前 BEV 轨迹坐标系下绘制 HDMap 底图。"""
+        if not hdmap_path:
+            return False
+
+        try:
+            bev = self._load_hdmap_bev_npz(hdmap_path)
+            if bev is None:
+                return False
+            bev_layout = self._infer_hdmap_bev_layout(bev, point_cloud_range, voxel_size)
+            display_image = self._to_hdmap_display_image(
+                self._build_hdmap_rgba_overlay(bev, alpha),
+                bev_layout,
+            )
+        except Exception as exc:
+            self._warn_hdmap_once(str(hdmap_path), f"无法绘制 HDMap BEV ({exc})")
+            return False
+
+        right_min, forward_min = point_cloud_range[0], point_cloud_range[1]
+        right_max, forward_max = point_cloud_range[3], point_cloud_range[4]
+        ax.imshow(
+            display_image,
+            origin="lower",
+            extent=(right_min, right_max, forward_min, forward_max),
+            interpolation="antialiased",
+            interpolation_stage="rgba",
+            resample=True,
+            zorder=0,
+        )
+        return True
     
     def get_scene_info(self, sample_idx: int) -> Optional[Tuple[str, int]]:
         """根据样本索引获取场景信息（时间戳和本地索引）"""
@@ -626,6 +795,10 @@ class MOGOTrajectoryAnalyzer:
         save_path: Optional[str],
         bev_xlim: Optional[Tuple[float, float]] = None,
         bev_ylim: Optional[Tuple[float, float]] = None,
+        show_hdmap: bool = True,
+        hdmap_point_cloud_range: Tuple[float, float, float, float, float, float] = DEFAULT_HDMAP_POINT_CLOUD_RANGE,
+        hdmap_voxel_size: Tuple[float, float, float] = DEFAULT_HDMAP_VOXEL_SIZE,
+        hdmap_alpha: float = DEFAULT_HDMAP_ALPHA,
     ):
         """上：4路摄像头图像（front/right/left/back）；下：BEV 轨迹"""
         if self.gt_trajectories is None or self.pred_trajectories is None:
@@ -643,7 +816,7 @@ class MOGOTrajectoryAnalyzer:
         result = self._load_images_from_pkl(sample_idx)
         if result is None:
             return
-        imgs, nav_text, his_traj = result
+        imgs, nav_text, his_traj, hdmap_bev_path = result
 
         # 获取场景信息
         scene_info = self.get_scene_info(sample_idx)
@@ -655,20 +828,17 @@ class MOGOTrajectoryAnalyzer:
         if nav_text:
             title_info += f" | Nav: {nav_text}"
 
-        # ----------------------------------------------------------------
-        # 布局：左边4个摄像头（2行2列），右边BEV轨迹
-        #   左侧 (col 0-1): 2行2列摄像头
-        #     第0行: front(col0), back(col1)
-        #     第1行: left(col2), right(col3)  <- 注意col索引在gs中
-        #   右侧 (col 2): BEV轨迹（跨2行）
-        # ----------------------------------------------------------------
-        # GridSpec: 2行 x 3列，左2列放摄像头，右1列放BEV
-        fig = plt.figure(figsize=(20, 9))
+        # 布局：左侧 4 路摄像头，右侧固定物理视野 BEV；保持紧凑固定尺寸。
+        fig = plt.figure(figsize=DUAL_VIEW_FIGSIZE)
         gs = fig.add_gridspec(
             2, 3,
-            width_ratios=[1.0, 1.0, 1.2],
+            width_ratios=[1.0, 1.0, 1.95],
             hspace=0.25,
             wspace=0.12,
+            # left=0.018,
+            # right=0.995,
+            # bottom=0.052,
+            # top=0.915,
         )
 
         # 摄像头布局：第一排 front/back，第二排 left/right
@@ -715,11 +885,20 @@ class MOGOTrajectoryAnalyzer:
                 ax.text(0.5, 0.5, f'{cam_labels[cam]}\n(N/A)',
                         ha='center', va='center', transform=ax.transAxes,
                         fontsize=12, color='#555555')
-            ax.set_title(cam_labels[cam], fontsize=11)
+            ax.set_title(cam_labels[cam], fontsize=9, pad=2)
             ax.axis("off")
 
         # 右侧：BEV 轨迹（跨2行）
         ax_bev = fig.add_subplot(gs[:, 2])
+        hdmap_drawn = False
+        if show_hdmap:
+            hdmap_drawn = self._draw_hdmap_bev_background(
+                ax=ax_bev,
+                hdmap_path=hdmap_bev_path,
+                point_cloud_range=hdmap_point_cloud_range,
+                voxel_size=hdmap_voxel_size,
+                alpha=hdmap_alpha,
+            )
 
         # 从原点 (0,0) 开始连线到轨迹各点
         origin = np.array([[0.0, 0.0]])
@@ -727,10 +906,17 @@ class MOGOTrajectoryAnalyzer:
         pred_traj_with_origin = np.concatenate([origin, pred_traj], axis=0)
         history_traj_with_origin = None
         if his_traj is not None and len(his_traj) > 0:
-            history_traj_with_origin = np.concatenate([his_traj, origin], axis=0)
+            his_dist = np.linalg.norm(his_traj, axis=1)
+            if his_dist[0] < his_dist[-1]:
+                his_traj_for_plot = his_traj[::-1]
+            else:
+                his_traj_for_plot = his_traj
+            history_traj_with_origin = np.concatenate([his_traj_for_plot, origin], axis=0)
+        else:
+            his_traj_for_plot = None
 
-        ax_bev.plot(gt_traj_with_origin[:, 1], gt_traj_with_origin[:, 0], "g-", linewidth=2, label="GT")
-        ax_bev.plot(pred_traj_with_origin[:, 1], pred_traj_with_origin[:, 0], "r-", linewidth=2, label="Pred")
+        ax_bev.plot(gt_traj_with_origin[:, 1], gt_traj_with_origin[:, 0], "g-", linewidth=2, label="GT", zorder=3)
+        ax_bev.plot(pred_traj_with_origin[:, 1], pred_traj_with_origin[:, 0], "r-", linewidth=2, label="Pred", zorder=3)
         if history_traj_with_origin is not None:
             ax_bev.plot(
                 history_traj_with_origin[:, 1],
@@ -739,9 +925,10 @@ class MOGOTrajectoryAnalyzer:
                 linestyle="--",
                 linewidth=2,
                 label="History",
+                zorder=3,
             )
-        ax_bev.scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
-        ax_bev.scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
+        ax_bev.scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points', zorder=4)
+        ax_bev.scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points', zorder=4)
         if his_traj is not None and len(his_traj) > 0:
             ax_bev.scatter(
                 his_traj[:, 1],
@@ -750,49 +937,40 @@ class MOGOTrajectoryAnalyzer:
                 s=24,
                 alpha=0.75,
                 label='History Points',
+                zorder=4,
             )
         ax_bev.scatter(0, 0, color='blue', s=100, marker='s', label='Start Point', zorder=5)
 
         ax_bev.set_xlabel("Y (right positive)")
         ax_bev.set_ylabel("X (up positive)")
 
-        all_pts_list = [gt_traj, pred_traj, origin]
-        if his_traj is not None and len(his_traj) > 0:
-            all_pts_list.append(his_traj)
-        all_pts = np.concatenate(all_pts_list, axis=0)
-        x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()
-        y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()
-        margin_x = max(1.0, 0.1 * (x_max - x_min + 1e-6))
-        margin_y = max(1.0, 0.1 * (y_max - y_min + 1e-6))
-
-        auto_xlim = (y_min - margin_y, y_max + margin_y)
-        auto_ylim = (x_min - margin_x, x_max + margin_x)
-
-        # 如果用户传了可视化范围，优先保留该视野，但必要时自动向外扩展，
-        # 避免历史轨迹落在原点后方时被固定窗口裁掉。
+        # 默认使用固定物理视野，保证批量输出的 BEV 宽高和比例一致。
+        # 如果用户传参，则只使用用户指定范围，不再按轨迹动态缩放。
         if bev_ylim:
-            xlim = (min(bev_ylim[0], auto_xlim[0]), max(bev_ylim[1], auto_xlim[1]))
-            ax_bev.set_xlim(xlim)
+            ax_bev.set_xlim(bev_ylim)
         else:
-            ax_bev.set_xlim(auto_xlim)
+            ax_bev.set_xlim(DEFAULT_BEV_YLIM)
 
         if bev_xlim:
-            ylim = (min(bev_xlim[0], auto_ylim[0]), max(bev_xlim[1], auto_ylim[1]))
-            ax_bev.set_ylim(ylim)
+            ax_bev.set_ylim(bev_xlim)
         else:
-            ax_bev.set_ylim(auto_ylim)
+            ax_bev.set_ylim(DEFAULT_BEV_XLIM)
 
-        ax_bev.set_aspect("equal")
-        ax_bev.grid(True, alpha=0.3)
-        ax_bev.legend(loc='upper left', fontsize=9)
-        ax_bev.set_title("BEV Trajectory")
+        ax_bev.set_aspect("equal", adjustable="box")
+        ax_bev.set_anchor("W")          # West，左对齐
+        ax_bev.grid(False)
+        legend_handles, _ = ax_bev.get_legend_handles_labels()
+        if hdmap_drawn:
+            legend_handles.extend(self._hdmap_legend_handles())
+        ax_bev.legend(legend_handles, [h.get_label() for h in legend_handles], loc='lower left', bbox_to_anchor=(1.02, 0.0), fontsize=7)
+        ax_bev.set_title("BEV Trajectory + HDMap" if hdmap_drawn else "BEV Trajectory", fontsize=10, pad=3)
 
-        # 在 BEV 图右侧展示轨迹坐标数值（文本注释）
+        # 在 BEV 内部展示坐标，避免额外文本列造成模块松散。
         history_lines = []
-        if his_traj is not None and len(his_traj) > 0:
+        if his_traj_for_plot is not None and len(his_traj_for_plot) > 0:
             history_lines = [
-                f"{i}: ({his_traj[i, 0]:.2f}, {his_traj[i, 1]:.2f})"
-                for i in range(len(his_traj))
+                f"{i}: ({his_traj_for_plot[i, 0]:.2f}, {his_traj_for_plot[i, 1]:.2f})"
+                for i in range(len(his_traj_for_plot))
             ]
         gt_lines = [f"{i}: ({gt_traj[i, 0]:.2f}, {gt_traj[i, 1]:.2f})" for i in range(len(gt_traj))]
         pred_lines = [f"{i}: ({pred_traj[i, 0]:.2f}, {pred_traj[i, 1]:.2f})" for i in range(len(pred_traj))]
@@ -802,14 +980,14 @@ class MOGOTrajectoryAnalyzer:
         coords_sections.append("GT:\n" + "\n".join(gt_lines))
         coords_sections.append("Pred:\n" + "\n".join(pred_lines))
         coords_text = "\n\n".join(coords_sections)
-        ax_bev.text(1.02, 1.0, coords_text, ha='left', va='top',
+        ax_bev.text(1.05, 1.0, coords_text, ha='left', va='top',
                     transform=ax_bev.transAxes, fontsize=6,
                     bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
 
         fig.suptitle(title_info, fontsize=11, y=0.98)
 
         if save_path:
-            fig.savefig(save_path, dpi=150, bbox_inches='tight')
+            fig.savefig(save_path, dpi=DUAL_VIEW_DPI, bbox_inches='tight')
         else:
             plt.show()
         plt.close(fig)
@@ -822,6 +1000,10 @@ class MOGOTrajectoryAnalyzer:
         bev_xlim: Optional[Tuple[float, float]],
         bev_ylim: Optional[Tuple[float, float]],
         max_scenes: Optional[int] = None,
+        show_hdmap: bool = True,
+        hdmap_point_cloud_range: Tuple[float, float, float, float, float, float] = DEFAULT_HDMAP_POINT_CLOUD_RANGE,
+        hdmap_voxel_size: Tuple[float, float, float] = DEFAULT_HDMAP_VOXEL_SIZE,
+        hdmap_alpha: float = DEFAULT_HDMAP_ALPHA,
     ):
         """可视化指定范围的样本"""
         if self.gt_trajectories is None or self.pred_trajectories is None:
@@ -881,6 +1063,10 @@ class MOGOTrajectoryAnalyzer:
                 save_path=save_path,
                 bev_xlim=bev_xlim,
                 bev_ylim=bev_ylim,
+                show_hdmap=show_hdmap,
+                hdmap_point_cloud_range=hdmap_point_cloud_range,
+                hdmap_voxel_size=hdmap_voxel_size,
+                hdmap_alpha=hdmap_alpha,
             )
     
     def plot_error_statistics(self, save_path: Optional[str] = None):
@@ -1025,20 +1211,47 @@ def main():
         type=float,
         nargs=2,
         default=None,
-        help="BEV可视化的X轴范围，如: --bev_xlim -10 60"
+        help="BEV可视化的X轴范围（前后方向），默认固定为 -30 60"
     )
     parser.add_argument(
         "--bev_ylim",
         type=float,
         nargs=2,
         default=None,
-        help="BEV可视化的Y轴范围，如: --bev_ylim -20 20"
+        help="BEV可视化的Y轴范围（左右方向），默认固定为 -40 40"
     )
     parser.add_argument(
         "--num_scenes",
         type=int,
         default=None,
         help="限制可视化的时间戳数量（仅用于dual模式，None表示不限制）"
+    )
+    parser.add_argument(
+        "--no_hdmap",
+        action="store_true",
+        help="dual 模式下不在 BEV 轨迹图中叠加 HDMap"
+    )
+    parser.add_argument(
+        "--hdmap_point_cloud_range",
+        type=float,
+        nargs=6,
+        default=list(DEFAULT_HDMAP_POINT_CLOUD_RANGE),
+        metavar=("RIGHT_MIN", "FORWARD_MIN", "Z_MIN", "RIGHT_MAX", "FORWARD_MAX", "Z_MAX"),
+        help="HDMap BEV 对应的 point_cloud_range，默认与 tool/visualize_hdmap_npz.py 一致"
+    )
+    parser.add_argument(
+        "--hdmap_voxel_size",
+        type=float,
+        nargs=3,
+        default=list(DEFAULT_HDMAP_VOXEL_SIZE),
+        metavar=("RIGHT_VOXEL", "FORWARD_VOXEL", "Z_VOXEL"),
+        help="HDMap BEV 对应的 voxel_size，默认与 tool/visualize_hdmap_npz.py 一致"
+    )
+    parser.add_argument(
+        "--hdmap_alpha",
+        type=float,
+        default=DEFAULT_HDMAP_ALPHA,
+        help="HDMap 底图整体透明度缩放，取值范围 [0, 1]"
     )
     
     args = parser.parse_args()
@@ -1094,6 +1307,10 @@ def main():
             bev_xlim=tuple(args.bev_xlim) if args.bev_xlim else None,
             bev_ylim=tuple(args.bev_ylim) if args.bev_ylim else None,
             max_scenes=args.num_scenes,
+            show_hdmap=not args.no_hdmap,
+            hdmap_point_cloud_range=tuple(args.hdmap_point_cloud_range),
+            hdmap_voxel_size=tuple(args.hdmap_voxel_size),
+            hdmap_alpha=args.hdmap_alpha,
         )
 
 
