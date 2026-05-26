@@ -33,6 +33,7 @@ MOGO 数据集轨迹数据分析工具
 """
 
 import argparse
+import json
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
@@ -40,8 +41,12 @@ from typing import Optional, Tuple, List, Dict
 import cv2
 from tqdm import tqdm
 import os
+import pickle
 import re
 import torch
+from matplotlib.colors import ListedColormap
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 from src.utils.metric import get_action_accuracy
 from src.data.utils.normalization import Normalize
@@ -56,6 +61,31 @@ NAVIGATION_ID_TO_TEXT = {
 }
 # 反向映射：文本 -> id（用于从 navigation_command 推断 nav_id）
 NAVIGATION_COMMAND_TO_ID = {v: k for k, v in NAVIGATION_ID_TO_TEXT.items()}
+
+HDMAP_BEV_EXTENT = [-48.0, 48.0, -89.6, 89.6]
+HDMAP_OVERLAY_CONFIG = {
+    "lanes": {
+        "channel_idx": 0,
+        "color": "#74c476",
+        "alpha": 0.18,
+        "label": "Lane Area",
+        "zorder": 0,
+    },
+    "junctions": {
+        "channel_idx": 3,
+        "color": "#f6b04d",
+        "alpha": 0.22,
+        "label": "Junction",
+        "zorder": 1,
+    },
+    "lane_boundaries": {
+        "channel_idx": 2,
+        "color": "#33d1ff",
+        "alpha": 0.28,
+        "label": "Lane Boundary",
+        "zorder": 2,
+    },
+}
 
 
 class MOGOTrajectoryAnalyzer:
@@ -493,6 +523,879 @@ class MOGOTrajectoryAnalyzer:
             "accuracies": accuracies,
             "norm_mode": normalize.norm_mode,
         }
+
+    @staticmethod
+    def _normalize_angle(angle: np.ndarray) -> np.ndarray:
+        return (angle + np.pi) % (2 * np.pi) - np.pi
+
+    @staticmethod
+    def _estimate_yaw_from_traj(
+        traj_xy: np.ndarray,
+        fallback_yaw: float,
+        valid_mask: Optional[np.ndarray] = None,
+        eps: float = 1e-4,
+    ) -> np.ndarray:
+        """根据轨迹切线估计每个时刻的朝向，无法估计时回退到 fallback_yaw。"""
+        traj_xy = np.asarray(traj_xy, dtype=np.float32)
+        num_steps = traj_xy.shape[0]
+        yaws = np.full((num_steps,), float(fallback_yaw), dtype=np.float32)
+
+        if valid_mask is None:
+            valid_mask = np.ones((num_steps,), dtype=bool)
+        else:
+            valid_mask = np.asarray(valid_mask, dtype=bool)
+
+        for t in range(num_steps):
+            if not valid_mask[t]:
+                continue
+            prev_idx = t - 1
+            next_idx = t + 1
+            direction = None
+            if next_idx < num_steps and valid_mask[next_idx]:
+                delta = traj_xy[next_idx] - traj_xy[t]
+                if float(np.linalg.norm(delta)) > eps:
+                    direction = delta
+            if direction is None and prev_idx >= 0 and valid_mask[prev_idx]:
+                delta = traj_xy[t] - traj_xy[prev_idx]
+                if float(np.linalg.norm(delta)) > eps:
+                    direction = delta
+            if direction is not None:
+                yaws[t] = np.arctan2(direction[1], direction[0]).astype(np.float32)
+        return yaws
+
+    @staticmethod
+    def _interpolate_polyline(
+        points_xy: np.ndarray,
+        src_times: np.ndarray,
+        target_times: np.ndarray,
+        valid_mask: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """对轨迹做线性插值，返回插值结果和有效 mask。"""
+        points_xy = np.asarray(points_xy, dtype=np.float32)
+        src_times = np.asarray(src_times, dtype=np.float32)
+        target_times = np.asarray(target_times, dtype=np.float32)
+        if valid_mask is None:
+            valid_mask = np.ones((len(points_xy),), dtype=bool)
+        else:
+            valid_mask = np.asarray(valid_mask, dtype=bool)
+
+        valid_points = points_xy[valid_mask]
+        valid_times = src_times[valid_mask]
+        out = np.zeros((len(target_times), 2), dtype=np.float32)
+        out_mask = np.zeros((len(target_times),), dtype=bool)
+
+        if len(valid_times) == 0:
+            return out, out_mask
+
+        if len(valid_times) == 1:
+            out[target_times == valid_times[0]] = valid_points[0]
+            out_mask[target_times == valid_times[0]] = True
+            return out, out_mask
+
+        for i, t in enumerate(target_times):
+            if t < valid_times[0] or t > valid_times[-1]:
+                continue
+            if np.any(np.isclose(valid_times, t, atol=1e-6)):
+                idx = int(np.argmin(np.abs(valid_times - t)))
+                out[i] = valid_points[idx]
+                out_mask[i] = True
+                continue
+            right = int(np.searchsorted(valid_times, t, side="right"))
+            left = right - 1
+            if left < 0 or right >= len(valid_times):
+                continue
+            t0, t1 = valid_times[left], valid_times[right]
+            if float(t1 - t0) <= 1e-6:
+                out[i] = valid_points[left]
+                out_mask[i] = True
+                continue
+            ratio = float((t - t0) / (t1 - t0))
+            out[i] = valid_points[left] + ratio * (valid_points[right] - valid_points[left])
+            out_mask[i] = True
+        return out, out_mask
+
+    @staticmethod
+    def _box_corners(center_xy: np.ndarray, yaw: float, length: float, width: float) -> np.ndarray:
+        """构造旋转框四角点。length 对应前后方向，width 对应左右方向。"""
+        cx, cy = float(center_xy[0]), float(center_xy[1])
+        hl = max(float(length), 1e-3) * 0.5
+        hw = max(float(width), 1e-3) * 0.5
+        local = np.array(
+            [
+                [hl, hw],
+                [hl, -hw],
+                [-hl, -hw],
+                [-hl, hw],
+            ],
+            dtype=np.float32,
+        )
+        cos_yaw = float(np.cos(yaw))
+        sin_yaw = float(np.sin(yaw))
+        rot = np.array(
+            [[cos_yaw, -sin_yaw], [sin_yaw, cos_yaw]],
+            dtype=np.float32,
+        )
+        return local @ rot.T + np.array([cx, cy], dtype=np.float32)
+
+    @staticmethod
+    def _polygons_overlap_sat(poly_a: np.ndarray, poly_b: np.ndarray, eps: float = 1e-6) -> bool:
+        """使用 SAT 判定两个凸四边形是否相交。"""
+        for poly in (poly_a, poly_b):
+            for i in range(len(poly)):
+                p0 = poly[i]
+                p1 = poly[(i + 1) % len(poly)]
+                edge = p1 - p0
+                axis = np.array([-edge[1], edge[0]], dtype=np.float32)
+                norm = float(np.linalg.norm(axis))
+                if norm <= eps:
+                    continue
+                axis = axis / norm
+                proj_a = poly_a @ axis
+                proj_b = poly_b @ axis
+                if float(np.max(proj_a)) < float(np.min(proj_b)) - eps:
+                    return False
+                if float(np.max(proj_b)) < float(np.min(proj_a)) - eps:
+                    return False
+        return True
+
+    def _load_raw_pkl(self, sample_idx: int) -> Optional[Dict[str, object]]:
+        if self.pkl_root_dir is None or sample_idx not in self.pkl_file_map:
+            return None
+        _, pkl_path = self.pkl_file_map[sample_idx]
+        try:
+            with open(pkl_path, "rb") as f:
+                return pickle.load(f, encoding="latin-1")
+        except Exception as e:
+            print(f"加载 pkl 失败 {pkl_path}: {e}")
+            return None
+
+    @staticmethod
+    def _load_hdmap_overlays(
+        raw_pkl: Dict[str, object],
+        channel_names: Optional[List[str]] = None,
+    ) -> Dict[str, np.ndarray]:
+        """从 pkl 的 hdmap_bev 中读取指定通道，返回转置后的 BEV 叠加图。"""
+        hdmap_bev_path = raw_pkl.get("hdmap_bev")
+        if hdmap_bev_path is None:
+            return {}
+        if isinstance(hdmap_bev_path, bytes):
+            hdmap_bev_path = hdmap_bev_path.decode("utf-8")
+        if not hdmap_bev_path or not os.path.exists(hdmap_bev_path):
+            return {}
+        try:
+            bev = np.load(hdmap_bev_path)["hdmap_bev"].astype(np.float32)
+        except Exception:
+            return {}
+        if bev.ndim != 3:
+            return {}
+
+        selected_names = channel_names or ["lanes", "junctions", "lane_boundaries"]
+        overlays = {}
+        for name in selected_names:
+            config = HDMAP_OVERLAY_CONFIG.get(name)
+            if config is None:
+                continue
+            channel_idx = int(config["channel_idx"])
+            if channel_idx >= bev.shape[0]:
+                continue
+            # 转为绘图坐标: horizontal=Y(left-right), vertical=X(rear-front)
+            overlays[name] = bev[channel_idx].T
+        return overlays
+
+    @staticmethod
+    def _draw_hdmap_overlays(ax, overlays: Dict[str, np.ndarray]) -> List[str]:
+        """在 BEV 坐标系中叠加 HDMap 图层，返回实际绘制的图层名。"""
+        drawn_layers: List[str] = []
+        for name in ("lanes", "junctions", "lane_boundaries"):
+            overlay = overlays.get(name)
+            config = HDMAP_OVERLAY_CONFIG.get(name)
+            if overlay is None or config is None:
+                continue
+            mask = np.ma.masked_where(overlay <= 0.0, overlay)
+            if mask.count() == 0:
+                continue
+            ax.imshow(
+                mask,
+                extent=HDMAP_BEV_EXTENT,
+                origin="lower",
+                cmap=ListedColormap([config["color"]]),
+                alpha=float(config["alpha"]),
+                interpolation="nearest",
+                zorder=int(config["zorder"]),
+            )
+            drawn_layers.append(name)
+        return drawn_layers
+
+    @staticmethod
+    def _build_bev_legend_handles(
+        hdmap_layers: List[str],
+        include_history: bool,
+        include_collision_objects: bool = False,
+        include_collision_box: bool = False,
+    ) -> List[object]:
+        handles: List[object] = []
+        for layer_name in ("lanes", "junctions", "lane_boundaries"):
+            if layer_name not in hdmap_layers:
+                continue
+            config = HDMAP_OVERLAY_CONFIG[layer_name]
+            handles.append(
+                Patch(
+                    facecolor=config["color"],
+                    edgecolor="none",
+                    alpha=float(config["alpha"]),
+                    label=str(config["label"]),
+                )
+            )
+        handles.append(Line2D([0], [0], color="green", linewidth=2, label="GT"))
+        handles.append(Line2D([0], [0], color="red", linewidth=2, label="Pred"))
+        if include_history:
+            handles.append(Line2D([0], [0], color="tab:blue", linestyle="--", linewidth=2, label="History"))
+        handles.append(
+            Line2D(
+                [0], [0],
+                marker="s",
+                color="blue",
+                markersize=8,
+                linestyle="None",
+                label="Ego Start",
+            )
+        )
+        if include_collision_objects:
+            handles.append(Line2D([0], [0], color="gray", linewidth=1.5, alpha=0.7, label="Other Agents"))
+            handles.append(Line2D([0], [0], color="orange", linewidth=1.8, label="Colliding Agent"))
+        if include_collision_box:
+            handles.append(Line2D([0], [0], color="crimson", linewidth=2.0, label="Collision Box"))
+        return handles
+
+    def compute_collision_metrics(
+        self,
+        interpolation_dt: float = 0.1,
+        class_id_to_name: Optional[Dict[int, str]] = None,
+    ) -> Dict[str, object]:
+        """统计当前和未来预测轨迹上的碰撞率。"""
+        if self.gt_trajectories is None or self.pred_trajectories is None:
+            print("错误: 请先加载轨迹数据")
+            return {}
+        if self.pkl_root_dir is None:
+            print("错误: 计算碰撞率需要提供 pkl_root_dir")
+            return {}
+
+        if class_id_to_name is None:
+            class_id_to_name = {
+                0: "CAR",
+                1: "PEDESTRIAN",
+                2: "BUS",
+                3: "RIDER",
+                4: "TRICYCLE",
+                5: "UNKNOWN",
+            }
+
+        future_times = np.array([0.5, 1.0, 1.5, 2.0, 2.5, 3.0], dtype=np.float32)
+        dense_future_times = np.arange(0.0, future_times[-1] + 1e-6, interpolation_dt, dtype=np.float32)
+        num_samples = len(self.pred_trajectories)
+
+        current_collisions = np.zeros((num_samples,), dtype=bool)
+        future_collisions = np.zeros((num_samples,), dtype=bool)
+        overall_collisions = np.zeros((num_samples,), dtype=bool)
+        future_collision_per_step = np.zeros((len(dense_future_times),), dtype=np.int64)
+        gt_future_collision_per_step = np.zeros((len(dense_future_times),), dtype=np.int64)
+        gt_future_collisions = np.zeros((num_samples,), dtype=bool)
+        first_collision_time = np.full((num_samples,), np.nan, dtype=np.float32)
+        collided_sample_infos: List[Dict[str, object]] = []
+        gt_collided_sample_infos: List[Dict[str, object]] = []
+        class_collision_counter: Dict[str, int] = {}
+        gt_class_collision_counter: Dict[str, int] = {}
+        valid_samples = 0
+
+        print("\n" + "=" * 60)
+        print("碰撞率分析")
+        print("=" * 60)
+
+        for sample_idx in tqdm(range(num_samples), desc="collision", unit="sample"):
+            raw = self._load_raw_pkl(sample_idx)
+            if raw is None:
+                continue
+
+            pred_future_xy = np.asarray(self.pred_trajectories[sample_idx], dtype=np.float32)
+            gt_future_xy = np.asarray(self.gt_trajectories[sample_idx], dtype=np.float32)
+            av_idx = int(np.asarray(raw.get("av_idx", 0)).item())
+
+            boxes_wh = np.asarray(raw["boxes_wh"], dtype=np.float32)
+            classes_type = np.asarray(raw["classes_type"], dtype=np.int32)
+            agent_centers = np.asarray(raw["agent_centers"], dtype=np.float32)
+            agent_yaws = np.asarray(raw["agent_rotate_angles"], dtype=np.float32)
+            obj_future_xy = np.asarray(raw["y"], dtype=np.float32)
+            obj_future_invalid = np.asarray(raw["y_padding_mask"], dtype=bool)
+
+            if av_idx < 0 or av_idx >= len(boxes_wh):
+                continue
+
+            valid_samples += 1
+            av_length, av_width = boxes_wh[av_idx]
+            av_center0 = agent_centers[av_idx]
+            av_current_yaw = 0.0
+            av_pred_full = np.concatenate([av_center0.reshape(1, 2), pred_future_xy], axis=0)
+            av_gt_full = np.concatenate([av_center0.reshape(1, 2), gt_future_xy], axis=0)
+            av_src_times = np.concatenate([np.array([0.0], dtype=np.float32), future_times], axis=0)
+            av_dense_pred_xy, av_dense_pred_mask = self._interpolate_polyline(
+                av_pred_full,
+                av_src_times,
+                dense_future_times,
+            )
+            av_dense_gt_xy, av_dense_gt_mask = self._interpolate_polyline(
+                av_gt_full,
+                av_src_times,
+                dense_future_times,
+            )
+            av_dense_pred_yaw = self._estimate_yaw_from_traj(av_dense_pred_xy, fallback_yaw=av_current_yaw, valid_mask=av_dense_pred_mask)
+            av_dense_gt_yaw = self._estimate_yaw_from_traj(av_dense_gt_xy, fallback_yaw=av_current_yaw, valid_mask=av_dense_gt_mask)
+
+            sample_current_collision = False
+            sample_future_collision = False
+            sample_gt_future_collision = False
+            sample_first_collision_time = np.nan
+            sample_gt_first_collision_time = np.nan
+            sample_collided_classes = set()
+            sample_gt_collided_classes = set()
+            sample_collision_steps = np.zeros((len(dense_future_times),), dtype=bool)
+            sample_gt_collision_steps = np.zeros((len(dense_future_times),), dtype=bool)
+
+            av_poly_current = self._box_corners(av_center0, av_current_yaw, av_length, av_width)
+
+            for obj_idx in range(len(boxes_wh)):
+                if obj_idx == av_idx:
+                    continue
+
+                obj_length, obj_width = boxes_wh[obj_idx]
+                obj_class_name = class_id_to_name.get(int(classes_type[obj_idx]), f"CLASS_{int(classes_type[obj_idx])}")
+                obj_center0 = agent_centers[obj_idx]
+                obj_yaw0 = float(agent_yaws[obj_idx])
+
+                obj_poly_current = self._box_corners(obj_center0, obj_yaw0, obj_length, obj_width)
+                if self._polygons_overlap_sat(av_poly_current, obj_poly_current):
+                    sample_current_collision = True
+                    sample_collided_classes.add(obj_class_name)
+                    if np.isnan(sample_first_collision_time):
+                        sample_first_collision_time = 0.0
+
+                obj_future_invalid_i = obj_future_invalid[obj_idx]
+                obj_future_valid_i = ~obj_future_invalid_i
+                obj_future_full = np.concatenate([obj_center0.reshape(1, 2), obj_future_xy[obj_idx]], axis=0)
+                obj_src_times = np.concatenate([np.array([0.0], dtype=np.float32), future_times], axis=0)
+                obj_src_valid = np.concatenate([np.array([True], dtype=bool), obj_future_valid_i], axis=0)
+                obj_dense_xy, obj_dense_mask = self._interpolate_polyline(
+                    obj_future_full,
+                    obj_src_times,
+                    dense_future_times,
+                    valid_mask=obj_src_valid,
+                )
+                obj_dense_yaw = self._estimate_yaw_from_traj(obj_dense_xy, fallback_yaw=obj_yaw0, valid_mask=obj_dense_mask)
+
+                for t_idx, t_sec in enumerate(dense_future_times):
+                    if t_idx == 0:
+                        continue
+                    if not (av_dense_pred_mask[t_idx] and obj_dense_mask[t_idx]):
+                        continue
+                    av_poly = self._box_corners(
+                        av_dense_pred_xy[t_idx],
+                        float(av_dense_pred_yaw[t_idx]),
+                        av_length,
+                        av_width,
+                    )
+                    obj_poly = self._box_corners(
+                        obj_dense_xy[t_idx],
+                        float(obj_dense_yaw[t_idx]),
+                        obj_length,
+                        obj_width,
+                    )
+                    if self._polygons_overlap_sat(av_poly, obj_poly):
+                        sample_future_collision = True
+                        sample_collision_steps[t_idx] = True
+                        sample_collided_classes.add(obj_class_name)
+                        if np.isnan(sample_first_collision_time):
+                            sample_first_collision_time = float(t_sec)
+                        break
+
+                for t_idx, _ in enumerate(dense_future_times):
+                    if t_idx == 0:
+                        continue
+                    if not (av_dense_gt_mask[t_idx] and obj_dense_mask[t_idx]):
+                        continue
+                    av_poly_gt = self._box_corners(
+                        av_dense_gt_xy[t_idx],
+                        float(av_dense_gt_yaw[t_idx]),
+                        av_length,
+                        av_width,
+                    )
+                    obj_poly = self._box_corners(
+                        obj_dense_xy[t_idx],
+                        float(obj_dense_yaw[t_idx]),
+                        obj_length,
+                        obj_width,
+                    )
+                    if self._polygons_overlap_sat(av_poly_gt, obj_poly):
+                        sample_gt_future_collision = True
+                        sample_gt_collision_steps[t_idx] = True
+                        sample_gt_collided_classes.add(obj_class_name)
+                        if np.isnan(sample_gt_first_collision_time):
+                            sample_gt_first_collision_time = float(dense_future_times[t_idx])
+                        break
+
+            current_collisions[sample_idx] = sample_current_collision
+            future_collisions[sample_idx] = sample_future_collision
+            overall_collisions[sample_idx] = sample_current_collision or sample_future_collision
+            gt_future_collisions[sample_idx] = sample_gt_future_collision
+            first_collision_time[sample_idx] = sample_first_collision_time
+            future_collision_per_step += sample_collision_steps.astype(np.int64)
+            gt_future_collision_per_step += sample_gt_collision_steps.astype(np.int64)
+
+            if overall_collisions[sample_idx]:
+                scene_info = self.get_scene_info(sample_idx)
+                timestamp, local_idx = scene_info if scene_info else ("unknown", sample_idx)
+                collided_sample_infos.append(
+                    {
+                        "sample_idx": int(sample_idx),
+                        "timestamp": str(timestamp),
+                        "local_idx": int(local_idx),
+                        "current_collision": bool(sample_current_collision),
+                        "future_collision": bool(sample_future_collision),
+                        "first_collision_time": None if np.isnan(sample_first_collision_time) else float(sample_first_collision_time),
+                        "collided_classes": sorted(sample_collided_classes),
+                    }
+                )
+                for cls_name in sample_collided_classes:
+                    class_collision_counter[cls_name] = class_collision_counter.get(cls_name, 0) + 1
+            if sample_gt_future_collision:
+                scene_info = self.get_scene_info(sample_idx)
+                timestamp, local_idx = scene_info if scene_info else ("unknown", sample_idx)
+                gt_collided_sample_infos.append(
+                    {
+                        "sample_idx": int(sample_idx),
+                        "timestamp": str(timestamp),
+                        "local_idx": int(local_idx),
+                        "first_collision_time": None if np.isnan(sample_gt_first_collision_time) else float(sample_gt_first_collision_time),
+                        "collided_classes": sorted(sample_gt_collided_classes),
+                    }
+                )
+                for cls_name in sample_gt_collided_classes:
+                    gt_class_collision_counter[cls_name] = gt_class_collision_counter.get(cls_name, 0) + 1
+
+        denom = max(valid_samples, 1)
+        current_collision_rate = float(current_collisions.sum() / denom)
+        future_collision_rate = float(future_collisions.sum() / denom)
+        overall_collision_rate = float(overall_collisions.sum() / denom)
+        gt_future_collision_rate = float(gt_future_collisions.sum() / denom)
+        collision_rate_per_step = (future_collision_per_step / denom).astype(np.float32)
+        gt_collision_rate_per_step = (gt_future_collision_per_step / denom).astype(np.float32)
+
+        print(f"有效样本数: {valid_samples}")
+        print(f"当前碰撞率 current_collision_rate: {current_collision_rate:.4f}")
+        print(f"未来碰撞率 future_collision_rate: {future_collision_rate:.4f}")
+        print(f"总体碰撞率 overall_collision_rate: {overall_collision_rate:.4f}")
+        print(f"GT未来碰撞率 gt_future_collision_rate: {gt_future_collision_rate:.4f}")
+        print("未来逐时刻碰撞率 (0.1s):")
+        for t_sec, rate in zip(dense_future_times[1:], collision_rate_per_step[1:]):
+            print(f"  t={t_sec:.1f}s: {rate:.4f}")
+        print("GT未来逐时刻碰撞率 (0.1s):")
+        for t_sec, rate in zip(dense_future_times[1:], gt_collision_rate_per_step[1:]):
+            print(f"  t={t_sec:.1f}s: {rate:.4f}")
+        if class_collision_counter:
+            print("按类别统计的碰撞样本数:")
+            for cls_name, count in sorted(class_collision_counter.items(), key=lambda kv: (-kv[1], kv[0])):
+                print(f"  {cls_name}: {count}")
+        if gt_class_collision_counter:
+            print("按类别统计的 GT 碰撞样本数:")
+            for cls_name, count in sorted(gt_class_collision_counter.items(), key=lambda kv: (-kv[1], kv[0])):
+                print(f"  {cls_name}: {count}")
+        print("=" * 60)
+
+        return {
+            "num_valid_samples": int(valid_samples),
+            "current_collision_rate": current_collision_rate,
+            "future_collision_rate": future_collision_rate,
+            "overall_collision_rate": overall_collision_rate,
+            "gt_future_collision_rate": gt_future_collision_rate,
+            "dense_future_times_sec": dense_future_times.tolist(),
+            "collision_rate_per_step": collision_rate_per_step.tolist(),
+            "gt_collision_rate_per_step": gt_collision_rate_per_step.tolist(),
+            "num_current_collisions": int(current_collisions.sum()),
+            "num_future_collisions": int(future_collisions.sum()),
+            "num_overall_collisions": int(overall_collisions.sum()),
+            "num_gt_future_collisions": int(gt_future_collisions.sum()),
+            "class_collision_counter": class_collision_counter,
+            "gt_class_collision_counter": gt_class_collision_counter,
+            "collided_samples": collided_sample_infos,
+            "gt_collided_samples": gt_collided_sample_infos,
+        }
+
+    def _build_collision_snapshot(
+        self,
+        sample_idx: int,
+        interpolation_dt: float = 0.1,
+    ) -> Optional[Dict[str, object]]:
+        """为单个样本构建碰撞可视化所需的几何快照。"""
+        if self.gt_trajectories is None or self.pred_trajectories is None:
+            return None
+        raw = self._load_raw_pkl(sample_idx)
+        if raw is None:
+            return None
+
+        future_times = np.array([0.5, 1.0, 1.5, 2.0, 2.5, 3.0], dtype=np.float32)
+        dense_future_times = np.arange(0.0, future_times[-1] + 1e-6, interpolation_dt, dtype=np.float32)
+
+        pred_future_xy = np.asarray(self.pred_trajectories[sample_idx], dtype=np.float32)
+        gt_future_xy = np.asarray(self.gt_trajectories[sample_idx], dtype=np.float32)
+        av_idx = int(np.asarray(raw.get("av_idx", 0)).item())
+        boxes_wh = np.asarray(raw["boxes_wh"], dtype=np.float32)
+        classes_type = np.asarray(raw["classes_type"], dtype=np.int32)
+        agent_centers = np.asarray(raw["agent_centers"], dtype=np.float32)
+        agent_yaws = np.asarray(raw["agent_rotate_angles"], dtype=np.float32)
+        obj_future_xy = np.asarray(raw["y"], dtype=np.float32)
+        obj_future_invalid = np.asarray(raw["y_padding_mask"], dtype=bool)
+
+        if av_idx < 0 or av_idx >= len(boxes_wh):
+            return None
+
+        av_length, av_width = boxes_wh[av_idx]
+        av_center0 = agent_centers[av_idx]
+        av_pred_full = np.concatenate([av_center0.reshape(1, 2), pred_future_xy], axis=0)
+        av_gt_full = np.concatenate([av_center0.reshape(1, 2), gt_future_xy], axis=0)
+        av_src_times = np.concatenate([np.array([0.0], dtype=np.float32), future_times], axis=0)
+        av_dense_pred_xy, av_dense_pred_mask = self._interpolate_polyline(
+            av_pred_full, av_src_times, dense_future_times
+        )
+        av_dense_gt_xy, av_dense_gt_mask = self._interpolate_polyline(
+            av_gt_full, av_src_times, dense_future_times
+        )
+        av_dense_pred_yaw = self._estimate_yaw_from_traj(
+            av_dense_pred_xy, fallback_yaw=0.0, valid_mask=av_dense_pred_mask
+        )
+        av_dense_gt_yaw = self._estimate_yaw_from_traj(
+            av_dense_gt_xy, fallback_yaw=0.0, valid_mask=av_dense_gt_mask
+        )
+
+        obj_snapshots: List[Dict[str, object]] = []
+        pred_collision_steps = np.zeros((len(dense_future_times),), dtype=bool)
+        gt_collision_steps = np.zeros((len(dense_future_times),), dtype=bool)
+        pred_collided_obj_indices = set()
+        gt_collided_obj_indices = set()
+        first_pred_collision_time = np.nan
+        first_gt_collision_time = np.nan
+
+        for obj_idx in range(len(boxes_wh)):
+            if obj_idx == av_idx:
+                continue
+            obj_length, obj_width = boxes_wh[obj_idx]
+            obj_center0 = agent_centers[obj_idx]
+            obj_yaw0 = float(agent_yaws[obj_idx])
+            obj_future_valid_i = ~obj_future_invalid[obj_idx]
+            obj_future_full = np.concatenate([obj_center0.reshape(1, 2), obj_future_xy[obj_idx]], axis=0)
+            obj_src_times = np.concatenate([np.array([0.0], dtype=np.float32), future_times], axis=0)
+            obj_src_valid = np.concatenate([np.array([True], dtype=bool), obj_future_valid_i], axis=0)
+            obj_dense_xy, obj_dense_mask = self._interpolate_polyline(
+                obj_future_full, obj_src_times, dense_future_times, valid_mask=obj_src_valid
+            )
+            obj_dense_yaw = self._estimate_yaw_from_traj(
+                obj_dense_xy, fallback_yaw=obj_yaw0, valid_mask=obj_dense_mask
+            )
+
+            obj_pred_collision_steps = np.zeros((len(dense_future_times),), dtype=bool)
+            obj_gt_collision_steps = np.zeros((len(dense_future_times),), dtype=bool)
+            for t_idx, t_sec in enumerate(dense_future_times):
+                if not (av_dense_pred_mask[t_idx] and obj_dense_mask[t_idx]):
+                    continue
+                av_poly = self._box_corners(
+                    av_dense_pred_xy[t_idx], float(av_dense_pred_yaw[t_idx]), av_length, av_width
+                )
+                obj_poly = self._box_corners(
+                    obj_dense_xy[t_idx], float(obj_dense_yaw[t_idx]), obj_length, obj_width
+                )
+                if self._polygons_overlap_sat(av_poly, obj_poly):
+                    obj_pred_collision_steps[t_idx] = True
+                    pred_collision_steps[t_idx] = True
+                    pred_collided_obj_indices.add(obj_idx)
+                    if np.isnan(first_pred_collision_time):
+                        first_pred_collision_time = float(t_sec)
+
+            for t_idx, t_sec in enumerate(dense_future_times):
+                if not (av_dense_gt_mask[t_idx] and obj_dense_mask[t_idx]):
+                    continue
+                av_poly_gt = self._box_corners(
+                    av_dense_gt_xy[t_idx], float(av_dense_gt_yaw[t_idx]), av_length, av_width
+                )
+                obj_poly = self._box_corners(
+                    obj_dense_xy[t_idx], float(obj_dense_yaw[t_idx]), obj_length, obj_width
+                )
+                if self._polygons_overlap_sat(av_poly_gt, obj_poly):
+                    obj_gt_collision_steps[t_idx] = True
+                    gt_collision_steps[t_idx] = True
+                    gt_collided_obj_indices.add(obj_idx)
+                    if np.isnan(first_gt_collision_time):
+                        first_gt_collision_time = float(t_sec)
+
+            obj_snapshots.append(
+                {
+                    "obj_idx": int(obj_idx),
+                    "class_id": int(classes_type[obj_idx]),
+                    "center0": obj_center0.tolist(),
+                    "yaw0": obj_yaw0,
+                    "length": float(obj_length),
+                    "width": float(obj_width),
+                    "dense_xy": obj_dense_xy.tolist(),
+                    "dense_mask": obj_dense_mask.tolist(),
+                    "dense_yaw": obj_dense_yaw.tolist(),
+                    "pred_collision_steps": obj_pred_collision_steps.tolist(),
+                    "gt_collision_steps": obj_gt_collision_steps.tolist(),
+                }
+            )
+
+        return {
+            "sample_idx": int(sample_idx),
+            "dense_future_times_sec": dense_future_times.tolist(),
+            "av_idx": int(av_idx),
+            "av_length": float(av_length),
+            "av_width": float(av_width),
+            "av_dense_pred_xy": av_dense_pred_xy.tolist(),
+            "av_dense_pred_mask": av_dense_pred_mask.tolist(),
+            "av_dense_pred_yaw": av_dense_pred_yaw.tolist(),
+            "av_dense_gt_xy": av_dense_gt_xy.tolist(),
+            "av_dense_gt_mask": av_dense_gt_mask.tolist(),
+            "av_dense_gt_yaw": av_dense_gt_yaw.tolist(),
+            "pred_collision_steps": pred_collision_steps.tolist(),
+            "gt_collision_steps": gt_collision_steps.tolist(),
+            "pred_collided_obj_indices": sorted(int(v) for v in pred_collided_obj_indices),
+            "gt_collided_obj_indices": sorted(int(v) for v in gt_collided_obj_indices),
+            "first_pred_collision_time": None if np.isnan(first_pred_collision_time) else float(first_pred_collision_time),
+            "first_gt_collision_time": None if np.isnan(first_gt_collision_time) else float(first_gt_collision_time),
+            "objects": obj_snapshots,
+        }
+
+    def export_collision_visualizations(
+        self,
+        collision_metrics: Dict[str, object],
+        output_dir: str,
+        interpolation_dt: float = 0.1,
+        max_samples: int = 20,
+        collision_type: str = "pred",
+    ) -> None:
+        """导出碰撞样本可视化图。"""
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        collided_samples = (
+            collision_metrics.get("gt_collided_samples", [])
+            if collision_type == "gt"
+            else collision_metrics.get("collided_samples", [])
+        )
+        if not collided_samples:
+            print(f"没有 {collision_type} 碰撞样本，跳过碰撞可视化导出")
+            return
+
+        class_name_map = {
+            0: "CAR",
+            1: "PEDESTRIAN",
+            2: "BUS",
+            3: "RIDER",
+            4: "TRICYCLE",
+            5: "UNKNOWN",
+        }
+
+        selected = collided_samples[:max_samples]
+        for item in tqdm(selected, desc="collision vis", unit="img"):
+            sample_idx = int(item["sample_idx"])
+            result = self._load_images_from_pkl(sample_idx)
+            if result is None:
+                continue
+            imgs, nav_text, his_traj = result
+            raw_pkl = self._load_raw_pkl(sample_idx)
+            snapshot = self._build_collision_snapshot(sample_idx, interpolation_dt=interpolation_dt)
+            if snapshot is None:
+                continue
+
+            gt_traj = self.gt_trajectories[sample_idx]
+            pred_traj = self.pred_trajectories[sample_idx]
+            scene_info = self.get_scene_info(sample_idx)
+            if scene_info:
+                timestamp, local_idx = scene_info
+                title_info = f"collision sample {sample_idx}, {timestamp}, step {local_idx}"
+            else:
+                title_info = f"collision sample {sample_idx}"
+            if nav_text:
+                title_info += f" | Nav: {nav_text}"
+
+            fig = plt.figure(figsize=(20, 9))
+            gs = fig.add_gridspec(2, 3, width_ratios=[1.0, 1.0, 1.25], hspace=0.25, wspace=0.12)
+
+            cam_grid = [('front', 0, 0), ('back', 0, 1), ('left', 1, 0), ('right', 1, 1)]
+            cam_labels = {'front': 'Front', 'right': 'Right', 'left': 'Left', 'back': 'Back'}
+            for cam, row, col in cam_grid:
+                ax = fig.add_subplot(gs[row, col])
+                img = imgs.get(cam)
+                if img is not None:
+                    ax.imshow(img)
+                else:
+                    ax.set_facecolor('#cccccc')
+                    ax.text(0.5, 0.5, f'{cam_labels[cam]}\n(N/A)', ha='center', va='center',
+                            transform=ax.transAxes, fontsize=12, color='#555555')
+                ax.set_title(cam_labels[cam], fontsize=11)
+                ax.axis("off")
+
+            ax_bev = fig.add_subplot(gs[:, 2])
+            hdmap_overlays = self._load_hdmap_overlays(raw_pkl) if raw_pkl is not None else {}
+            drawn_hdmap_layers = self._draw_hdmap_overlays(ax_bev, hdmap_overlays)
+
+            origin = np.array([[0.0, 0.0]], dtype=np.float32)
+            gt_traj_with_origin = np.concatenate([origin, gt_traj], axis=0)
+            pred_traj_with_origin = np.concatenate([origin, pred_traj], axis=0)
+            ax_bev.plot(gt_traj_with_origin[:, 1], gt_traj_with_origin[:, 0], "g-", linewidth=2, zorder=4)
+            ax_bev.plot(pred_traj_with_origin[:, 1], pred_traj_with_origin[:, 0], "r-", linewidth=2, zorder=4)
+            if his_traj is not None and len(his_traj) > 0:
+                his_with_origin = np.concatenate([his_traj, origin], axis=0)
+                ax_bev.plot(his_with_origin[:, 1], his_with_origin[:, 0], color="tab:blue",
+                            linestyle="--", linewidth=2, zorder=4)
+            ax_bev.scatter(0, 0, color="blue", s=100, marker="s", zorder=6)
+
+            dense_times = np.asarray(snapshot["dense_future_times_sec"], dtype=np.float32)
+            if collision_type == "gt":
+                av_xy = np.asarray(snapshot["av_dense_gt_xy"], dtype=np.float32)
+                av_mask = np.asarray(snapshot["av_dense_gt_mask"], dtype=bool)
+                av_yaw = np.asarray(snapshot["av_dense_gt_yaw"], dtype=np.float32)
+                collision_steps = np.asarray(snapshot["gt_collision_steps"], dtype=bool)
+                collided_obj_indices = set(snapshot["gt_collided_obj_indices"])
+                first_collision_time = snapshot["first_gt_collision_time"]
+            else:
+                av_xy = np.asarray(snapshot["av_dense_pred_xy"], dtype=np.float32)
+                av_mask = np.asarray(snapshot["av_dense_pred_mask"], dtype=bool)
+                av_yaw = np.asarray(snapshot["av_dense_pred_yaw"], dtype=np.float32)
+                collision_steps = np.asarray(snapshot["pred_collision_steps"], dtype=bool)
+                collided_obj_indices = set(snapshot["pred_collided_obj_indices"])
+                first_collision_time = snapshot["first_pred_collision_time"]
+            av_length = float(snapshot["av_length"])
+            av_width = float(snapshot["av_width"])
+
+            all_pts = [gt_traj, pred_traj, origin, av_xy[av_mask]]
+            if his_traj is not None and len(his_traj) > 0:
+                all_pts.append(his_traj)
+
+            for obj_item in snapshot["objects"]:
+                obj_xy = np.asarray(obj_item["dense_xy"], dtype=np.float32)
+                obj_mask = np.asarray(obj_item["dense_mask"], dtype=bool)
+                obj_yaw = np.asarray(obj_item["dense_yaw"], dtype=np.float32)
+                obj_collision_steps = np.asarray(
+                    obj_item["gt_collision_steps"] if collision_type == "gt" else obj_item["pred_collision_steps"],
+                    dtype=bool,
+                )
+                cls_name = class_name_map.get(int(obj_item["class_id"]), f"CLASS_{int(obj_item['class_id'])}")
+                line_color = "orange" if np.any(obj_collision_steps) else "gray"
+                alpha = 0.95 if np.any(obj_collision_steps) else 0.45
+                if np.any(obj_mask):
+                    ax_bev.plot(
+                        obj_xy[obj_mask, 1],
+                        obj_xy[obj_mask, 0],
+                        color=line_color,
+                        alpha=alpha,
+                        linewidth=1.5,
+                        zorder=4,
+                    )
+                    ax_bev.scatter(obj_xy[0, 1], obj_xy[0, 0], color=line_color, s=18, alpha=alpha, zorder=5)
+                    all_pts.append(obj_xy[obj_mask])
+                for t_idx, t_sec in enumerate(dense_times):
+                    if not obj_mask[t_idx]:
+                        continue
+                    if t_idx == 0 or np.isclose(t_sec % 0.5, 0.0, atol=1e-6) or obj_collision_steps[t_idx]:
+                        corners = self._box_corners(
+                            obj_xy[t_idx],
+                            float(obj_yaw[t_idx]),
+                            float(obj_item["length"]),
+                            float(obj_item["width"]),
+                        )
+                        poly = np.vstack([corners, corners[0]])
+                        ax_bev.plot(poly[:, 1], poly[:, 0], color=line_color, alpha=alpha, linewidth=1.0, zorder=5)
+                        if obj_collision_steps[t_idx]:
+                            ax_bev.text(obj_xy[t_idx, 1], obj_xy[t_idx, 0], f"{cls_name}[{int(obj_item['obj_idx'])}]",
+                                        color="darkred", fontsize=7, zorder=6)
+
+            for t_idx, t_sec in enumerate(dense_times):
+                if not av_mask[t_idx]:
+                    continue
+                if t_idx == 0 or np.isclose(t_sec % 0.5, 0.0, atol=1e-6) or collision_steps[t_idx]:
+                    av_corners = self._box_corners(av_xy[t_idx], float(av_yaw[t_idx]), av_length, av_width)
+                    av_poly = np.vstack([av_corners, av_corners[0]])
+                    color = "crimson" if collision_steps[t_idx] else "tab:red"
+                    width = 2.0 if collision_steps[t_idx] else 1.0
+                    ax_bev.plot(av_poly[:, 1], av_poly[:, 0], color=color, linewidth=width, alpha=0.95, zorder=6)
+                    if collision_steps[t_idx]:
+                        ax_bev.text(av_xy[t_idx, 1], av_xy[t_idx, 0], f"{collision_type.upper()} COL@{t_sec:.1f}s",
+                                    color="crimson", fontsize=8, fontweight="bold", zorder=7)
+
+            all_pts = np.concatenate([pts for pts in all_pts if len(pts) > 0], axis=0)
+            x_min, x_max = all_pts[:, 0].min(), all_pts[:, 0].max()
+            y_min, y_max = all_pts[:, 1].min(), all_pts[:, 1].max()
+            margin_x = max(2.0, 0.12 * (x_max - x_min + 1e-6))
+            margin_y = max(2.0, 0.12 * (y_max - y_min + 1e-6))
+            ax_bev.set_xlim((y_min - margin_y, y_max + margin_y))
+            ax_bev.set_ylim((x_min - margin_x, x_max + margin_x))
+            ax_bev.set_aspect("equal")
+            ax_bev.grid(True, alpha=0.3)
+            ax_bev.set_xlabel("Y (right positive)")
+            ax_bev.set_ylabel("X (up positive)")
+            ax_bev.set_title(f"Collision BEV ({collision_type.upper()})")
+            legend_handles = self._build_bev_legend_handles(
+                hdmap_layers=drawn_hdmap_layers,
+                include_history=his_traj is not None and len(his_traj) > 0,
+                include_collision_objects=True,
+                include_collision_box=True,
+            )
+            ax_bev.legend(handles=legend_handles, loc="upper left", fontsize=8)
+
+            summary_text = (
+                f"type: {collision_type}\n"
+                f"first_collision_time: {first_collision_time}\n"
+                f"current_collision: {item.get('current_collision')}\n"
+                f"future_collision: {item.get('future_collision')}\n"
+                f"collided_classes: {', '.join(item.get('collided_classes', [])) or 'None'}\n"
+                f"collided_obj_indices: {sorted(collided_obj_indices)}"
+            )
+            ax_bev.text(
+                1.02, 1.0, summary_text, ha="left", va="top", transform=ax_bev.transAxes, fontsize=8,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85),
+            )
+
+            fig.suptitle(title_info, fontsize=11, y=0.98)
+            scene_dir = output_path / collision_type / str(item.get("timestamp", "unknown"))
+            scene_dir.mkdir(parents=True, exist_ok=True)
+            local_idx = int(item.get("local_idx", sample_idx))
+            fig.savefig(scene_dir / f"collision_{local_idx:06d}.png", dpi=150, bbox_inches="tight")
+            plt.close(fig)
+
+    @staticmethod
+    def export_collision_class_table(
+        collision_metrics: Dict[str, object],
+        output_dir: str,
+    ) -> None:
+        """导出按类别统计的碰撞率表。"""
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        class_counter = collision_metrics.get("class_collision_counter", {})
+        gt_class_counter = collision_metrics.get("gt_class_collision_counter", {})
+        num_valid_samples = int(collision_metrics.get("num_valid_samples", 0))
+        rows = []
+        for cls_name, count in sorted(class_counter.items(), key=lambda kv: (-kv[1], kv[0])):
+            rate = float(count / num_valid_samples) if num_valid_samples > 0 else 0.0
+            rows.append(("pred", cls_name, int(count), rate))
+        for cls_name, count in sorted(gt_class_counter.items(), key=lambda kv: (-kv[1], kv[0])):
+            rate = float(count / num_valid_samples) if num_valid_samples > 0 else 0.0
+            rows.append(("gt", cls_name, int(count), rate))
+
+        txt_path = output_path / "collision_class_table.txt"
+        csv_path = output_path / "collision_class_table.csv"
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("collision_type,class_name,count,sample_level_rate\n")
+            for collision_type, cls_name, count, rate in rows:
+                f.write(f"{collision_type},{cls_name},{count},{rate:.6f}\n")
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write("collision_type,class_name,count,sample_level_rate\n")
+            for collision_type, cls_name, count, rate in rows:
+                f.write(f"{collision_type},{cls_name},{count},{rate:.6f}\n")
     
     def _load_images_from_pkl(
         self, sample_idx: int
@@ -644,6 +1547,7 @@ class MOGOTrajectoryAnalyzer:
         if result is None:
             return
         imgs, nav_text, his_traj = result
+        raw_pkl = self._load_raw_pkl(sample_idx)
 
         # 获取场景信息
         scene_info = self.get_scene_info(sample_idx)
@@ -720,6 +1624,8 @@ class MOGOTrajectoryAnalyzer:
 
         # 右侧：BEV 轨迹（跨2行）
         ax_bev = fig.add_subplot(gs[:, 2])
+        hdmap_overlays = self._load_hdmap_overlays(raw_pkl) if raw_pkl is not None else {}
+        drawn_hdmap_layers = self._draw_hdmap_overlays(ax_bev, hdmap_overlays)
 
         # 从原点 (0,0) 开始连线到轨迹各点
         origin = np.array([[0.0, 0.0]])
@@ -729,8 +1635,8 @@ class MOGOTrajectoryAnalyzer:
         if his_traj is not None and len(his_traj) > 0:
             history_traj_with_origin = np.concatenate([his_traj, origin], axis=0)
 
-        ax_bev.plot(gt_traj_with_origin[:, 1], gt_traj_with_origin[:, 0], "g-", linewidth=2, label="GT")
-        ax_bev.plot(pred_traj_with_origin[:, 1], pred_traj_with_origin[:, 0], "r-", linewidth=2, label="Pred")
+        ax_bev.plot(gt_traj_with_origin[:, 1], gt_traj_with_origin[:, 0], "g-", linewidth=2, zorder=4)
+        ax_bev.plot(pred_traj_with_origin[:, 1], pred_traj_with_origin[:, 0], "r-", linewidth=2, zorder=4)
         if history_traj_with_origin is not None:
             ax_bev.plot(
                 history_traj_with_origin[:, 1],
@@ -738,10 +1644,10 @@ class MOGOTrajectoryAnalyzer:
                 color="tab:blue",
                 linestyle="--",
                 linewidth=2,
-                label="History",
+                zorder=4,
             )
-        ax_bev.scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
-        ax_bev.scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', label='Pred Points')
+        ax_bev.scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, zorder=5)
+        ax_bev.scatter(pred_traj[:, 1], pred_traj[:, 0], c='red', s=30, alpha=0.7, marker='x', zorder=5)
         if his_traj is not None and len(his_traj) > 0:
             ax_bev.scatter(
                 his_traj[:, 1],
@@ -749,9 +1655,9 @@ class MOGOTrajectoryAnalyzer:
                 c='tab:blue',
                 s=24,
                 alpha=0.75,
-                label='History Points',
+                zorder=5,
             )
-        ax_bev.scatter(0, 0, color='blue', s=100, marker='s', label='Start Point', zorder=5)
+        ax_bev.scatter(0, 0, color='blue', s=100, marker='s', zorder=6)
 
         ax_bev.set_xlabel("Y (right positive)")
         ax_bev.set_ylabel("X (up positive)")
@@ -784,7 +1690,11 @@ class MOGOTrajectoryAnalyzer:
 
         ax_bev.set_aspect("equal")
         ax_bev.grid(True, alpha=0.3)
-        ax_bev.legend(loc='upper left', fontsize=9)
+        legend_handles = self._build_bev_legend_handles(
+            hdmap_layers=drawn_hdmap_layers,
+            include_history=history_traj_with_origin is not None,
+        )
+        ax_bev.legend(handles=legend_handles, loc='upper left', fontsize=9)
         ax_bev.set_title("BEV Trajectory")
 
         # 在 BEV 图右侧展示轨迹坐标数值（文本注释）
@@ -973,7 +1883,7 @@ def main():
         type=str,
         default="info",
         choices=["info", "error", "dual"],
-        help="运行模式: info(基本信息), error(误差分析), dual(左图pkl+右图BEV)"
+        help="运行模式: info(基本信息), error(误差分析+碰撞率), dual(左图pkl+右图BEV)"
     )
     parser.add_argument(
         "--scene_names",
@@ -1040,6 +1950,12 @@ def main():
         default=None,
         help="限制可视化的时间戳数量（仅用于dual模式，None表示不限制）"
     )
+    parser.add_argument(
+        "--collision_interp_dt",
+        type=float,
+        default=0.1,
+        help="碰撞检测的时间插值分辨率（秒）"
+    )
     
     args = parser.parse_args()
     
@@ -1080,6 +1996,57 @@ def main():
             eval_thresholds=args.eval_thresholds,
             norm_mode=args.norm_mode,
         )
+        if args.pkl_root_dir is None:
+            print("警告: 未提供 pkl_root_dir，跳过碰撞率分析")
+        else:
+            collision_metrics = analyzer.compute_collision_metrics(
+                interpolation_dt=args.collision_interp_dt,
+            )
+            if args.output_dir and collision_metrics:
+                collision_json_path = output_dir / "collision_metrics.json"
+                collision_txt_path = output_dir / "collision_report.txt"
+                collision_vis_dir = output_dir / "collision_visualizations"
+                with open(collision_json_path, "w", encoding="utf-8") as f:
+                    json.dump(collision_metrics, f, ensure_ascii=False, indent=2)
+                with open(collision_txt_path, "w", encoding="utf-8") as f:
+                    f.write("MOGO Collision Metrics\n")
+                    f.write(f"num_valid_samples: {collision_metrics['num_valid_samples']}\n")
+                    f.write(f"current_collision_rate: {collision_metrics['current_collision_rate']:.6f}\n")
+                    f.write(f"future_collision_rate: {collision_metrics['future_collision_rate']:.6f}\n")
+                    f.write(f"overall_collision_rate: {collision_metrics['overall_collision_rate']:.6f}\n")
+                    f.write(f"gt_future_collision_rate: {collision_metrics['gt_future_collision_rate']:.6f}\n")
+                    f.write("collision_rate_per_step:\n")
+                    for t_sec, rate in zip(
+                        collision_metrics["dense_future_times_sec"][1:],
+                        collision_metrics["collision_rate_per_step"][1:],
+                    ):
+                        f.write(f"  t={t_sec:.1f}s: {rate:.6f}\n")
+                    f.write("class_collision_counter:\n")
+                    for cls_name, count in sorted(
+                        collision_metrics["class_collision_counter"].items(),
+                        key=lambda kv: (-kv[1], kv[0]),
+                    ):
+                        f.write(f"  {cls_name}: {count}\n")
+                analyzer.export_collision_class_table(
+                    collision_metrics=collision_metrics,
+                    output_dir=str(output_dir),
+                )
+                analyzer.export_collision_visualizations(
+                    collision_metrics=collision_metrics,
+                    output_dir=str(collision_vis_dir),
+                    interpolation_dt=args.collision_interp_dt,
+                    max_samples=20,
+                    collision_type="pred",
+                )
+                analyzer.export_collision_visualizations(
+                    collision_metrics=collision_metrics,
+                    output_dir=str(collision_vis_dir),
+                    interpolation_dt=args.collision_interp_dt,
+                    max_samples=20,
+                    collision_type="gt",
+                )
+                print(f"碰撞指标 JSON 已保存到: {collision_json_path}")
+                print(f"碰撞指标文本报告已保存到: {collision_txt_path}")
 
     if args.mode == "dual":
         if args.pkl_root_dir is None:
