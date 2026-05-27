@@ -84,6 +84,15 @@ class DrivePiZeroInferenceAgent:
         self.use_his_trajectory = cfg.data.get("use_his_trajectory", False)
         self.state_frame_index = cfg.data.get("state_frame_index", None)
 
+        # Diagnostic: zero out his_trajectory at inference (kept here so the switch
+        # is per-agent and visible in logs). mask_vlm is handled via cfg override
+        # before model construction, so we don't need to touch the model here.
+        self.zero_his_traj = bool(cfg.get("zero_his_traj", False))
+        if self.zero_his_traj and not self.use_his_trajectory:
+            log.warning("--zero_his_traj has no effect because use_his_trajectory=False.")
+        if bool(cfg.get("mask_vlm_for_action", False)):
+            log.info("VLM is masked from action: action/proprio will not attend VLM tokens.")
+
         # HDMap 开关
         self.use_hdmap_image = cfg.data.get("use_hdmap_image", False)
         self.use_hdmap_proprio = cfg.data.get("use_hdmap_proprio", False)
@@ -420,6 +429,14 @@ class DrivePiZeroInferenceAgent:
                         else:
                             all_data['hdmap_features'] = np.zeros(HDMAP_PROPRIO_DIM, dtype=np.float32)
 
+                    # Diagnostic: blank out his_trajectory so the model can no longer
+                    # use the "future ≈ history extrapolation" shortcut. Pre-normalization
+                    # zeros map to the origin token in normalization.prepare_state.
+                    if self.zero_his_traj and 'his_trajectory' in all_data:
+                        ht = np.asarray(all_data['his_trajectory'], dtype=np.float32)
+                        all_data = dict(all_data)
+                        all_data['his_trajectory'] = np.zeros_like(ht)
+
                     state = normalize.prepare_state(
                         all_data,
                         nav_onehot=self.nav_onehot,
@@ -696,10 +713,23 @@ if __name__ == '__main__':
                         help="当前进程的 rank（0-indexed），用于多卡并行推理")
     parser.add_argument("--world_size", type=int, default=1,
                         help="总进程数（GPU 数量），用于多卡并行推理")
+    parser.add_argument("--zero_his_traj", action="store_true",
+                        help="Diagnostic: zero-out his_trajectory before normalize.prepare_state, so the action expert cannot use it as a shortcut. Other history signals (speed/accel/theta) are kept intact.")
+    parser.add_argument("--mask_vlm", action="store_true",
+                        help="Diagnostic: at inference time, force action/proprio NOT to attend VLM tokens (overrides cfg.mask_vlm_for_action=True). Use it together with --zero_his_traj or alone to isolate VLM contribution.")
     args = parser.parse_args()
-    
+
     config = OmegaConf.load(args.config_path)
     statistic_path = args.statistic_path
+
+    # 把诊断开关注入到 cfg，供 Agent 在 __init__ 时读取
+    if args.zero_his_traj:
+        OmegaConf.update(config, "zero_his_traj", True, merge=True)
+    if args.mask_vlm:
+        # cfg.mask_vlm_for_action 在 DrivePiZeroInference.__init__ 直接被读取，
+        # 模型构造前覆盖即可，无需 monkey-patch torch.compile 后的实例属性
+        OmegaConf.update(config, "mask_vlm_for_action", True, merge=True)
+        print("[Inference] mask_vlm_for_action overridden to True via --mask_vlm")
 
     # 多卡推理：每个进程通过 CUDA_VISIBLE_DEVICES=X 隔离 GPU，
     # gpu_id 统一设为 0（进程内唯一的 GPU）
@@ -763,6 +793,11 @@ if __name__ == '__main__':
                     all_data['hdmap_features'] = extract_hdmap_features(hdmap_bev_path)
                 else:
                     all_data['hdmap_features'] = np.zeros(HDMAP_PROPRIO_DIM, dtype=np.float32)
+
+            if inference_agent.zero_his_traj and 'his_trajectory' in all_data:
+                ht = np.asarray(all_data['his_trajectory'], dtype=np.float32)
+                all_data = dict(all_data)
+                all_data['his_trajectory'] = np.zeros_like(ht)
 
             state = normalize.prepare_state(
                 all_data,

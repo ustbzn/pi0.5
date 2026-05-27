@@ -1,0 +1,190 @@
+##########################################################################
+# 0527 ablation_state_only_1frame 推理/评测配置
+#
+# 来源:
+#   - 由 config/train/DrivePi0/0527_ablation_state_only_1frame_8gpu.yaml
+#     提取推理所需字段得到。
+#
+# 关键差异 vs 0514:
+#   - state_only_for_action: True   严格 state-only，不初始化 tokenizer/processor
+#   - mask_vlm_for_action:   False  state-only 模式下 VLM 不参与 forward
+#   - use_his_trajectory:    False
+#   - state_frame_index:     0      只取当前帧 state
+#   - cond_steps:            1
+#   - proprio_dim:           7      = speed(2)+accel(2)+ang_v(1)+theta(1)+nav_id(1)
+#   - max_seq_len:           600
+#   - HDMap A/B/C 全关
+##########################################################################
+
+defaults:
+  - _self_
+
+hydra:
+  run:
+    dir: ${log_dir}
+
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU
+log_dir: ${oc.env:LOG_DIR}/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_${seed}
+name: drive-pi0
+device: cuda
+gpu_id: 0
+n_nodes: 1
+seed: 42
+
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+checkpoint_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU/logs/train/drive-pi0/2026-05-27_11-51_ablation_state_only_1frame_8gpu/checkpoint/step3290.pt
+
+use_torch_compile: False
+use_bf16: True
+quantize: False
+
+# 训练模式开关：与 0527 训练保持一致
+train_vlm: False
+state_only_for_action: True
+mask_vlm_for_action: False
+use_lm_head: False
+action_expert_adaptive_mode:
+
+# LoRA: 0527 训练未启用
+lora: False
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.05
+lora_vlm: False
+lora_vlm_target_modules: [q_proj, k_proj, v_proj, o_proj]
+lora_vlm_mlp: False
+lora_vision: False
+lora_vision_mlp: False
+lora_vision_merger: False
+lora_vision_deepstack_merger: False
+
+# HDMap: 0527 全关
+use_hdmap_image: False
+hdmap_image_size: [352, 192]
+use_hdmap_proprio: False
+use_hdmap_cnn: False
+hdmap_cnn_dim: 32
+hdmap_bev_downsample_size: [96, 180]
+hdmap_downsample_mode:
+  lanes: max
+  lane_links: max
+  lane_boundaries: max
+  junctions: area
+hdmap_channel_scale: [0.08, 0.12, 0.10, 1.0]
+hdmap_fusion_mode: gated_residual
+separate_hdmap_optimizer_group: False
+hdmap_lr: 1e-4
+hdmap_weight_decay: 1e-4
+hdmap_lr_scheduler:
+  min_lr: 1e-6
+
+norm_mode: minmax
+
+data:
+  statistics_path: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap/statistics.json
+  use_fixed_images: False
+  work_dir: ${current_dir}
+  dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap
+  fixed_dir: b2d_fixed_camera
+  split: val
+  num_of_action_experts: 13
+  shuffle_buffer_size: 200000
+  norm_mode: ${norm_mode}
+  nav_onehot: False
+  use_his_trajectory: False
+  state_frame_index: 0
+  cam_image_size: ${cam_image_size}
+  use_hdmap_image: ${use_hdmap_image}
+  use_hdmap_proprio: ${use_hdmap_proprio}
+  use_hdmap_cnn: ${use_hdmap_cnn}
+  hdmap_image_size: ${hdmap_image_size}
+  hdmap_bev_downsample_size: ${hdmap_bev_downsample_size}
+  hdmap_downsample_mode: ${hdmap_downsample_mode}
+  hdmap_channel_scale: ${hdmap_channel_scale}
+
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+device_batch_size: 32
+num_workers: 8
+
+flow_sampling: beta
+flow_alpha: 1.5
+flow_beta: 1.0
+flow_sig_min: 0.001
+num_inference_steps: 10
+final_action_clip_value: 1.0
+debug: False
+save_trajectories: True
+
+cond_steps: 1
+horizon_steps: 6
+action_dim: 2
+proprio_dim: 7
+state_dim: ${proprio_dim}
+
+cam_image_size: [224, 224]
+max_seq_len: 600
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 6144
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: False
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+
+time_hidden_size: 256
+pad_token_id: 0
+
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: ${pretrained_model_path}
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    hidden_act: "silu"
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    rope_scaling:
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+      rope_type: "default"
+
+image_token_index: 151655
+video_token_id: 151656
+vision_start_token_id: 151652
+vision_end_token_id: 151653
+vocab_size: 151936
+bos_token_id: 151643
+eos_token_id: 151645
