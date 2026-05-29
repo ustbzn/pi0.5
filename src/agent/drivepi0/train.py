@@ -549,6 +549,11 @@ class DrivePiZeroTrainAgent:
         self.use_hdmap_cnn = cfg.data.train.get("use_hdmap_cnn", False)
         if self.use_hdmap_cnn:
             log.info("HDMap CNN encoder enabled (Plan C): will encode raw BEV into proprio")
+        self.use_hdmap_vector = cfg.data.train.get("use_hdmap_vector", False)
+        if self.use_hdmap_vector:
+            log.info("HDMap vector tokens enabled (Plan D, PlanVOCA-style)")
+        # 与 dataset 端 max_map_tokens 对齐，仅用于在 preprocess_batch 中传给 model.build_causal_mask
+        self.max_map_tokens = int(cfg.data.train.get("max_map_tokens", 128))
 
     def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
         if self.flow_sampling == "uniform":  # uniform between 0 and 1
@@ -586,30 +591,80 @@ class DrivePiZeroTrainAgent:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
 
+    def _collect_map_tensors(self, batch):
+        """收集 PlanVOCA-style map token tensors，统一 dtype。
+
+        浮点 tensor → self.dtype；整型/bool 按 MapEncoder 期望保持 long/bool。
+        device 由调用方 .to(self.device) 统一处理。
+        """
+        out = {}
+        if "map_point_position" in batch:
+            out["map_point_position"] = batch["map_point_position"].to(self.dtype)
+        if "map_point_vector" in batch:
+            out["map_point_vector"] = batch["map_point_vector"].to(self.dtype)
+        if "map_point_orientation" in batch:
+            out["map_point_orientation"] = batch["map_point_orientation"].to(self.dtype)
+        if "map_polygon_center" in batch:
+            out["map_polygon_center"] = batch["map_polygon_center"].to(self.dtype)
+        if "map_polygon_type" in batch:
+            out["map_polygon_type"] = batch["map_polygon_type"].long()
+        if "map_polygon_on_route" in batch:
+            out["map_polygon_on_route"] = batch["map_polygon_on_route"].long()
+        if "map_polygon_tl_status" in batch:
+            out["map_polygon_tl_status"] = batch["map_polygon_tl_status"].long()
+        if "map_polygon_has_speed_limit" in batch:
+            out["map_polygon_has_speed_limit"] = batch["map_polygon_has_speed_limit"].bool()
+        if "map_polygon_speed_limit" in batch:
+            out["map_polygon_speed_limit"] = batch["map_polygon_speed_limit"].to(self.dtype)
+        if "map_point_valid_mask" in batch:
+            out["map_point_valid_mask"] = batch["map_point_valid_mask"].to(self.dtype)
+        if "map_valid_mask" in batch:
+            out["map_valid_mask"] = batch["map_valid_mask"].to(self.dtype)
+        return out
+
     @staticmethod
     def _apply_eval_map_mode(inputs: dict, mode: str, seed: int):
-        if mode == "normal" or "hdmap_bev" not in inputs:
+        # 兼容 vector tokens：normal/zero/shuffle 同时影响 hdmap_bev 与 map_*。
+        has_bev = "hdmap_bev" in inputs
+        has_vector = "map_polygon_center" in inputs
+        if mode == "normal" or (not has_bev and not has_vector):
             return inputs
 
         inputs = dict(inputs)
-        hdmap = inputs["hdmap_bev"]
         if mode == "zero":
-            inputs["hdmap_bev"] = torch.zeros_like(hdmap)
+            if has_bev:
+                inputs["hdmap_bev"] = torch.zeros_like(inputs["hdmap_bev"])
+            if has_vector:
+                # 把 map valid mask 置 0 即可让 attention 忽略所有 lane token
+                if "map_valid_mask" in inputs:
+                    inputs["map_valid_mask"] = torch.zeros_like(inputs["map_valid_mask"])
+                if "map_point_valid_mask" in inputs:
+                    inputs["map_point_valid_mask"] = torch.zeros_like(inputs["map_point_valid_mask"])
             return inputs
 
         if mode == "shuffle":
-            if hdmap.shape[0] <= 1:
+            ref = inputs.get("hdmap_bev")
+            if ref is None and has_vector:
+                ref = inputs["map_polygon_center"]
+            if ref is None or ref.shape[0] <= 1:
                 return inputs
-            generator = torch.Generator(device=hdmap.device)
+            generator = torch.Generator(device=ref.device)
             generator.manual_seed(int(seed))
-            perm = torch.randperm(
-                hdmap.shape[0],
-                device=hdmap.device,
-                generator=generator,
-            )
-            inputs["hdmap_bev"] = hdmap[perm]
-            if "hdmap_valid_mask" in inputs:
-                inputs["hdmap_valid_mask"] = inputs["hdmap_valid_mask"][perm]
+            perm = torch.randperm(ref.shape[0], device=ref.device, generator=generator)
+            if has_bev:
+                inputs["hdmap_bev"] = inputs["hdmap_bev"][perm]
+                if "hdmap_valid_mask" in inputs:
+                    inputs["hdmap_valid_mask"] = inputs["hdmap_valid_mask"][perm]
+            if has_vector:
+                map_keys = [
+                    "map_point_position", "map_point_vector", "map_point_orientation",
+                    "map_polygon_center", "map_polygon_type", "map_polygon_on_route",
+                    "map_polygon_tl_status", "map_polygon_has_speed_limit",
+                    "map_polygon_speed_limit", "map_point_valid_mask", "map_valid_mask",
+                ]
+                for k in map_keys:
+                    if k in inputs:
+                        inputs[k] = inputs[k][perm]
             return inputs
 
         raise ValueError(f"Unknown eval_map_mode: {mode}")
@@ -640,6 +695,7 @@ class DrivePiZeroTrainAgent:
 
             if self.state_only_for_action:
                 batch_size = state.shape[0]
+                map_valid_mask_cpu = batch.get("map_valid_mask") if self.use_hdmap_vector else None
                 (
                     causal_mask,
                     vlm_position_ids,
@@ -649,6 +705,7 @@ class DrivePiZeroTrainAgent:
                     batch_size=batch_size,
                     device=state.device,
                     dtype=self.dtype,
+                    map_valid_mask=map_valid_mask_cpu,
                 )
 
                 inputs = {
@@ -661,6 +718,9 @@ class DrivePiZeroTrainAgent:
                     "proprios": state.to(self.dtype),
                     "actions": trajectory.to(self.dtype),
                 }
+
+                if self.use_hdmap_vector and "map_polygon_center" in batch:
+                    inputs.update(self._collect_map_tensors(batch))
 
                 if split_mask:
                     state_mask, action_mask = model.split_full_mask_into_submasks(
@@ -746,9 +806,11 @@ class DrivePiZeroTrainAgent:
             # print(f"input_ids 中图像token数量: {num_image_tokens}, pixel_values shape: {model_inputs['pixel_values'].shape}")
 
             # build causal mask and position ids for trajectory
+            map_valid_mask_cpu = batch.get("map_valid_mask") if self.use_hdmap_vector else None
             causal_mask, _vlm_pos_1d, state_position_ids, action_position_ids = (
                 model.build_causal_mask_and_position_ids(
-                    model_inputs["attention_mask"], self.dtype
+                    model_inputs["attention_mask"], self.dtype,
+                    map_valid_mask=map_valid_mask_cpu,
                 )
             )
             # P0-A: 使用官方 3D M-RoPE position_ids 替代 1D arange
@@ -774,6 +836,10 @@ class DrivePiZeroTrainAgent:
                 inputs["hdmap_bev"] = batch["hdmap_bev_raw"].to(self.dtype)
             if self.use_hdmap_cnn and "hdmap_valid_mask" in batch:
                 inputs["hdmap_valid_mask"] = batch["hdmap_valid_mask"].to(self.dtype)
+
+            # 方案 D: PlanVOCA-style 结构化 lane token
+            if self.use_hdmap_vector and "map_polygon_center" in batch:
+                inputs.update(self._collect_map_tensors(batch))
 
             if split_mask:
                 image_text_proprio_mask, action_mask = (

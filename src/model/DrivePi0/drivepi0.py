@@ -48,9 +48,16 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self.max_image_text_tokens = cfg.max_image_text_tokens
         self.num_proprio_tokens = cfg.cond_steps
         self.num_action_tokens = cfg.horizon_steps
+
+        # 方案 D（PlanVOCA-style）: 结构化 lane token 拼到 proprio mixture 后面
+        self.use_hdmap_vector = cfg.get("use_hdmap_vector", False)
+        self.num_map_tokens = int(cfg.get("max_map_tokens", 128)) if self.use_hdmap_vector else 0
+        self.map_sample_points = int(cfg.get("map_sample_points", 20))
+
         self.total_num_tokens = (
             self.max_image_text_tokens
             + self.num_proprio_tokens
+            + self.num_map_tokens
             + self.num_action_tokens
         )
 
@@ -188,6 +195,19 @@ class DrivePiZero(nn.Module, NoSyncBase):
             self.proprio_hidden_size,
         )
 
+        # 方案 D: PlanVOCA-style MapEncoder，输出 [B, M, proprio_hidden_size]
+        # 与 proprio embeds 拼接，共享 proprio mixture 的 attention 路径。
+        if self.use_hdmap_vector:
+            from src.model.DrivePi0.map_encoder import MapEncoder
+            self.map_encoder = MapEncoder(
+                hidden_size=self.proprio_hidden_size,
+                polygon_channel=6,
+                num_polygon_types=3,
+                num_tl_states=4,
+            )
+        else:
+            self.map_encoder = None
+
         # Action decoder
         self.action_decoder = nn.Linear(
             self.action_hidden_size,
@@ -238,6 +258,9 @@ class DrivePiZero(nn.Module, NoSyncBase):
             + list(self.proprio_encoder.parameters())
             + list(self.joint_model.mixtures["action"].parameters())
         )
+        # map_encoder 与 proprio mixture 共享路径，跟随 action expert 学习率训练。
+        if self.map_encoder is not None:
+            params += list(self.map_encoder.parameters())
         # 方案 A: 辅助 heads 跟随 action expert 使用 action_lr 训练
         if self.enable_aux_loss:
             params += list(self.maneuver_head.parameters())
@@ -290,7 +313,30 @@ class DrivePiZero(nn.Module, NoSyncBase):
         gate = torch.sigmoid(self.hdmap_gate(gate_input))
         return gate * map_residual * hdmap_valid_mask
 
-    def _encode_proprio(self, proprios, hdmap_bev=None, hdmap_valid_mask=None):
+    def _build_zero_map_inputs(self, batch_size: int, device, dtype):
+        """use_hdmap_vector=True 但调用方没传 map_inputs 时（比如老 inference 入口、
+        单帧 debug），用全 0 兜底，valid_mask=0 让 attention 屏蔽，但 token 数仍占位，
+        保证 position_ids / total_num_tokens 一致 (P1-3)。"""
+        M = self.num_map_tokens
+        P = self.map_sample_points
+        f = lambda *shape, d=torch.float32: torch.zeros(*shape, dtype=d, device=device)
+        return {
+            "map_polygon_center": f(batch_size, M, 3),
+            "map_polygon_type": f(batch_size, M, d=torch.long),
+            "map_polygon_on_route": f(batch_size, M, d=torch.long),
+            "map_polygon_tl_status": torch.full(
+                (batch_size, M), 3, dtype=torch.long, device=device
+            ),  # UNKNOWN=3
+            "map_polygon_has_speed_limit": f(batch_size, M, d=torch.bool),
+            "map_polygon_speed_limit": f(batch_size, M),
+            "map_point_position": f(batch_size, M, 3, P, 2),
+            "map_point_vector": f(batch_size, M, 3, P, 2),
+            "map_point_orientation": f(batch_size, M, 3, P),
+            "map_point_valid_mask": f(batch_size, M, P),
+            "map_valid_mask": f(batch_size, M),
+        }
+
+    def _encode_proprio(self, proprios, hdmap_bev=None, hdmap_valid_mask=None, map_inputs=None):
         if hdmap_bev is not None and self.hdmap_encoder is not None:
             hdmap_feat = self.hdmap_encoder(hdmap_bev)  # (B, hdmap_cnn_dim)
             hdmap_feat = self._fuse_hdmap_feat(
@@ -300,7 +346,31 @@ class DrivePiZero(nn.Module, NoSyncBase):
             )
             hdmap_feat = hdmap_feat.unsqueeze(1).expand(-1, proprios.shape[1], -1)
             proprios = torch.cat([proprios, hdmap_feat], dim=-1)
-        return self.proprio_encoder(proprios)
+        proprio_embeds = self.proprio_encoder(proprios)
+        # 拼接 PlanVOCA-style map tokens 到 proprio mixture 序列后面。
+        # padding map token 由 attention mask + map_valid_mask 屏蔽。
+        if self.map_encoder is not None and self.use_hdmap_vector:
+            if map_inputs is None or "map_polygon_center" not in map_inputs:
+                map_inputs = self._build_zero_map_inputs(
+                    proprios.shape[0], proprios.device, proprios.dtype
+                )
+            map_embeds = self.map_encoder(
+                polygon_center=map_inputs["map_polygon_center"],
+                polygon_type=map_inputs["map_polygon_type"],
+                polygon_on_route=map_inputs["map_polygon_on_route"],
+                polygon_tl_status=map_inputs["map_polygon_tl_status"],
+                polygon_has_speed_limit=map_inputs["map_polygon_has_speed_limit"],
+                polygon_speed_limit=map_inputs["map_polygon_speed_limit"],
+                point_position=map_inputs["map_point_position"],
+                point_vector=map_inputs["map_point_vector"],
+                point_orientation=map_inputs["map_point_orientation"],
+                point_valid_mask=map_inputs["map_point_valid_mask"],
+                valid_mask=map_inputs["map_valid_mask"],
+            )
+            # match dtype (proprio_encoder 可能输出 bf16)
+            map_embeds = map_embeds.to(proprio_embeds.dtype)
+            proprio_embeds = torch.cat([proprio_embeds, map_embeds], dim=1)
+        return proprio_embeds
 
     @property
     def trainable_vlm_parameters(self):
@@ -661,71 +731,77 @@ class DrivePiZero(nn.Module, NoSyncBase):
         return position_ids
 
     def build_causal_mask_and_position_ids(
-        self, attention_mask: torch.Tensor, dtype: torch.dtype
+        self,
+        attention_mask: torch.Tensor,
+        dtype: torch.dtype,
+        map_valid_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.FloatTensor]:
         """
         block attention --- padding for unused text tokens
 
-        When mask_vlm_for_action=False (default):
-                 img/text img/text img/text (padding) proprio action action
-        img/text    x        x        x
-        img/text    x        x        x
-        img/text    x        x        x
-        (padding)
-        proprio     x        x        x                 x
-        action      x        x        x                 x       x      x
-        action      x        x        x                 x       x      x
+        Token 顺序：VLM | proprio | map | action
 
-        When mask_vlm_for_action=True (ablation — VLM fully isolated):
-                 img/text img/text img/text (padding) proprio action action
-        img/text    x        x        x
-        img/text    x        x        x
-        img/text    x        x        x
-        (padding)
-        proprio                                        x
-        action                                          x       x      x
-        action                                          x       x      x
+        - proprio + map 共享 proprio mixture，所以 attention 上当作连续段。
+        - padding 的 map token (map_valid_mask=0) 不被任何 token attend。
+        - action 可以 attend VLM + proprio + map + 自身（block triangular）。
+
+        若 num_map_tokens=0，行为等价于原来的 VLM | proprio | action 三段。
         """
         bsz = attention_mask.size(0)
         proprio_start = self.max_image_text_tokens
         proprio_end   = self.max_image_text_tokens + self.num_proprio_tokens
-        action_start  = proprio_end
+        map_start     = proprio_end
+        map_end       = map_start + self.num_map_tokens
+        action_start  = map_end
         image_text_token_cnts = torch.sum(attention_mask, dim=1)
         causal_mask = torch.full(
             (bsz, self.total_num_tokens, self.total_num_tokens),
             torch.finfo(dtype).min,
             dtype=dtype,
-        )  # smallest value, avoid using inf for softmax nan issues with padding
+        )
         for idx, cnt in enumerate(image_text_token_cnts):
             cnt = int(cnt.item())
-            # VLM token 内部使用 causal mask (decoder-only, lower-triangular)
-            # 对齐官方 Qwen3-VL 的 causal 语义
             causal_mask[idx, :cnt, :cnt] = torch.triu(
                 torch.full((cnt, cnt), torch.finfo(dtype).min, dtype=dtype),
                 diagonal=1,
             )
             if not self.mask_vlm_for_action:
-                causal_mask[idx, proprio_start:, :cnt] = (
-                    0  # proprio/action attend to all VLM tokens
-                )
-        causal_mask[:, proprio_start:proprio_end, proprio_start:proprio_end] = (
-            0  # proprio attend to itself
-        )
-        causal_mask[:, action_start:, proprio_start:] = (
-            0  # action attend to itself and proprio
-        )
+                # proprio / map / action 都能 attend 到全部有效 VLM tokens
+                causal_mask[idx, proprio_start:, :cnt] = 0
+        # proprio block 内部全连接
+        causal_mask[:, proprio_start:proprio_end, proprio_start:proprio_end] = 0
+        if self.num_map_tokens > 0:
+            # map token 与 proprio 双向可见 + map 内部全连接
+            causal_mask[:, proprio_start:proprio_end, map_start:map_end] = 0
+            causal_mask[:, map_start:map_end, proprio_start:proprio_end] = 0
+            causal_mask[:, map_start:map_end, map_start:map_end] = 0
+        # action attend to VLM (above) + proprio + map + self
+        causal_mask[:, action_start:, proprio_start:] = 0
+
+        if self.num_map_tokens > 0 and map_valid_mask is not None:
+            # padding map token 不被任何 token 看到
+            mvm = map_valid_mask.to(dtype=dtype, device=causal_mask.device)
+            invalid = mvm <= 0  # [B, M]
+            if invalid.any():
+                neg_inf = torch.finfo(dtype).min
+                # 将 KV 维度上 padding map token 的列全部屏蔽
+                col_idx = torch.arange(map_start, map_end, device=causal_mask.device)
+                for b in range(bsz):
+                    bad_cols = col_idx[invalid[b]]
+                    if bad_cols.numel() > 0:
+                        causal_mask[b, :, bad_cols] = neg_inf
 
         # add the head dimension
-        # [Batch_Size, Q_Len, KV_Len] -> [Batch_Size, Num_Heads_Q, Q_Len, KV_Len]
         causal_mask = causal_mask.unsqueeze(1)
 
-        # ── 3. position ids（不变）──────────────────────────────────────
         vlm_position_ids = (
             torch.arange(0, self.max_image_text_tokens, device=attention_mask.device)
             .unsqueeze(0).expand(bsz, -1)
         )
+        # proprio + map 共享 proprio mixture，position id 顺序递增覆盖整个 [proprio | map] 段
         proprio_position_ids = (
-            torch.arange(0, self.num_proprio_tokens, device=attention_mask.device)
+            torch.arange(0, self.num_proprio_tokens + self.num_map_tokens,
+                         device=attention_mask.device)
             .unsqueeze(0).expand(bsz, -1)
         )
         action_position_ids = (
@@ -733,7 +809,6 @@ class DrivePiZero(nn.Module, NoSyncBase):
             .unsqueeze(0).expand(bsz, -1)
         )
 
-        # since proprio and action share the same mixture weights, makes sense to use [1 (proprio), 2 (action), 3 (action), ...] instead of [1 (proprio), 1 (action), 2 (action), ...]
         return causal_mask, vlm_position_ids, proprio_position_ids, action_position_ids
 
     def build_state_only_causal_mask_and_position_ids(
@@ -741,9 +816,14 @@ class DrivePiZero(nn.Module, NoSyncBase):
         batch_size: int,
         device: torch.device,
         dtype: torch.dtype,
+        map_valid_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.FloatTensor, torch.LongTensor, torch.LongTensor, torch.LongTensor]:
-        total_tokens = self.num_proprio_tokens + self.num_action_tokens
-        proprio_end = self.num_proprio_tokens
+        # 顺序: proprio | map | action
+        proprio_seg = self.num_proprio_tokens + self.num_map_tokens
+        total_tokens = proprio_seg + self.num_action_tokens
+        proprio_end = proprio_seg
+        map_start = self.num_proprio_tokens
+        map_end = proprio_seg
 
         causal_mask = torch.full(
             (batch_size, total_tokens, total_tokens),
@@ -752,16 +832,27 @@ class DrivePiZero(nn.Module, NoSyncBase):
             device=device,
         )
 
-        # proprio -> proprio
+        # proprio + map (作为一个段) 内部全连接
         causal_mask[:, :proprio_end, :proprio_end] = 0
-        # action -> proprio + action
+        # action -> proprio + map + action
         causal_mask[:, proprio_end:, :] = 0
+
+        if self.num_map_tokens > 0 and map_valid_mask is not None:
+            mvm = map_valid_mask.to(dtype=dtype, device=device)
+            invalid = mvm <= 0
+            if invalid.any():
+                neg_inf = torch.finfo(dtype).min
+                col_idx = torch.arange(map_start, map_end, device=device)
+                for b in range(batch_size):
+                    bad_cols = col_idx[invalid[b]]
+                    if bad_cols.numel() > 0:
+                        causal_mask[b, :, bad_cols] = neg_inf
 
         causal_mask = causal_mask.unsqueeze(1)
 
         vlm_position_ids = torch.empty((batch_size, 0), dtype=torch.long, device=device)
         proprio_position_ids = (
-            torch.arange(0, self.num_proprio_tokens, device=device)
+            torch.arange(0, proprio_seg, device=device)
             .unsqueeze(0)
             .expand(batch_size, -1)
         )
@@ -776,20 +867,21 @@ class DrivePiZero(nn.Module, NoSyncBase):
     def split_full_mask_into_submasks(
         self, causal_mask: torch.FloatTensor
     ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
-        """split into ones for paligemma and action"""
+        """split into ones for paligemma+proprio(+map) and action"""
+        proprio_seg = self.num_proprio_tokens + self.num_map_tokens
         if self.state_only_for_action:
             state_mask = causal_mask[
                 ...,
-                : self.num_proprio_tokens,
-                : self.num_proprio_tokens,
+                : proprio_seg,
+                : proprio_seg,
             ]
             action_mask = causal_mask[..., -self.num_action_tokens :, :]
             return state_mask, action_mask
 
         image_text_proprio_mask = causal_mask[
             ...,
-            : self.max_image_text_tokens + self.num_proprio_tokens,
-            : self.max_image_text_tokens + self.num_proprio_tokens,
+            : self.max_image_text_tokens + proprio_seg,
+            : self.max_image_text_tokens + proprio_seg,
         ]
         action_mask = causal_mask[..., -self.num_action_tokens :, :]
         return image_text_proprio_mask, action_mask
@@ -939,14 +1031,43 @@ class DrivePiZero(nn.Module, NoSyncBase):
         proprios: torch.FloatTensor,
         hdmap_bev: Optional[torch.FloatTensor] = None,
         hdmap_valid_mask: Optional[torch.FloatTensor] = None,
+        map_point_position: Optional[torch.FloatTensor] = None,
+        map_point_vector: Optional[torch.FloatTensor] = None,
+        map_point_orientation: Optional[torch.FloatTensor] = None,
+        map_polygon_center: Optional[torch.FloatTensor] = None,
+        map_polygon_type: Optional[torch.LongTensor] = None,
+        map_polygon_on_route: Optional[torch.LongTensor] = None,
+        map_polygon_tl_status: Optional[torch.LongTensor] = None,
+        map_polygon_has_speed_limit: Optional[torch.BoolTensor] = None,
+        map_polygon_speed_limit: Optional[torch.FloatTensor] = None,
+        map_point_valid_mask: Optional[torch.FloatTensor] = None,
+        map_valid_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         dtype, device = proprios.dtype, proprios.device
         bsz = proprios.size(0)
 
+        map_inputs = None
+        if self.map_encoder is not None and map_polygon_center is not None:
+            map_inputs = {
+                "map_point_position": map_point_position,
+                "map_point_vector": map_point_vector,
+                "map_point_orientation": map_point_orientation,
+                "map_polygon_center": map_polygon_center,
+                "map_polygon_type": map_polygon_type,
+                "map_polygon_on_route": map_polygon_on_route,
+                "map_polygon_tl_status": map_polygon_tl_status,
+                "map_polygon_has_speed_limit": map_polygon_has_speed_limit,
+                "map_polygon_speed_limit": map_polygon_speed_limit,
+                "map_point_valid_mask": map_point_valid_mask,
+                "map_valid_mask": map_valid_mask,
+            }
+
         if self.state_only_for_action:
             kv_caches = {"proprio": KVCache()}
 
-            proprio_embeds = self.proprio_encoder(proprios)
+            proprio_embeds = self._encode_proprio(
+                proprios, map_inputs=map_inputs,
+            )
 
             _, kv_caches = self.joint_model(
                 attention_mask=image_text_proprio_mask,
@@ -1010,6 +1131,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
             proprios,
             hdmap_bev,
             hdmap_valid_mask=hdmap_valid_mask,
+            map_inputs=map_inputs,
         )
 
         # forward pass thru the vlm and proprio, cache the kv
@@ -1081,6 +1203,17 @@ class DrivePiZero(nn.Module, NoSyncBase):
         proprios: torch.FloatTensor,
         hdmap_bev: Optional[torch.FloatTensor] = None,
         hdmap_valid_mask: Optional[torch.FloatTensor] = None,
+        map_point_position: Optional[torch.FloatTensor] = None,
+        map_point_vector: Optional[torch.FloatTensor] = None,
+        map_point_orientation: Optional[torch.FloatTensor] = None,
+        map_polygon_center: Optional[torch.FloatTensor] = None,
+        map_polygon_type: Optional[torch.LongTensor] = None,
+        map_polygon_on_route: Optional[torch.LongTensor] = None,
+        map_polygon_tl_status: Optional[torch.LongTensor] = None,
+        map_polygon_has_speed_limit: Optional[torch.BoolTensor] = None,
+        map_polygon_speed_limit: Optional[torch.FloatTensor] = None,
+        map_point_valid_mask: Optional[torch.FloatTensor] = None,
+        map_valid_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         dtype, device = pixel_values.dtype, pixel_values.device
         bsz = input_ids.size(0)
@@ -1093,11 +1226,28 @@ class DrivePiZero(nn.Module, NoSyncBase):
         )
         deepstack_data = (visual_pos_masks, deepstack_features) if deepstack_features else None
 
+        map_inputs = None
+        if self.map_encoder is not None and map_polygon_center is not None:
+            map_inputs = {
+                "map_point_position": map_point_position,
+                "map_point_vector": map_point_vector,
+                "map_point_orientation": map_point_orientation,
+                "map_polygon_center": map_polygon_center,
+                "map_polygon_type": map_polygon_type,
+                "map_polygon_on_route": map_polygon_on_route,
+                "map_polygon_tl_status": map_polygon_tl_status,
+                "map_polygon_has_speed_limit": map_polygon_has_speed_limit,
+                "map_polygon_speed_limit": map_polygon_speed_limit,
+                "map_point_valid_mask": map_point_valid_mask,
+                "map_valid_mask": map_valid_mask,
+            }
+
         # encode proprio
         proprio_embeds = self._encode_proprio(
             proprios,
             hdmap_bev,
             hdmap_valid_mask=hdmap_valid_mask,
+            map_inputs=map_inputs,
         )
 
         # sample pure action noise
@@ -1212,6 +1362,17 @@ class DrivePiZero(nn.Module, NoSyncBase):
         t: torch.FloatTensor,
         hdmap_bev: Optional[torch.FloatTensor] = None,
         hdmap_valid_mask: Optional[torch.FloatTensor] = None,
+        map_point_position: Optional[torch.FloatTensor] = None,
+        map_point_vector: Optional[torch.FloatTensor] = None,
+        map_point_orientation: Optional[torch.FloatTensor] = None,
+        map_polygon_center: Optional[torch.FloatTensor] = None,
+        map_polygon_type: Optional[torch.LongTensor] = None,
+        map_polygon_on_route: Optional[torch.LongTensor] = None,
+        map_polygon_tl_status: Optional[torch.LongTensor] = None,
+        map_polygon_has_speed_limit: Optional[torch.BoolTensor] = None,
+        map_polygon_speed_limit: Optional[torch.FloatTensor] = None,
+        map_point_valid_mask: Optional[torch.FloatTensor] = None,
+        map_valid_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         """flow matching loss for action prediction, no use of kv cache"""
         # noisy action
@@ -1220,11 +1381,28 @@ class DrivePiZero(nn.Module, NoSyncBase):
         x1 = actions
         psi_t = self.psi_t(x0, x1, t)
 
-        # proprio
+        map_inputs = None
+        if self.map_encoder is not None and map_polygon_center is not None:
+            map_inputs = {
+                "map_point_position": map_point_position,
+                "map_point_vector": map_point_vector,
+                "map_point_orientation": map_point_orientation,
+                "map_polygon_center": map_polygon_center,
+                "map_polygon_type": map_polygon_type,
+                "map_polygon_on_route": map_polygon_on_route,
+                "map_polygon_tl_status": map_polygon_tl_status,
+                "map_polygon_has_speed_limit": map_polygon_has_speed_limit,
+                "map_polygon_speed_limit": map_polygon_speed_limit,
+                "map_point_valid_mask": map_point_valid_mask,
+                "map_valid_mask": map_valid_mask,
+            }
+
+        # proprio (+ map tokens 拼接在 proprio embeds 后面)
         proprio_embeds = self._encode_proprio(
             proprios,
             hdmap_bev,
             hdmap_valid_mask=hdmap_valid_mask,
+            map_inputs=map_inputs,
         )
 
         # inference with noisy action
@@ -1352,6 +1530,17 @@ class DrivePiZeroInference(DrivePiZero):
         proprios: torch.FloatTensor,
         hdmap_bev: Optional[torch.FloatTensor] = None,
         hdmap_valid_mask: Optional[torch.FloatTensor] = None,
+        map_point_position: Optional[torch.FloatTensor] = None,
+        map_point_vector: Optional[torch.FloatTensor] = None,
+        map_point_orientation: Optional[torch.FloatTensor] = None,
+        map_polygon_center: Optional[torch.FloatTensor] = None,
+        map_polygon_type: Optional[torch.LongTensor] = None,
+        map_polygon_on_route: Optional[torch.LongTensor] = None,
+        map_polygon_tl_status: Optional[torch.LongTensor] = None,
+        map_polygon_has_speed_limit: Optional[torch.BoolTensor] = None,
+        map_polygon_speed_limit: Optional[torch.FloatTensor] = None,
+        map_point_valid_mask: Optional[torch.FloatTensor] = None,
+        map_valid_mask: Optional[torch.FloatTensor] = None,
     ) -> torch.FloatTensor:
         return super().infer_action(
             input_ids,
@@ -1365,6 +1554,17 @@ class DrivePiZeroInference(DrivePiZero):
             proprios,
             hdmap_bev=hdmap_bev,
             hdmap_valid_mask=hdmap_valid_mask,
+            map_point_position=map_point_position,
+            map_point_vector=map_point_vector,
+            map_point_orientation=map_point_orientation,
+            map_polygon_center=map_polygon_center,
+            map_polygon_type=map_polygon_type,
+            map_polygon_on_route=map_polygon_on_route,
+            map_polygon_tl_status=map_polygon_tl_status,
+            map_polygon_has_speed_limit=map_polygon_has_speed_limit,
+            map_polygon_speed_limit=map_polygon_speed_limit,
+            map_point_valid_mask=map_point_valid_mask,
+            map_valid_mask=map_valid_mask,
         )
 
 

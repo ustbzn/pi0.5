@@ -12,6 +12,7 @@ from src.data.camera_scenario_map import get_cam_id_by_label, get_cam_id_by_name
 from src.data.utils.image import image_normalization
 from src.data.utils.normalization import Normalize
 from src.data.utils.hdmap_features import extract_hdmap_features, load_hdmap_image, load_hdmap_bev_downsampled, HDMAP_PROPRIO_DIM, HDMAP_BEV_CHANNELS
+from src.data.utils.hdmap_vector import load_hdmap_vector_tokens
 
 
 
@@ -145,14 +146,18 @@ class TorchDataset(Dataset):
         nav_onehot: bool = False,
         use_his_trajectory: bool = False,
         state_frame_index: Optional[int] = None,
-        use_hdmap_image: bool = False, 
-        use_hdmap_proprio: bool = False, 
-        use_hdmap_cnn: bool = False, 
-        cam_image_size: tuple = (224, 224), 
-        hdmap_image_size: tuple = (192, 352), 
-        hdmap_bev_downsample_size: tuple = (48, 90), 
-        hdmap_downsample_mode=None, 
-        hdmap_channel_scale=None, 
+        use_hdmap_image: bool = False,
+        use_hdmap_proprio: bool = False,
+        use_hdmap_cnn: bool = False,
+        use_hdmap_vector: bool = False,
+        max_map_tokens: int = 128,
+        map_sample_points: int = 20,
+        strict_hdmap_vector: bool = True,
+        cam_image_size: tuple = (224, 224),
+        hdmap_image_size: tuple = (192, 352),
+        hdmap_bev_downsample_size: tuple = (48, 90),
+        hdmap_downsample_mode=None,
+        hdmap_channel_scale=None,
     ):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
@@ -166,6 +171,10 @@ class TorchDataset(Dataset):
         self.use_hdmap_image = use_hdmap_image
         self.use_hdmap_proprio = use_hdmap_proprio
         self.use_hdmap_cnn = use_hdmap_cnn
+        self.use_hdmap_vector = use_hdmap_vector
+        self.max_map_tokens = int(max_map_tokens)
+        self.map_sample_points = int(map_sample_points)
+        self.strict_hdmap_vector = bool(strict_hdmap_vector)
         self.cam_image_size = tuple(cam_image_size)      # (H, W) 相机图像缩放目标
         self.hdmap_image_size = tuple(hdmap_image_size)   # (H, W) HDMap BEV 缩放目标
         self.hdmap_bev_downsample_size = tuple(hdmap_bev_downsample_size)  # (H, W) 方案 C BEV 下采样目标
@@ -394,6 +403,16 @@ class TorchDataset(Dataset):
                 else:
                     data_dict['hdmap_bev_raw'] = torch.zeros((HDMAP_BEV_CHANNELS, h, w), dtype=torch.float32)
 
+            # 方案 D（PlanVOCA-style）: 从 pkl 顶层 hdmap_vector_* 读取结构化 lane token
+            if self.use_hdmap_vector:
+                map_tensors = load_hdmap_vector_tokens(
+                    all_data,
+                    max_map_tokens=self.max_map_tokens,
+                    sample_points=self.map_sample_points,
+                    strict=self.strict_hdmap_vector,
+                )
+                data_dict.update(map_tensors)
+
             hdmap_context = ""
             if self.use_hdmap_image:
                 hdmap_context += "An HD map bird's-eye view is provided showing lane layout, junctions, and road boundaries. "
@@ -432,14 +451,18 @@ def prepare_b2d_dataset(
     nav_onehot: bool = False,
     use_his_trajectory: bool = False,
     state_frame_index: Optional[int] = None,
-    use_hdmap_image: bool = False, 
-    use_hdmap_proprio: bool = False, 
-    use_hdmap_cnn: bool = False, 
-    cam_image_size: tuple = (224, 224), 
-    hdmap_image_size: tuple = (192, 352), 
-    hdmap_bev_downsample_size: tuple = (48, 90), 
-    hdmap_downsample_mode=None, 
-    hdmap_channel_scale=None, 
+    use_hdmap_image: bool = False,
+    use_hdmap_proprio: bool = False,
+    use_hdmap_cnn: bool = False,
+    use_hdmap_vector: bool = False,
+    max_map_tokens: int = 128,
+    map_sample_points: int = 20,
+    strict_hdmap_vector: bool = True,
+    cam_image_size: tuple = (224, 224),
+    hdmap_image_size: tuple = (192, 352),
+    hdmap_bev_downsample_size: tuple = (48, 90),
+    hdmap_downsample_mode=None,
+    hdmap_channel_scale=None,
 ):
     common_kwargs = dict(
         statistics_path=statistics_path,
@@ -451,6 +474,10 @@ def prepare_b2d_dataset(
         use_hdmap_image=use_hdmap_image,
         use_hdmap_proprio=use_hdmap_proprio,
         use_hdmap_cnn=use_hdmap_cnn,
+        use_hdmap_vector=use_hdmap_vector,
+        max_map_tokens=max_map_tokens,
+        map_sample_points=map_sample_points,
+        strict_hdmap_vector=strict_hdmap_vector,
         cam_image_size=cam_image_size,
         hdmap_image_size=hdmap_image_size,
         hdmap_bev_downsample_size=hdmap_bev_downsample_size,
