@@ -24,6 +24,7 @@ import re
 import torch
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+from src.utils.bev_axes import configure_bev_axes
 from src.utils.metric import get_action_accuracy
 from src.data.utils.normalization import Normalize
 
@@ -494,7 +495,7 @@ class TrajectoryAnalyzer:
         # 数值上：gt_traj[:, 0] / pred_traj[:, 0] 是原始 fur_x，gt_traj[:, 1] / pred_traj[:, 1] 是原始 fur_y
         # 可视化约定：
         #   - 纵轴：x，向上为正（前方）
-        #   - 横轴：y，向右为正（右侧，往左 y 变小）
+        #   - 横轴：y，向左为正
         # 因此在图中使用 (y, x) 作为 (横, 纵)
         axes[1].plot(gt_traj[:, 1], gt_traj[:, 0], "g-", linewidth=2, label="GT")
         axes[1].plot(pred_traj[:, 1], pred_traj[:, 0], "r-", linewidth=2, label="Pred")
@@ -508,10 +509,9 @@ class TrajectoryAnalyzer:
         axes[1].scatter(pred_traj[0, 1], pred_traj[0, 0], color='red', s=100, marker='s', label='Pred Start', zorder=5)
         
         # 坐标轴语义：
-        #   - 横轴：Y（右正左负，往左 y 变小）
+        #   - 横轴：Y（左正右负）
         #   - 纵轴：X（前正后负）
-        axes[1].set_xlabel("Y (right positive)")
-        axes[1].set_ylabel("X (up positive)")
+        configure_bev_axes(axes[1])
 
         # 计算轨迹范围用于自动范围或兜底（仍基于原始 (x, y) 数值）
         all_pts = np.concatenate([gt_traj, pred_traj], axis=0)
@@ -836,7 +836,7 @@ def _visualize_single_sample(args_tuple):
         axes[0].axis("off")
         
         # 右：BEV 轨迹，采用与上面一致的坐标约定：
-        #   纵轴：x（向上为正），横轴：y（向右为正，往左 y 变小）
+        #   纵轴：x（向上为正），横轴：y（向左为正）
         axes[1].plot(gt_traj[:, 1], gt_traj[:, 0], "g-", linewidth=2, label="GT")
         axes[1].plot(pred_traj[:, 1], pred_traj[:, 0], "r-", linewidth=2, label="Pred")
         axes[1].scatter(gt_traj[:, 1], gt_traj[:, 0], c='green', s=30, alpha=0.7, label='GT Points')
@@ -844,8 +844,7 @@ def _visualize_single_sample(args_tuple):
         axes[1].scatter(gt_traj[0, 1], gt_traj[0, 0], color='green', s=100, marker='s', label='GT Start', zorder=5)
         axes[1].scatter(pred_traj[0, 1], pred_traj[0, 0], color='red', s=100, marker='s', label='Pred Start', zorder=5)
         
-        axes[1].set_xlabel("Y (right positive)")
-        axes[1].set_ylabel("X (up positive)")
+        configure_bev_axes(axes[1])
         
         # 计算范围（仍基于原始 (x, y) 数值）
         all_pts = np.concatenate([gt_traj, pred_traj], axis=0)
@@ -1047,4 +1046,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

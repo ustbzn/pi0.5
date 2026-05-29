@@ -37,6 +37,8 @@ from tqdm import tqdm
 import re
 import pickle
 
+from src.utils.bev_axes import configure_bev_axes
+
 
 class TrajectoryAnalyzer:
     """轨迹分析器"""
@@ -269,7 +271,7 @@ class TrajectoryAnalyzer:
             # 数值上：traj[:, 0] / traj[:, 1] 分别是原始 fur_x / fur_y
             # 可视化约定：
             #   - 纵轴：x，向上为正
-            #   - 横轴：y，向右为正（往左 y 变小）
+            #   - 横轴：y，向左为正
             ax_bev.plot(traj[:, 1], traj[:, 0], "b-", linewidth=2, label="Trajectory", marker='o', markersize=4)
             
             # 标记起始点
@@ -279,8 +281,7 @@ class TrajectoryAnalyzer:
             ax_bev.scatter(traj[-1, 1], traj[-1, 0], color='red', s=100, marker='s', 
                           label='End', zorder=5)
             
-            ax_bev.set_xlabel("Y (right positive)")
-            ax_bev.set_ylabel("X (up positive)")
+            configure_bev_axes(ax_bev)
             ax_bev.set_title(f"BEV Trajectory ({file_scene_name}, step {step_num})")
             
             # 设置坐标轴范围（基于原始 (x, y) 数值）

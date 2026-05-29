@@ -49,6 +49,8 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
 from src.utils.metric import get_action_accuracy
+from src.utils.bev_axes import configure_bev_axes
+from src.utils.collision_time_config import get_default_collision_interp_dt
 from src.data.utils.normalization import Normalize
 
 # navigation_id -> 映射前的导航指令文本（与 json_to_pkl_py3.py 中 NAVIGATION_COMMAND_MAP 反向对应）
@@ -62,7 +64,7 @@ NAVIGATION_ID_TO_TEXT = {
 # 反向映射：文本 -> id（用于从 navigation_command 推断 nav_id）
 NAVIGATION_COMMAND_TO_ID = {v: k for k, v in NAVIGATION_ID_TO_TEXT.items()}
 
-HDMAP_BEV_EXTENT = [-48.0, 48.0, -89.6, 89.6]
+HDMAP_BEV_EXTENT = [48.0, -48.0, -89.6, 89.6]
 HDMAP_OVERLAY_CONFIG = {
     "lanes": {
         "channel_idx": 0,
@@ -769,7 +771,7 @@ class MOGOTrajectoryAnalyzer:
 
     def compute_collision_metrics(
         self,
-        interpolation_dt: float = 0.1,
+        interpolation_dt: float = get_default_collision_interp_dt(),
         class_id_to_name: Optional[Dict[int, str]] = None,
     ) -> Dict[str, object]:
         """统计当前和未来预测轨迹上的碰撞率。"""
@@ -993,10 +995,10 @@ class MOGOTrajectoryAnalyzer:
         print(f"未来碰撞率 future_collision_rate: {future_collision_rate:.4f}")
         print(f"总体碰撞率 overall_collision_rate: {overall_collision_rate:.4f}")
         print(f"GT未来碰撞率 gt_future_collision_rate: {gt_future_collision_rate:.4f}")
-        print("未来逐时刻碰撞率 (0.1s):")
+        print(f"未来逐时刻碰撞率 ({interpolation_dt:.1f}s):")
         for t_sec, rate in zip(dense_future_times[1:], collision_rate_per_step[1:]):
             print(f"  t={t_sec:.1f}s: {rate:.4f}")
-        print("GT未来逐时刻碰撞率 (0.1s):")
+        print(f"GT未来逐时刻碰撞率 ({interpolation_dt:.1f}s):")
         for t_sec, rate in zip(dense_future_times[1:], gt_collision_rate_per_step[1:]):
             print(f"  t={t_sec:.1f}s: {rate:.4f}")
         if class_collision_counter:
@@ -1031,7 +1033,7 @@ class MOGOTrajectoryAnalyzer:
     def _build_collision_snapshot(
         self,
         sample_idx: int,
-        interpolation_dt: float = 0.1,
+        interpolation_dt: float = get_default_collision_interp_dt(),
     ) -> Optional[Dict[str, object]]:
         """为单个样本构建碰撞可视化所需的几何快照。"""
         if self.gt_trajectories is None or self.pred_trajectories is None:
@@ -1174,7 +1176,7 @@ class MOGOTrajectoryAnalyzer:
         self,
         collision_metrics: Dict[str, object],
         output_dir: str,
-        interpolation_dt: float = 0.1,
+        interpolation_dt: float = get_default_collision_interp_dt(),
         max_samples: int = 20,
         collision_type: str = "pred",
     ) -> None:
@@ -1336,8 +1338,7 @@ class MOGOTrajectoryAnalyzer:
             ax_bev.set_ylim((x_min - margin_x, x_max + margin_x))
             ax_bev.set_aspect("equal")
             ax_bev.grid(True, alpha=0.3)
-            ax_bev.set_xlabel("Y (right positive)")
-            ax_bev.set_ylabel("X (up positive)")
+            configure_bev_axes(ax_bev)
             ax_bev.set_title(f"Collision BEV ({collision_type.upper()})")
             legend_handles = self._build_bev_legend_handles(
                 hdmap_layers=drawn_hdmap_layers,
@@ -1659,8 +1660,7 @@ class MOGOTrajectoryAnalyzer:
             )
         ax_bev.scatter(0, 0, color='blue', s=100, marker='s', zorder=6)
 
-        ax_bev.set_xlabel("Y (right positive)")
-        ax_bev.set_ylabel("X (up positive)")
+        configure_bev_axes(ax_bev)
 
         all_pts_list = [gt_traj, pred_traj, origin]
         if his_traj is not None and len(his_traj) > 0:
@@ -1953,7 +1953,7 @@ def main():
     parser.add_argument(
         "--collision_interp_dt",
         type=float,
-        default=0.1,
+        default=get_default_collision_interp_dt(),
         help="碰撞检测的时间插值分辨率（秒）"
     )
     
