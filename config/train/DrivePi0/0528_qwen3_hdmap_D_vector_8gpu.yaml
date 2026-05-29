@@ -1,0 +1,343 @@
+# ============================================================================
+# 消融实验：mogo_hdmap_D_vector_8gpu
+# ============================================================================
+# 配置说明:
+#   - 本文件是当前 DrivePi_8GPU 代码的“完整功能模板”，只使用 defaults: - _self_。
+#   - 主模型: Qwen3-VL-2B-Instruct 官方前向路径，包含 3D M-RoPE、VLM causal mask、
+#     position_embeddings 显式传递、DeepStack 注入。
+#   - 输入: 8 路相机图像 (front/right/left/back 当前帧 + 历史帧) + 文本导航 + ego state。
+#   - HDMap:
+#       C1: 原始 BEV 下采样为多通道 dense map；
+#       C2: 独立 HDMap optimizer group；
+#       C3: gated_residual 融合；
+#       A: 可选将 HDMap PNG 作为第 9 张视觉图输入 VLM；
+#       B: 可选将手工 HDMap 标量特征拼到 proprio state。
+#   - VLM 优化:
+#       D: 轨迹类型加权采样、hard-case 加权、bucketed eval；
+#       A: action-grounded 辅助监督；
+#       H: action/VLM 差异化学习率和 warmup；
+#       K: eval-time HDMap ablation (normal/zero/shuffle)；
+#       I/L: LoRA 组件与 rank 可通过本配置直接做消融。
+#   - Eval 指标:
+#       L1、Acc@threshold、真实坐标系 Avg. L2、bucketed L1/Acc/Avg.L2。
+#   - 默认值偏“全功能验证”，显存压力较高；做严格消融时建议一次只关闭一个功能块。
+# ============================================================================
+
+defaults:
+  - _self_
+
+hydra:
+  run:
+    dir: ${log_dir}
+
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+# ==================== 路径配置 ====================
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU
+dataset_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_mogo_hdmap_D_vector_8gpu
+log_dir: ${oc.env:LOG_DIR,logs}/train/${name}/${run_name}
+
+# ==================== 基本设置 ====================
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+
+
+# ==================== 模型加载 ====================
+# 三种模式:
+#   1. 首训: load_pretrained_weights=True, resume_checkpoint_path=null, finetune_checkpoint_path=null
+#   2. 断点续训: resume_checkpoint_path=/path/to/checkpoint.pt，会恢复模型、优化器、scheduler、step
+#   3. 微调: finetune_checkpoint_path=/path/to/checkpoint.pt，只加载模型权重，优化器重新初始化
+load_pretrained_weights: True
+resume_checkpoint_path:
+finetune_checkpoint_path:
+
+# ==================== 训练模式 ====================
+train_vlm: False                    # True: 训练 VLM/LoRA 参数；False: 冻结 vision tower + language model
+state_only_for_action: True         # True: 严格 state-only，不初始化 tokenizer/processor，不加载图像
+mask_vlm_for_action: False          # True: action/proprio 不 attend VLM，用于视觉贡献消融
+action_expert_adaptive_mode:        # 可选: adaLN / adaLN-Zero / null；当前默认不使用
+use_torch_compile: True             # 只 compile joint_model/action/proprio，跳过官方 vision_tower
+use_bf16: True                      # bf16 优先；若需 fp16，将 use_bf16=False, use_fp16=True
+use_fp16: False
+use_amp: True
+quantize: False
+use_lm_head: False                  # 仅文本生成路径需要；轨迹训练不使用
+
+# ==================== LoRA 配置 (方案 I/L) ====================
+# lora=True 时，必须 load_pretrained_weights=True 或使用 checkpoint。
+# 默认全开主要用于“全功能模板”；做诊断时建议按 I-1/I-2/I-3 单独消融。
+lora: False
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.05
+lora_vlm: False                     # language model attention: q/k/v/o_proj
+lora_vlm_target_modules: [q_proj, k_proj, v_proj, o_proj]
+lora_vlm_mlp: False                 # language model MLP: gate/up/down_proj
+lora_vision: False                  # vision tower attention: qkv/proj
+lora_vision_mlp: False              # vision tower MLP: linear_fc1/linear_fc2
+lora_vision_merger: False           # vision merger: linear_fc1/linear_fc2
+lora_vision_deepstack_merger: False # 可单独打开验证；默认关闭以降低额外显存和 DDP 风险
+
+# ==================== HDMap 开关 (A/B/C1-C3) ====================
+# A: HDMap PNG 作为第 9 张图输入 VLM。依赖 hdmap_bev_npz -> hdmap_bev_img 路径转换。
+use_hdmap_image: False
+hdmap_image_size: [352, 192]        # (H, W)，BEV PNG 通常是纵向长图
+
+# B: HDMap 8 维手工标量特征拼入 proprio state。
+# 开启后 proprio_dim 需要额外 +8。本配置默认同时开启 B 和 C，proprio_dim=15。
+use_hdmap_proprio: False
+
+# C1/C2/C3: 原始 HDMap BEV 多通道下采样 + CNN 编码 + gated residual 融合。
+use_hdmap_cnn: False
+hdmap_cnn_dim: 32
+hdmap_bev_downsample_size: [96, 180] # (H, W)，更大尺寸保留更多道路拓扑
+hdmap_downsample_mode:
+  lanes: max
+  lane_links: max
+  lane_boundaries: max
+  junctions: area
+hdmap_channel_scale: [0.08, 0.12, 0.10, 1.0]
+hdmap_fusion_mode: gated_residual   # concat / gated_residual
+
+# C2: HDMap 模块使用独立 optimizer group。
+separate_hdmap_optimizer_group: False
+hdmap_lr: 1e-4
+hdmap_weight_decay: 1e-4
+hdmap_lr_scheduler:
+  min_lr: 1e-6
+
+# 方案 D: PlanVOCA-style 结构化 lane token
+# 数据来源：mogo-dataset-tools/parseRosBag-2O-Poutine_junv2_50f_merge_hdmap_p2lane.py
+# 启用 HDMapVectorGenerator 后，pkl 顶层会写入 hdmap_vector_* 字段。
+use_hdmap_vector: True
+max_map_tokens: 128
+map_sample_points: 20
+# 训练数据必须严格带 hdmap_vector_* 字段；缺失时 dataloader 直接 raise，避免
+# 静默退化为"no map" baseline（P0-2）。debug 时可临时改成 False。
+strict_hdmap_vector: True
+
+# ==================== 数据集 ====================
+data:
+  train:
+    statistics_path: ${dataset_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: ${dataset_dir}
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    nav_onehot: False
+    use_his_trajectory: False
+    state_frame_index: 0            # 只取当前 state token；若使用历史状态，置空
+    cam_image_size: ${cam_image_size}
+    use_hdmap_image: ${use_hdmap_image}
+    use_hdmap_proprio: ${use_hdmap_proprio}
+    use_hdmap_cnn: ${use_hdmap_cnn}
+    hdmap_image_size: ${hdmap_image_size}
+    hdmap_bev_downsample_size: ${hdmap_bev_downsample_size}
+    hdmap_downsample_mode: ${hdmap_downsample_mode}
+    hdmap_channel_scale: ${hdmap_channel_scale}
+    use_hdmap_vector: ${use_hdmap_vector}
+    max_map_tokens: ${max_map_tokens}
+    map_sample_points: ${map_sample_points}
+    strict_hdmap_vector: ${strict_hdmap_vector}
+  val:
+    statistics_path: ${dataset_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: ${dataset_dir}
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    nav_onehot: False
+    use_his_trajectory: False
+    state_frame_index: 0
+    cam_image_size: ${cam_image_size}
+    use_hdmap_image: ${use_hdmap_image}
+    use_hdmap_proprio: ${use_hdmap_proprio}
+    use_hdmap_cnn: ${use_hdmap_cnn}
+    hdmap_image_size: ${hdmap_image_size}
+    hdmap_bev_downsample_size: ${hdmap_bev_downsample_size}
+    hdmap_downsample_mode: ${hdmap_downsample_mode}
+    hdmap_channel_scale: ${hdmap_channel_scale}
+    use_hdmap_vector: ${use_hdmap_vector}
+    max_map_tokens: ${max_map_tokens}
+    map_sample_points: ${map_sample_points}
+    strict_hdmap_vector: ${strict_hdmap_vector}
+
+cam_image_size: [224, 224]          # Qwen3VLProcessor 后续会对齐到 patch/merge 需要的尺寸
+norm_mode: minmax                   # percentile / percentile_clip / minmax；Avg. L2 会按该模式反归一化
+
+# ==================== 日志 ====================
+swanlab:
+  enable: False
+  project: DriveMoE_Qwen3
+  experiment_name: ${run_name}
+  mode: cloud
+  description: "mogo_hdmap_D_vector_8gpu + bucket eval + Avg.L2"
+  entity: null
+
+log_freq: 16
+
+# ==================== 加权采样 (方案 D) ====================
+nav_weighted_sampling: False
+trajectory_weighted_sampling:
+  enable: True
+  static_threshold: 1.0             # 末端位移 < 1m 判定为 static
+  turn_threshold: 2.0               # 末端横向偏移 > 2m 判定为 turn
+  static_weight: 2.0
+  turn_weight: 3.0
+  straight_weight: 1.0
+  hard_case_weight_path: null       # 可填 build_state_only_hardcase_weights.py 生成的 json
+  hard_case_alpha: 1.0              # hard case 权重倍率: w *= 1 + alpha * normalized_error
+
+# ==================== 训练超参数 ====================
+n_epochs: 40
+n_train: 59778
+num_gpus: 8
+per_device_batch_size: 16            # 全功能 + VLM + HDMap 图像显存较高，建议从 8 起步
+global_batch_size: ${eval:'${per_device_batch_size} * ${num_gpus}'}
+n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}
+save_model_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
+num_workers: 8
+max_grad_norm: 1.0
+
+# ==================== Eval 配置 (方案 D/K + Avg. L2) ====================
+eval_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
+eval_size: 1024
+eval_full_val: True                # True: 跑完整 val；False: 使用 eval_size 限制
+eval_seed: 42
+eval_repeats: 1                     # >1 时日志输出 mean±std
+eval_map_modes: [normal] # HDMap CNN ablation[normal, zero, shuffle]: 正常 / BEV 置零 / batch 内打乱
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+
+# ==================== 学习率 (方案 H) ====================
+# action branch 从头或从 checkpoint 继续训练，通常可用较大学习率；
+# VLM 更靠近预训练分布，如果lora微调默认使用 action_lr 的 1/5，避免破坏视觉语言先验。
+action_lr: 5e-5
+vlm_lr: 5e-5
+action_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+vlm_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 500
+action_weight_decay: 0
+vlm_weight_decay: 0
+
+# ==================== Flow Matching ====================
+flow_sampling: beta                 # uniform / beta
+flow_alpha: 1.5
+flow_beta: 1.0
+flow_sig_min: 0.001
+num_inference_steps: 10
+final_action_clip_value: 1.0        # 归一化 action 空间裁剪到 [-1, 1]
+
+# ==================== 轨迹辅助损失 ====================
+trajectory_loss:
+  lambda_smooth: 0.05               # reconstructed trajectory 一阶差分约束，抑制抖动
+  lambda_accel: 0.02                # reconstructed trajectory 二阶差分约束，抑制锯齿
+  endpoint_weight_mode: linear      # none / linear
+  endpoint_weight_max: 2.0          # horizon 末端点 MSE 权重
+
+# ==================== Action-grounded 辅助监督 (方案 A) ====================
+aux_loss:
+  enable: False
+  lambda_maneuver: 0.2              # maneuver 5 类分类
+  lambda_stop: 0.1                  # stop/non-stop 二分类
+  lambda_endpoint: 0.2              # 末端点回归
+  lambda_progress: 0.05             # 总位移回归
+  lambda_curvature: 0.05            # 曲率/二阶差分强度回归
+
+# ==================== 序列维度 ====================
+cond_steps: 1
+horizon_steps: 6
+action_dim: 2                       # trajectory: [x, y]
+# proprio_dim 计算:
+#   base his state = speed(2)+acceleration(2)+angular_velocity(1)+theta(1)+navigation_id(1)=7
+#   use_hdmap_proprio=True 额外 +8
+#   HDMap CNN 特征不计入 proprio_dim，模型内部会在 proprio_encoder 前动态拼接 hdmap_cnn_dim。
+proprio_dim: 7
+state_dim: ${proprio_dim}
+
+# 8 张相机图 + 1 张 HDMap BEV 时，Qwen3-VL 视觉 token 和 chat template 会明显增加。
+# 若关闭 use_hdmap_image，可将 max_seq_len 降到 600。
+max_seq_len: 600
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+# ==================== Mixture 配置 ====================
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 6144
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+
+time_hidden_size: 256
+
+# ==================== Joint Model (Transformer) ====================
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: ${pretrained_model_path}
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    hidden_act: "silu" # 当前仓库历史 Qwen3 配置使用该值；若严格对齐官方可改为 "silu"
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    rope_scaling:
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+      rope_type: "default"
+
+# ==================== Qwen3-VL Token 配置 ====================
+pad_token_id: 0
+image_token_index: 151655
+video_token_id: 151656
+vision_start_token_id: 151652
+vision_end_token_id: 151653
+vocab_size: 151936
+bos_token_id: 151643
+eos_token_id: 151645
