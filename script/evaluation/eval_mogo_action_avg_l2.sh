@@ -40,17 +40,37 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # 使用哪张 GPU。当前环境正在训练时，请改成空闲 GPU。
 GPU_ID="${GPU_ID:-0}"
 
-# 0514 训练产物 checkpoint。训练未保存到该 step 前，脚本会提前报错退出。
-CHECKPOINT_PATH="${CHECKPOINT_PATH:-/pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU/logs/train/drive-pi0/2026-05-14_20-56_qwen3_hdmap_all_features_8gpu/checkpoint/step37400.pt}"
+# 0514 训练产物 checkpoint。优先使用仓库内路径；如需其他位置，可直接用环境变量覆盖。
+DEFAULT_CHECKPOINT_PATH="${PROJECT_DIR}/logs/train/drive-pi0/2026-05-14_20-56_qwen3_hdmap_all_features_8gpu/checkpoint/step37400.pt"
+LEGACY_CHECKPOINT_PATH="/pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU/logs/train/drive-pi0/2026-05-14_20-56_qwen3_hdmap_all_features_8gpu/checkpoint/step37400.pt"
+if [[ -n "${CHECKPOINT_PATH:-}" ]]; then
+  CHECKPOINT_PATH="${CHECKPOINT_PATH}"
+elif [[ -f "${DEFAULT_CHECKPOINT_PATH}" ]]; then
+  CHECKPOINT_PATH="${DEFAULT_CHECKPOINT_PATH}"
+elif [[ -f "${LEGACY_CHECKPOINT_PATH}" ]]; then
+  CHECKPOINT_PATH="${LEGACY_CHECKPOINT_PATH}"
+else
+  CHECKPOINT_PATH="${DEFAULT_CHECKPOINT_PATH}"
+fi
 
-# 由 config/train/DrivePi0/0514_qwen3_hdmap_all_features_8gpu.yaml 提取出的评测配置。
-CONFIG_PATH="${CONFIG_PATH:-${PROJECT_DIR}/config/inference/DrivePi0/0514_qwen3_hdmap_all_features_8gpu_1A100.yaml}"
+# 评测配置优先使用本地 1A100 专用版；不存在时回退到仓库基线配置。
+DEFAULT_CONFIG_PATH="${PROJECT_DIR}/config/inference/DrivePi0/0514_qwen3_hdmap_all_features_8gpu.yaml"
+LOCAL_1A100_CONFIG_PATH="${PROJECT_DIR}/config/inference/DrivePi0/0514_qwen3_hdmap_all_features_8gpu_1A100.yaml"
+if [[ -n "${CONFIG_PATH:-}" ]]; then
+  CONFIG_PATH="${CONFIG_PATH}"
+elif [[ -f "${LOCAL_1A100_CONFIG_PATH}" ]]; then
+  CONFIG_PATH="${LOCAL_1A100_CONFIG_PATH}"
+else
+  CONFIG_PATH="${DEFAULT_CONFIG_PATH}"
+fi
 
 # MOGO naviv2 val 数据目录；inference_mogo_test.py 会遍历其中的 pkl。
-VAL_DATA_DIR="${VAL_DATA_DIR:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_0509_obj/val}"
+VAL_DATA_DIR="${VAL_DATA_DIR:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_worldsim/val}"
 
-# 与 0514 训练一致的 statistics 文件，用于 state/trajectory 的归一化和反归一化。
-STATISTIC_PATH="${STATISTIC_PATH:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_0509_obj/statistics.json}"
+# 与训练时一致的 statistics 文件，用于 state/trajectory 的归一化和反归一化。
+# 注意：必须使用训练时同一份 statistics，否则 fur_x/fur_y 的 minmax 不一致，
+# 反归一化会引入恒定坐标偏置。
+STATISTIC_PATH="${STATISTIC_PATH:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap/statistics.json}"
 
 # 评测输出根目录。每次运行会在下面创建一个带 checkpoint 名称的 RUN_DIR。
 EVAL_ROOT="${EVAL_ROOT:-${PROJECT_DIR}/logs/eval/drive-pi0/mogo_action_avg_l2}"

@@ -89,24 +89,38 @@ class Normalize:
 
     def _normalize_by_mode(self, x, p01, p99, vmin, vmax):
         if self.norm_mode == "percentile":
+            if np.allclose(p01, p99):
+                return np.zeros_like(np.asarray(x, dtype=np.float32))
             return self.standard_normalize(x, p01, p99)
         if self.norm_mode == "percentile_clip":
+            if np.allclose(p01, p99):
+                return np.zeros_like(np.asarray(x, dtype=np.float32))
             y = self.standard_normalize(x, p01, p99)
             return np.clip(y, -1.0, 1.0)
         if self.norm_mode == "minmax":
             if np.allclose(vmin, vmax):
+                if np.allclose(p01, p99):
+                    return np.zeros_like(np.asarray(x, dtype=np.float32))
                 return self.standard_normalize(x, p01, p99)
             y = 2 * (x - vmin) / (vmax - vmin) - 1
             return np.clip(y, -1.0, 1.0)
+        if np.allclose(p01, p99):
+            return np.zeros_like(np.asarray(x, dtype=np.float32))
         return self.standard_normalize(x, p01, p99)
 
     def _denormalize_by_mode(self, x_norm, p01, p99, vmin, vmax):
         if self.norm_mode in ("percentile", "percentile_clip"):
+            if np.allclose(p01, p99):
+                return np.full_like(np.asarray(x_norm, dtype=np.float32), float(p01))
             return self.recover_trajectory(x_norm, p01, p99)
         if self.norm_mode == "minmax":
             if np.allclose(vmin, vmax):
+                if np.allclose(p01, p99):
+                    return np.full_like(np.asarray(x_norm, dtype=np.float32), float(p01))
                 return self.recover_trajectory(x_norm, p01, p99)
             return self.recover_trajectory(x_norm, vmin, vmax)
+        if np.allclose(p01, p99):
+            return np.full_like(np.asarray(x_norm, dtype=np.float32), float(p01))
         return self.recover_trajectory(x_norm, p01, p99)
 
     NUM_NAV_CLASSES = 5
