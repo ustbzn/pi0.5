@@ -59,8 +59,10 @@ def concatenate_images(left_image: str, middle_image: str, right_image: str):
     return rgb
 
 
-def image_normalization(path: str, size: Tuple[int, int]):
+def image_normalization(path: str, size: Tuple[int, int], augment: bool = True):
     image = read_resize_encode_image_pytorch(path, size)
+    if not augment:
+        return image
     np_array = image.numpy()
     tf_tensor = tf.convert_to_tensor(np_array)
     image_augment_kwargs = dict(random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1],),

@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash script/train_debug.sh)",
+      "Bash(find /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/mogo-dataset-tools -name parseRosBag*.py)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(find /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/src/model -name *.py -type f)",
+      "Bash(find /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/config -name *.yaml -type f)",
+      "Bash(grep -rn \"action_expert\\\\|action_encoder\\\\|action_decoder\\\\|proprio_encoder\" /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/src/ --include=*.py)",
+      "Bash(grep -rn \"expert\\\\|mixture\\\\|moe\\\\|MoE\" /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/src/model/ --include=*.py)",
+      "Bash(grep -rn \"num_of_action_experts\\\\|router\\\\|GatingNetwork\\\\|TopKGating\\\\|NoisyTopK\" /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/src/ --include=*.py)",
+      "Bash(ls /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi/train/*.pkl)",
+      "Bash(ls /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi/val/*.pkl)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:github.com)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(chmod +x:*)",
+      "Bash(python *)",
+      "Bash(bash script/training/train_drivepi0_mogo.sh)",
+      "Bash(kill 1831845)",
+      "Bash(kill 1827426 1827428)",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs kill -9)",
+      "Bash(echo \"GPU stress PID: $!\")",
+      "Bash(echo \"exit: $?\")",
+      "mcp__ide__getDiagnostics",
+      "Bash(pkill -f \"script/run.py\")",
+      "WebFetch(domain:arxiv.org)"
+    ]
+  }
+}

@@ -431,6 +431,60 @@ class DrivePiZeroTrainAgent:
             model = self.model
         self.model.train()
 
+        def build_vlm_images(batch):
+            camera_mode = self.config.get("camera_mode", "mogo_8")
+            if camera_mode in ("front_history_2", "b2d_front_history_2"):
+                image_specs = [
+                    ("image_front", "current front view"),
+                    ("image_front_time", "previous front view"),
+                ]
+            elif camera_mode in ("b2d_surround_history_12", "surround_history_12"):
+                image_specs = [
+                    ("image_front", "current front view"),
+                    ("image_front_left", "current front-left view"),
+                    ("image_front_right", "current front-right view"),
+                    ("image_back", "current rear view"),
+                    ("image_back_left", "current rear-left view"),
+                    ("image_back_right", "current rear-right view"),
+                    ("image_front_time", "previous front view"),
+                    ("image_front_left_time", "previous front-left view"),
+                    ("image_front_right_time", "previous front-right view"),
+                    ("image_back_time", "previous rear view"),
+                    ("image_back_left_time", "previous rear-left view"),
+                    ("image_back_right_time", "previous rear-right view"),
+                ]
+            elif camera_mode in ("b2d_surround_current_6", "surround_current_6"):
+                image_specs = [
+                    ("image_front", "current front view"),
+                    ("image_front_left", "current front-left view"),
+                    ("image_front_right", "current front-right view"),
+                    ("image_back", "current rear view"),
+                    ("image_back_left", "current rear-left view"),
+                    ("image_back_right", "current rear-right view"),
+                ]
+            elif camera_mode in ("mogo_8", "surround_history_8"):
+                image_specs = [
+                    ("image_front", "current front view"),
+                    ("image_right", "current right view"),
+                    ("image_left", "current left view"),
+                    ("image_back", "current rear view"),
+                    ("image_front_time", "previous front view"),
+                    ("image_right_time", "previous right view"),
+                    ("image_left_time", "previous left view"),
+                    ("image_back_time", "previous rear view"),
+                ]
+            else:
+                raise ValueError(f"Unsupported camera_mode: {camera_mode}")
+
+            image_list = []
+            cam_labels = []
+            for key, label in image_specs:
+                img = batch[key]  # [B, H, W, C]
+                img = einops.rearrange(img, "B H W C -> B C H W")
+                image_list.append(img.unsqueeze(1))
+                cam_labels.append(label)
+            return torch.cat(image_list, dim=1), cam_labels
+
         def preprocess_batch(batch, split_mask: bool, sample_fm_time: bool):
             state = batch["state"]
             trajectory = batch["trajectory"].squeeze(1)
@@ -474,26 +528,7 @@ class DrivePiZeroTrainAgent:
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
                 return inputs
 
-            # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
-            cam_names = ['front', 'right', 'left', 'back']
-            # 图像语义标签：与 image_list 顺序严格对应
-            cam_labels = [
-                'current front view', 'current right view',
-                'current left view', 'current rear view',
-                'previous front view', 'previous right view',
-                'previous left view', 'previous rear view',
-            ]
-            image_list = []
-            for cam in cam_names:
-                img = batch[f"image_{cam}"]  # [B, H, W, C]
-                img = einops.rearrange(img, "B H W C -> B C H W")
-                image_list.append(img.unsqueeze(1))  # [B, 1, C, H, W]
-            for cam in cam_names:
-                img = batch[f"image_{cam}_time"]  # [B, H, W, C]
-                img = einops.rearrange(img, "B H W C -> B C H W")
-                image_list.append(img.unsqueeze(1))  # [B, 1, C, H, W]
-
-            images = torch.cat(image_list, dim=1)  # [B, 8, C, H, W]
+            images, cam_labels = build_vlm_images(batch)
             batch_size = images.shape[0]
 
             model_inputs = self.processor(text=texts, images=images, cam_labels=cam_labels)
@@ -696,6 +731,22 @@ class DrivePiZeroTrainAgent:
                                 for acc_key in sorted(bucket_acc_sums.get(bname, {}).keys()):
                                     bacc = bucket_acc_sums[bname][acc_key] / bucket_counts[bname]
                                     log_msg += f" | {bname}_{acc_key}: {bacc:.3f}"
+                        # --- 加权开环指标: 困难场景权重更高 ---
+                        w_map = {"straight": 1.0, "turn": 3.0, "static": 2.0, "high_curvature": 4.0}
+                        w_l1_num, w_total = 0.0, 0.0
+                        w_acc_nums = defaultdict(float)
+                        for bname, w in w_map.items():
+                            cnt = bucket_counts.get(bname, 0)
+                            if cnt > 0:
+                                w_l1_num += bucket_l1_sums[bname] * w
+                                w_total += cnt * w
+                                for ak in bucket_acc_sums.get(bname, {}):
+                                    w_acc_nums[ak] += bucket_acc_sums[bname][ak] * w
+                        if w_total > 0:
+                            w_l1 = w_l1_num / w_total
+                            log_msg += f" | weighted_l1: {w_l1:.3f}"
+                            for ak in sorted(w_acc_nums):
+                                log_msg += f" | weighted_{ak}: {w_acc_nums[ak] / w_total:.3f}"
                         log.info(log_msg)
                         self.save_training(cnt_update, cnt_batch)
 
@@ -742,6 +793,11 @@ class DrivePiZeroTrainAgent:
                                 metrics[f"eval/{bname}_l1"] = bucket_l1_sums[bname] / bucket_counts[bname]
                                 for acc_key in sorted(bucket_acc_sums.get(bname, {}).keys()):
                                     metrics[f"eval/{bname}_{acc_key}"] = bucket_acc_sums[bname][acc_key] / bucket_counts[bname]
+                        # --- 加权指标写入 SwanLab ---
+                        if w_total > 0:
+                            metrics["eval/weighted_l1"] = w_l1_num / w_total
+                            for ak in sorted(w_acc_nums):
+                                metrics[f"eval/weighted_{ak}"] = w_acc_nums[ak] / w_total
                         new_eval_from_last_log = False
                     # [新增] SwanLab Log
                     if self.use_swanlab:

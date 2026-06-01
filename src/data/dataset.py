@@ -88,13 +88,22 @@ def build_aux_targets(all_data):
       straight(0) / turn(1) / static(2) / high_curvature(3)
 
     Args:
-        all_data: 包含 'fur_trajectory' 字段的样本字典，
-                  fur_trajectory shape = [H, 2]，列顺序 [y, x]
+        all_data: 支持两种轨迹格式：
+                  1) fur_trajectory shape = [H, 2]，列顺序 [y, x]
+                  2) fur_x/fur_y，旧 Bench2Drive 格式，shape 可为 [1, H] 或 [H]
     Returns:
         dict: 包含上述 5 个辅助标签和 trajectory_bucket
     """
-    fur = np.asarray(all_data["fur_trajectory"], dtype=np.float32)  # [H, 2], [y, x]
-    final_y, final_x = float(fur[-1, 0]), float(fur[-1, 1])
+    if "fur_trajectory" in all_data:
+        fur = np.asarray(all_data["fur_trajectory"], dtype=np.float32)  # [H, 2], [y, x]
+        fur_y = fur[:, 0]
+        fur_x = fur[:, 1]
+    else:
+        fur_x = np.asarray(all_data["fur_x"], dtype=np.float32).reshape(-1)
+        fur_y = np.asarray(all_data["fur_y"], dtype=np.float32).reshape(-1)
+        fur = np.stack([fur_y, fur_x], axis=1)
+
+    final_y, final_x = float(fur_y[-1]), float(fur_x[-1])
     displacement = float(np.sqrt(final_x ** 2 + final_y ** 2))
 
     # --- curvature: 平均二阶差分范数 ---
@@ -145,6 +154,8 @@ class TorchDataset(Dataset):
         use_his_trajectory: bool = False,
         state_frame_index: Optional[int] = None,
         state_only: bool = False,
+        image_augment: bool = True,
+        camera_mode: Optional[str] = None,
     ):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
@@ -156,6 +167,8 @@ class TorchDataset(Dataset):
         self.use_his_trajectory = use_his_trajectory
         self.state_frame_index = state_frame_index
         self.state_only = state_only
+        self.image_augment = image_augment
+        self.camera_mode = camera_mode
         self.list_data_dict = [f for f in os.listdir(self.data_path) if f.endswith('.pkl')]
 
     def __len__(self):
@@ -261,6 +274,16 @@ class TorchDataset(Dataset):
                     return path
         return None
 
+    @staticmethod
+    def _previous_frame_path(path: str):
+        dirname = os.path.dirname(path)
+        filename = os.path.basename(path)
+        stem, ext = os.path.splitext(filename)
+        if not stem.isdigit():
+            return None
+        previous_stem = str(max(int(stem) - 1, 0)).zfill(len(stem))
+        return os.path.join(dirname, f"{previous_stem}{ext}")
+
     def __getitem__(self, i):
         data_dict = {}
         pkl_data_path = os.path.join(self.data_path, self.list_data_dict[i])
@@ -297,8 +320,56 @@ class TorchDataset(Dataset):
                         path_time = self._pick_image_path(all_data, history_key)
                         if not path or not path_time:
                             return self.__getitem__((i + 1) % len(self))
-                        data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224))
-                        data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224))
+                        data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224), augment=self.image_augment)
+                        data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224), augment=self.image_augment)
+                # B2D action 格式：6 路当前帧图像；历史帧由当前帧路径回推上一帧编号。
+                elif 'his_image_front' in all_data:
+                    if self.camera_mode in ("front_history_2", "b2d_front_history_2"):
+                        image_key_map = {'front': 'his_image_front'}
+                    else:
+                        image_key_map = {
+                            'front': 'his_image_front',
+                            'front_left': 'his_image_front_left',
+                            'front_right': 'his_image_front_right',
+                            'back': 'his_image_back',
+                            'back_left': 'his_image_back_left',
+                            'back_right': 'his_image_back_right',
+                        }
+                    needs_history = self.camera_mode in (
+                        "front_history_2",
+                        "b2d_front_history_2",
+                        "b2d_surround_history_12",
+                        "surround_history_12",
+                        "mogo_8",
+                        "surround_history_8",
+                    )
+                    for cam_name, key in image_key_map.items():
+                        path = self._pick_image_path(all_data, key)
+                        if not path:
+                            return self.__getitem__((i + 1) % len(self))
+                        data_dict[f'image_{cam_name}'] = image_normalization(
+                            path, (224, 224), augment=self.image_augment
+                        )
+                        if needs_history:
+                            history_path = self._previous_frame_path(path)
+                            if not history_path:
+                                return self.__getitem__((i + 1) % len(self))
+                            data_dict[f'image_{cam_name}_time'] = image_normalization(
+                                history_path, (224, 224), augment=self.image_augment
+                            )
+                    # 兼容其他 camera_mode 的通用命名。
+                    if 'image_front_left' in data_dict:
+                        data_dict['image_left'] = data_dict['image_front_left']
+                    if 'image_front_right' in data_dict:
+                        data_dict['image_right'] = data_dict['image_front_right']
+                    if 'image_front_left_time' in data_dict:
+                        data_dict['image_left_time'] = data_dict['image_front_left_time']
+                    if 'image_front_right_time' in data_dict:
+                        data_dict['image_right_time'] = data_dict['image_front_right_time']
+                    if 'his_camera_id' in all_data:
+                        data_dict['cam_id'] = get_cam_id_by_label(
+                            decode_path_value(all_data['his_camera_id'])
+                        )
                 # drive-pi0 旧格式
                 elif 'cam_id' not in all_data.keys():
                     # 4 cameras x 2 time steps = 8 images
@@ -310,32 +381,43 @@ class TorchDataset(Dataset):
                         if not path or not path.strip() or not path_time or not path_time.strip():
                             # 跳过坏样本，随机取下一个
                             return self.__getitem__((i + 1) % len(self))
-                        data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224))
-                        data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224))
+                        data_dict[f'image_{cam_name}'] = image_normalization(path, (224, 224), augment=self.image_augment)
+                        data_dict[f'image_{cam_name}_time'] = image_normalization(path_time, (224, 224), augment=self.image_augment)
 
                 elif not self.use_fixed_images:
                     image_front_path = decode_path_value(all_data['his_cam_front'])
-                    data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
+                    data_dict['image_front'] = image_normalization(image_front_path, (224, 224), augment=self.image_augment)
                     image_back_path = decode_path_value(all_data['his_cam_back'])
-                    data_dict['image_back'] = image_normalization(image_back_path, (224, 224))
+                    data_dict['image_back'] = image_normalization(image_back_path, (224, 224), augment=self.image_augment)
                     image_front_time_path = decode_path_value(all_data['his_cam_front_time'])
-                    data_dict['image_front_time'] = image_normalization(image_front_time_path, (224, 224))
+                    data_dict['image_front_time'] = image_normalization(image_front_time_path, (224, 224), augment=self.image_augment)
+                    image_back_time_path = self._pick_image_path(all_data, 'his_cam_back_time')
+                    if image_back_time_path:
+                        data_dict['image_back_time'] = image_normalization(image_back_time_path, (224, 224), augment=self.image_augment)
                     image_front_left_path = decode_path_value(all_data['his_cam_front_left'])
-                    data_dict['image_front_left'] = image_normalization(image_front_left_path, (224, 224))
+                    data_dict['image_front_left'] = image_normalization(image_front_left_path, (224, 224), augment=self.image_augment)
                     image_front_right_path = decode_path_value(all_data['his_cam_front_right'])
-                    data_dict['image_front_right'] = image_normalization(image_front_right_path, (224, 224))
+                    data_dict['image_front_right'] = image_normalization(image_front_right_path, (224, 224), augment=self.image_augment)
                     image_back_left_path = decode_path_value(all_data['his_cam_back_left'])
-                    data_dict['image_back_left'] = image_normalization(image_back_left_path, (224, 224))
+                    data_dict['image_back_left'] = image_normalization(image_back_left_path, (224, 224), augment=self.image_augment)
                     image_back_right_path = decode_path_value(all_data['his_cam_back_right'])
-                    data_dict['image_back_right'] = image_normalization(image_back_right_path, (224, 224))
+                    data_dict['image_back_right'] = image_normalization(image_back_right_path, (224, 224), augment=self.image_augment)
+                    # 兼容训练侧统一的 front/right/left/back 命名；旧 B2D 没有 right/left 后向历史帧，
+                    # 默认使用当前帧占位，具体使用哪些图像由 camera_mode 决定。
+                    data_dict['image_left'] = data_dict['image_front_left']
+                    data_dict['image_right'] = data_dict['image_front_right']
+                    data_dict['image_left_time'] = data_dict['image_left']
+                    data_dict['image_right_time'] = data_dict['image_right']
+                    if 'image_back_time' not in data_dict:
+                        data_dict['image_back_time'] = data_dict['image_back']
                     data_dict['cam_id'] = get_cam_id_by_label(decode_path_value(all_data['cam_id']))
                 else:
                     image_front_path = decode_path_value(all_data['his_cam_front'])
-                    data_dict['image_front'] = image_normalization(image_front_path, (224, 224))
+                    data_dict['image_front'] = image_normalization(image_front_path, (224, 224), augment=self.image_augment)
                     image_front_time_path = decode_path_value(all_data['his_cam_front_time'])
-                    data_dict['image_front_time'] = image_normalization(image_front_time_path, (224, 224))
+                    data_dict['image_front_time'] = image_normalization(image_front_time_path, (224, 224), augment=self.image_augment)
                     skill_cam_path = decode_path_value(all_data['skill_cam'])
-                    data_dict['skill_cam'] = image_normalization(skill_cam_path, (224, 224))
+                    data_dict['skill_cam'] = image_normalization(skill_cam_path, (224, 224), augment=self.image_augment)
                     cam_id = pkl_data_path.split('/')[-1].split('_')[-1]
                     cam_id = cam_id.split('.')[0]
                     cam_id = get_cam_id_by_name(cam_id)
@@ -353,6 +435,10 @@ class TorchDataset(Dataset):
             if nav_desc is not None:
                 nav_desc = np.asarray(nav_desc).reshape(-1)
                 data_dict['language_instruction'] = f"Predict trajectory based on the navigation command: {str(nav_desc[0])}"
+            elif "command_far" in all_data:
+                command = np.asarray(all_data["command_far"]).reshape(-1)
+                command_id = int(command[-1]) if command.size else 0
+                data_dict['language_instruction'] = f"Predict trajectory based on the navigation command id: {command_id}"
             else:
                 data_dict['language_instruction'] = 'predict trajectory'
         return data_dict
@@ -370,6 +456,8 @@ def prepare_b2d_dataset(
     use_his_trajectory: bool = False,
     state_frame_index: Optional[int] = None,
     state_only: bool = False,
+    image_augment: bool = True,
+    camera_mode: Optional[str] = None,
 ):
     """
     Select the dataset directory based on camera type and split.
@@ -387,6 +475,8 @@ def prepare_b2d_dataset(
             use_his_trajectory=use_his_trajectory,
             state_frame_index=state_frame_index,
             state_only=state_only,
+            image_augment=image_augment,
+            camera_mode=camera_mode,
         )
     data_path = os.path.join(work_dir, dynamic_dir_name)
     if split == 'train':
@@ -401,6 +491,8 @@ def prepare_b2d_dataset(
             use_his_trajectory=use_his_trajectory,
             state_frame_index=state_frame_index,
             state_only=state_only,
+            image_augment=image_augment,
+            camera_mode=camera_mode,
         )
     if split == 'val':
         val_data_path = os.path.join(data_path, 'val')
@@ -414,5 +506,7 @@ def prepare_b2d_dataset(
             use_his_trajectory=use_his_trajectory,
             state_frame_index=state_frame_index,
             state_only=state_only,
+            image_augment=image_augment,
+            camera_mode=camera_mode,
         )
     raise ValueError("split type must be 'train' or 'val'")

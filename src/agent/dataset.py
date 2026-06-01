@@ -24,6 +24,8 @@ class Bench2DriveDataset:
             use_his_trajectory=config.get("use_his_trajectory", False),
             state_frame_index=config.get("state_frame_index", None),
             state_only=config.get("state_only", False),
+            image_augment=config.get("image_augment", True),
+            camera_mode=config.get("camera_mode", None),
         )
         self.dataset = dataset
 

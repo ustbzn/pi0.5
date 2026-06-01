@@ -13,6 +13,11 @@ import hydra
 import torch
 from omegaconf import OmegaConf, open_dict
 
+# Ensure `torchrun script/run.py` resolves this repository before any editable installs.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 # dummy
 # print(pretty_errors.__version__)
 

@@ -1,0 +1,259 @@
+# ============================================================================
+# 公平对比实验：Frozen VLM 模式 (冻结 VLM + action expert)
+# ============================================================================
+# 配置说明:
+#   - state_only_for_action: False → 加载图像, 走 VLM + action 联合 attention
+#   - train_vlm: False → VLM 权重完全冻结, 只训练 action expert
+#   - per_device_batch_size: 8 → 与 state_only 实验保持一致（公平对比）
+#   - eval_size: 4000 → 覆盖全部 val 样本 (3900)
+#   - max_seq_len: 2180 → 8张图×256 patches + cam_labels + text
+#   - 其余参数与 state_only 实验完全相同
+# ============================================================================
+
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${log_dir}
+
+# 训练入口类
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+# ==================== 路径配置 ====================
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_fair_frozen_vlm
+log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
+
+# ==================== 基本设置 ====================
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/paligemma-3b-pt-224
+
+# ==================== 模型加载 ====================
+load_pretrained_weights: True
+resume_checkpoint_path:
+finetune_checkpoint_path:
+
+# ==================== 训练模式 ====================
+train_vlm: False                    # ★ VLM 完全冻结
+action_expert_adaptive_mode:        # 不使用 adaLN
+use_torch_compile: True             # 编译加速
+use_bf16: True
+use_amp: True
+quantize: False
+
+# ==================== LoRA (不使用) ====================
+lora: False
+lora_r: 32
+lora_dropout: 0.05
+lora_vlm: ${lora}
+lora_vlm_mlp: False
+lora_vision: False
+lora_projector: False
+
+# ==================== 核心开关 ====================
+state_only_for_action: False        # ★ 使用 VLM 图像输入
+mask_vlm_for_action: False
+
+# ==================== 数据集 ====================
+data:
+  train:
+    statistics_path: ${data.train.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+    state_frame_index: 0            # 只取当前帧
+    nav_onehot: False
+    state_only: ${state_only_for_action}  # False → 加载图片
+  val:
+    statistics_path: ${data.val.dynamic_dir}/statistics_9dim.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_v2
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    use_his_trajectory: False
+    state_frame_index: 0
+    nav_onehot: False
+    state_only: ${state_only_for_action}
+
+# ==================== SwanLab 日志 ====================
+swanlab:
+  enable: True
+  project: drive-pi0
+  experiment_name: ${run_name}
+  mode: cloud
+  description: "公平对比: frozen_vlm, batch=8, full_eval"
+  entity: null
+
+log_freq: 16
+norm_mode: minmax                   # 归一化方法: minmax
+
+# ==================== 训练超参数 (与 state_only 完全一致) ====================
+n_epochs: 40
+n_train: 59778
+per_device_batch_size: 8            # ★ 与 state_only 相同
+num_gpus: 8
+global_batch_size: ${eval:'${per_device_batch_size} * ${num_gpus}'}  # = 64
+n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}
+save_model_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
+eval_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 10'}
+eval_size: 4000                     # ★ 覆盖全部 val 样本 (3900)
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+num_workers: 8
+
+# ==================== 学习率 ====================
+action_lr: 1e-5
+vlm_lr: 1e-5
+action_lr_scheduler:
+  first_cycle_steps: ${n_updates}   # cosine 不衰减
+  min_lr: 1e-8
+  warmup_steps: 200
+vlm_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+action_weight_decay: 0
+vlm_weight_decay: 0
+max_grad_norm: 1.0                  # 梯度裁剪
+
+# ==================== Flow Matching ====================
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0        # 归一化空间 [-1, 1]
+
+# ==================== 序列维度 ====================
+cond_steps: 1                       # 状态条件帧数
+horizon_steps: 6                    # 预测轨迹点数
+action_dim: 2                       # (x, y)
+proprio_dim: 7                      # speed(2)+accel(2)+angular_vel(1)+theta(1)+nav_id(1)
+state_dim: ${proprio_dim}
+max_seq_len: 2180                   # ★ 8×256 patches + cam_labels(~48) + text(~25) + 余量
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+# ==================== 加权采样 (关闭) ====================
+nav_weighted_sampling: False
+trajectory_weighted_sampling:
+  enable: False
+  static_threshold: 1.0
+  turn_threshold: 2.0
+  static_weight: 2.0
+  turn_weight: 3.0
+  straight_weight: 1.0
+  hard_case_weight_path: null
+  hard_case_alpha: 1.0
+
+# ==================== 轨迹辅助损失 ====================
+trajectory_loss:
+  lambda_smooth: 0.05
+  lambda_accel: 0.02
+  endpoint_weight_mode: linear
+  endpoint_weight_max: 2.0
+
+# ==================== 辅助监督 (关闭) ====================
+aux_loss:
+  enable: False
+  lambda_maneuver: 0.2
+  lambda_stop: 0.1
+  lambda_endpoint: 0.2
+  lambda_progress: 0.05
+  lambda_curvature: 0.05
+
+# ==================== Mixture 配置 ====================
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 16384
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256
+
+# ==================== Tokenizer ====================
+image_token_index: 257152
+vocab_size: 257216
+pad_token_id: 0
+
+# ==================== Vision (SigLIP) ====================
+vision:
+  _target_: src.model.paligemma.siglip.SiglipVisionModel
+  config:
+    hidden_size: 1152
+    intermediate_size: 4304
+    num_hidden_layers: 27
+    num_attention_heads: 16
+    num_channels: 3
+    image_size: 224
+    patch_size: 14                  # (224/14)^2 = 256 patches/image
+    layer_norm_eps: 1e-6
+    attention_dropout: 0.0
+    num_image_tokens: 2048          # 8 images × 256 patches
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+  use_quantize: ${quantize}
+  use_lora: ${lora}
+
+# ==================== Vision Projector ====================
+vision_projector:
+  _target_: src.model.paligemma.siglip.PaliGemmaMultiModalProjector
+  config:
+    vision_config:
+      hidden_size: 1152
+      projection_dim: 2048
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+  use_quantize: ${quantize}
+  use_lora: ${lora}
+
+# ==================== Joint Model (Transformer) ====================
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 18
+    num_attention_heads: 8
+    num_key_value_heads: 1
+    head_dim: 256
+    max_position_embeddings: 8192
+    rms_norm_eps: 1e-6
+    rope_theta: 10000.0
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}

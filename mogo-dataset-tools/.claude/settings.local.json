@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import rosbag\")",
+      "Bash(echo \"exit: $?\")",
+      "Bash(pip3 show:*)",
+      "Read(//opt/**)",
+      "Bash(pip3 list:*)",
+      "Bash(conda list:*)",
+      "Bash(python3 -c \"import rosbags; help\\(rosbags\\)\")",
+      "Bash(python3 -c \"from rosbags.rosbag1 import Reader; help\\(Reader\\)\")",
+      "Bash(python3:*)",
+      "Bash(find . -path */common/localization*)",
+      "Bash(bash general_json.sh)",
+      "Bash(head -10 echo \"---\" python3 -c \":*)"
+    ]
+  }
+}

@@ -214,6 +214,18 @@ class DrivePiZero(nn.Module, NoSyncBase):
 
         from safetensors import safe_open
 
+        def assign_pretrained_tensor(state_dict, key, tensor):
+            if key in state_dict:
+                state_dict[key] = tensor
+                return True
+            for suffix in (".weight", ".bias"):
+                if key.endswith(suffix):
+                    base_key = f"{key[:-len(suffix)]}.base_layer{suffix}"
+                    if base_key in state_dict:
+                        state_dict[base_key] = tensor
+                        return True
+            return False
+
         # load tensors from files
         safetensors_files = glob.glob(
             os.path.join(self.cfg.pretrained_model_path, "*.safetensors")
@@ -229,7 +241,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         for k, v in tensors.items():
             if "embed_tokens" in k:
                 new_key = k.replace("language_model.model.embed_tokens.", "")
-                embed_tokens_state_dict[new_key] = v
+                assign_pretrained_tensor(embed_tokens_state_dict, new_key, v)
         self.embed_tokens.load_state_dict(embed_tokens_state_dict, strict=True)
         log.info("Loaded pre-trained weights for embed tokens")
 
@@ -238,7 +250,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         for k, v in tensors.items():
             if "vision_tower" in k:
                 new_key = k.replace("vision_tower.", "")
-                vision_tower_state_dict[new_key] = v
+                assign_pretrained_tensor(vision_tower_state_dict, new_key, v)
         self.vision_tower.load_state_dict(vision_tower_state_dict, strict=True)
         log.info("Loaded pre-trained weights for vision tower")
 
@@ -247,27 +259,21 @@ class DrivePiZero(nn.Module, NoSyncBase):
         for k, v in tensors.items():
             if "multi_modal_projector" in k:
                 new_key = k.replace("multi_modal_projector.", "")
-                multi_modal_projector_state_dict[new_key] = v
+                assign_pretrained_tensor(
+                    multi_modal_projector_state_dict, new_key, v
+                )
         self.multi_modal_projector.load_state_dict(
             multi_modal_projector_state_dict, strict=True
         )
         log.info("Loaded pre-trained weights for projector")
 
-        # load lm --- do not change any lora weights
+        # load lm --- keep LoRA weights initialized while filling base weights
         joint_model_state_dict = self.joint_model.state_dict()
-        lora_keys = []
-        for key in (
-            joint_model_state_dict.keys()
-        ):  # avoid RuntimeError: OrderedDict mutated during iteration
-            if "lora_" in key:
-                lora_keys.append(key)
-        for key in lora_keys:
-            del joint_model_state_dict[key]
         for k, v in tensors.items():
             if "language_model.model" in k:
                 new_key = k.replace("language_model.model.", "mixtures.vlm.")
-                joint_model_state_dict[new_key] = v
-        self.joint_model.load_state_dict(joint_model_state_dict, strict=False)
+                assign_pretrained_tensor(joint_model_state_dict, new_key, v)
+        self.joint_model.load_state_dict(joint_model_state_dict, strict=True)
         log.info("Loaded pre-trained weights for lm part of the joint model")
 
     def _check_gemma_unused_parameter_by_name(self, name: str) -> bool:
@@ -302,7 +308,11 @@ class DrivePiZero(nn.Module, NoSyncBase):
         total = 0
 
         def _wrap(module, attr_name):
+            if isinstance(module, LoRALinear):
+                return 0
             original = getattr(module, attr_name)
+            if isinstance(original, LoRALinear):
+                return 0
             if isinstance(original, nn.Linear):
                 setattr(module, attr_name, LoRALinear(
                     original, r=r, lora_alpha=lora_alpha,
@@ -1117,3 +1127,4 @@ if __name__ == "__main__":
         print("Final action values:", actions)
     print("Time taken:", time.time() - start_time)
     print("============================\n\n")
+    

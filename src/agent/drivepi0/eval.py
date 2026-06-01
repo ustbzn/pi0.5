@@ -43,6 +43,7 @@ class DrivePiZeroEvalAgent:
         # 日志目录（由 Hydra 配置指定，一般是 logs/eval/...）
         self.log_dir = cfg.log_dir
         self.config = cfg
+        self.state_only_for_action = cfg.get("state_only_for_action", False)
         # 是否保存轨迹数据（用于后续可视化）
         self.save_trajectories = cfg.get("save_trajectories", False)
         if self.save_trajectories:
@@ -104,22 +105,31 @@ class DrivePiZeroEvalAgent:
         )
         # 多阈值列表，比如 [0.05, 0.1, 0.2, 0.3, 0.5]
         self.eval_thresholds = cfg.eval_thresholds
+        self.normalize = Normalize(
+            cfg.data.statistics_path,
+            norm_mode=cfg.data.get("norm_mode", cfg.get("norm_mode", "percentile")),
+        )
         
         # ------------------------------
         # 3) 准备 tokenizer / VLAProcessor，将图像+文本打包成模型输入
         # ------------------------------
-        # 文本 tokenizer（与预训练模型保持一致）
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            cfg.pretrained_model_path, padding_side="right"
-        )
-        # VLAProcessor：封装了图像 + 文本 -> token 序列 的预处理逻辑，
-        # 会输出 input_ids / pixel_values / attention_mask 等
-        self.processor = VLAProcessor(
-            self.tokenizer,
-            num_image_tokens=cfg.vision.config.num_image_tokens,
-            max_seq_len=cfg.max_seq_len,
-            tokenizer_padding=cfg.tokenizer_padding,
-        )
+        if self.state_only_for_action:
+            self.tokenizer = None
+            self.processor = None
+            log.info("Strict state-only enabled; skipping VLAProcessor initialization.")
+        else:
+            # 文本 tokenizer（与预训练模型保持一致）
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                cfg.pretrained_model_path, padding_side="right"
+            )
+            # VLAProcessor：封装了图像 + 文本 -> token 序列 的预处理逻辑，
+            # 会输出 input_ids / pixel_values / attention_mask 等
+            self.processor = VLAProcessor(
+                self.tokenizer,
+                num_image_tokens=cfg.vision.config.num_image_tokens,
+                max_seq_len=cfg.max_seq_len,
+                tokenizer_padding=cfg.tokenizer_padding,
+            )
         print('Agent done')
 
     def run(self):
@@ -142,6 +152,60 @@ class DrivePiZeroEvalAgent:
         # 累计 L1 / L2 误差（最终会除以 batch 数）
         eval_l1_loss = torch.tensor(0.0, device=self.device)
         eval_l2_loss = torch.tensor(0.0, device=self.device)
+
+        def build_vlm_images(batch):
+            camera_mode = self.config.get("camera_mode", "front_history_2")
+            if camera_mode in ("front_history_2", "b2d_front_history_2"):
+                image_specs = [
+                    ("image_front", "current front view"),
+                    ("image_front_time", "previous front view"),
+                ]
+            elif camera_mode in ("b2d_surround_history_12", "surround_history_12"):
+                image_specs = [
+                    ("image_front", "current front view"),
+                    ("image_front_left", "current front-left view"),
+                    ("image_front_right", "current front-right view"),
+                    ("image_back", "current rear view"),
+                    ("image_back_left", "current rear-left view"),
+                    ("image_back_right", "current rear-right view"),
+                    ("image_front_time", "previous front view"),
+                    ("image_front_left_time", "previous front-left view"),
+                    ("image_front_right_time", "previous front-right view"),
+                    ("image_back_time", "previous rear view"),
+                    ("image_back_left_time", "previous rear-left view"),
+                    ("image_back_right_time", "previous rear-right view"),
+                ]
+            elif camera_mode in ("b2d_surround_current_6", "surround_current_6"):
+                image_specs = [
+                    ("image_front", "current front view"),
+                    ("image_front_left", "current front-left view"),
+                    ("image_front_right", "current front-right view"),
+                    ("image_back", "current rear view"),
+                    ("image_back_left", "current rear-left view"),
+                    ("image_back_right", "current rear-right view"),
+                ]
+            elif camera_mode in ("mogo_8", "surround_history_8"):
+                image_specs = [
+                    ("image_front", "current front view"),
+                    ("image_right", "current right view"),
+                    ("image_left", "current left view"),
+                    ("image_back", "current rear view"),
+                    ("image_front_time", "previous front view"),
+                    ("image_right_time", "previous right view"),
+                    ("image_left_time", "previous left view"),
+                    ("image_back_time", "previous rear view"),
+                ]
+            else:
+                raise ValueError(f"Unsupported camera_mode: {camera_mode}")
+
+            image_list = []
+            cam_labels = []
+            for key, label in image_specs:
+                img = batch[key]
+                img = einops.rearrange(img, "B H W C -> B C H W")
+                image_list.append(img.unsqueeze(1))
+                cam_labels.append(label)
+            return torch.cat(image_list, dim=1), cam_labels
         
         # ============================================================
         # 内部函数：对一个 batch 做预处理，转成模型期望的输入格式
@@ -162,43 +226,58 @@ class DrivePiZeroEvalAgent:
               split_mask: 是否将 full causal mask 分拆成 image_text_proprio_mask / action_mask
               sample_fm_time: 是否采样 flow matching 时间 t（只在训练用，这里一般为 False）
             """
-            images_front = batch["image_front"]                 # 前视当前帧
-            images_front_history = batch["image_front_time"]    # 前视历史帧
-            images_back = batch["image_back"]                   # 后视图（暂未拼接入模型，但保留以便未来修改）
-            # 当前 batch 大小
-            batch_size = images_front.shape[0]
             # 状态（proprio）和未来轨迹（actions）
             state = batch["state"]
             # 原始 shape 为 (B, 1, horizon, action_dim)，这里去掉冗余的时间维度
             trajectory = batch["trajectory"].squeeze(1)  # remove the time dimension
             # 文本描述/指令
             texts = batch["language_instruction"]
-            # =============================
-            # 图像预处理：BHWC -> BCHW，再加上“帧维度”
-            # =============================
-            # 前视当前帧: (B, H, W, C) -> (B, C, H, W)
-            images_front = einops.rearrange(images_front, "B H W C -> B C H W")  # remove cond_steps dimension
-            # 在第 1 维增加帧维度 => (B, 1, C, H, W)
-            images_front = images_front.unsqueeze(1)
-            
-            # 前视历史帧: (B, H, W, C) -> (B, C, H, W) -> (B, 1, C, H, W)
-            images_front_history = einops.rearrange(images_front_history, "B H W C -> B C H W")  # remove cond_steps dimension
-            images_front_history = images_front_history.unsqueeze(1)
 
-            # 后视图: (B, H, W, C) -> (B, C, H, W) -> (B, 1, C, H, W)
-            images_back = einops.rearrange(images_back, "B H W C -> B C H W")  # remove cond_steps dimension
-            images_back = images_back.unsqueeze(1)
-            
-            # 如需三路图像一起送入模型，可以用下面这行（目前被注释掉）：
-            # images = torch.cat((images_front, images_front_history, images_back), dim=1)
-            # 当前只使用前视当前帧 + 历史帧，共 2 帧
-            images = torch.cat((images_front, images_front_history), dim=1)
+            if self.state_only_for_action:
+                batch_size = state.shape[0]
+                (
+                    causal_mask,
+                    vlm_position_ids,
+                    state_position_ids,
+                    action_position_ids,
+                ) = self.model.build_state_only_causal_mask_and_position_ids(
+                    batch_size=batch_size,
+                    device=state.device,
+                    dtype=self.dtype,
+                )
+
+                inputs = {
+                    "input_ids": torch.empty((batch_size, 0), dtype=torch.long),
+                    "pixel_values": torch.empty((0,), dtype=self.dtype),
+                    "vlm_position_ids": vlm_position_ids,
+                    "proprio_position_ids": state_position_ids,
+                    "action_position_ids": action_position_ids,
+                    "proprios": state.to(self.dtype),
+                    "actions": trajectory.to(self.dtype),
+                }
+
+                if split_mask:
+                    state_mask, action_mask = self.model.split_full_mask_into_submasks(
+                        causal_mask
+                    )
+                    inputs["image_text_proprio_mask"] = state_mask
+                    inputs["action_mask"] = action_mask
+                else:
+                    inputs["causal_mask"] = causal_mask
+
+                if sample_fm_time:
+                    raise RuntimeError("Evaluation does not support sampling flow time.")
+
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                return inputs
+
+            images, cam_labels = build_vlm_images(batch)
 
             # VLAProcessor 负责把 (文本, 多帧图像) 转成模型的多模态输入：
             #   - input_ids
             #   - pixel_values
             #   - attention_mask
-            model_inputs = self.processor(text=texts, images=images)
+            model_inputs = self.processor(text=texts, images=images, cam_labels=cam_labels)
 
             # =======================================
             # 构造轨迹的 causal_mask 和 position_ids
@@ -267,7 +346,7 @@ class DrivePiZeroEvalAgent:
             #       acc_t = ( |pred - gt| < t 的样本/点 比例 )
             eval_accuracy += get_action_accuracy(gt_trajectory, preds, self.eval_thresholds)
             # 4) 使用 Normalize 单例，将预测/真实轨迹从 [-1,1] 反归一化回真实坐标（米等物理单位）
-            normalize = Normalize.get_instance('statistics.json')
+            normalize = self.normalize
             pred_trajectory = []
             label_trajectory = []
 
@@ -293,9 +372,9 @@ class DrivePiZeroEvalAgent:
                 label = label.unsqueeze(0)
                 label_trajectory.append(label)
             
-            # 拼成 [B, horizon, 2]
-            pred_trajectory = torch.cat(pred_trajectory, dim=0)
-            label_trajectory = torch.cat(label_trajectory, dim=0)
+            # 拼成 [B, horizon, 2]，指标计算和 NumPy 保存统一使用 float32。
+            pred_trajectory = torch.cat(pred_trajectory, dim=0).to(torch.float32)
+            label_trajectory = torch.cat(label_trajectory, dim=0).to(torch.float32)
             cnt += 1
             # 5) 在真实坐标系下计算 L1 / L2 损失（每个 batch 得到一个平均误差，再累加）
             eval_l1_loss += torch.nn.functional.l1_loss(pred_trajectory, label_trajectory)
@@ -304,8 +383,8 @@ class DrivePiZeroEvalAgent:
             # 6) 保存轨迹数据（用于后续可视化）
             if self.save_trajectories:
                 # 转换为numpy数组（CPU上）
-                pred_traj_np = pred_trajectory.cpu().numpy()  # [B, horizon, 2]
-                gt_traj_np = label_trajectory.cpu().numpy()    # [B, horizon, 2]
+                pred_traj_np = pred_trajectory.detach().cpu().numpy()  # [B, horizon, 2]
+                gt_traj_np = label_trajectory.detach().cpu().numpy()    # [B, horizon, 2]
                 
                 # 存储轨迹数据
                 self.all_pred_trajectories.append(pred_traj_np)

@@ -1,0 +1,168 @@
+# ============================================================================
+# 评测：B2D Action VLM 模式 (VLM + action expert)
+# ============================================================================
+# 配置说明:
+#   - state_only_for_action: False → 加载前向当前帧 + 前向上一帧图像
+#   - camera_mode: b2d_front_history_2 → 对齐 his_image_front，并由当前帧路径回推上一帧
+#   - 数据集: /pcpt/pcpt/data/VLA/MOGO/b2d_action
+#   - horizon_steps: 20 → 对齐新 B2D action 数据集
+#   - checkpoint_path 需要在运行时替换为 frozen_vlm 实验 checkpoint
+# ============================================================================
+
+hydra:
+  run:
+    dir: ${log_dir}
+
+# 评测入口类
+_target_: src.agent.drivepi0.eval.DrivePiZeroEvalAgent
+
+# ==================== 路径配置 ====================
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi
+dataset_dir: /pcpt/pcpt/data/VLA/MOGO/b2d_action_hisTraj
+log_dir: ${oc.env:LOG_DIR}/eval/${name}/${now:%Y-%m-%d}_${now:%H-%M}_fair_b2d_front_history_histraj
+
+# ==================== 基本设置 ====================
+name: drive-pi0
+device: cuda
+gpu_id: 0
+n_nodes: 1
+seed: 42
+pretrained_model_path: /D2/NXT/vlm/miaobinqi/models/paligemma-3b-pt-224
+checkpoint_path: /path/to/front_history_histraj/checkpoint.pt
+
+# ==================== 模型模式 ====================
+state_only_for_action: False
+camera_mode: b2d_front_history_2
+action_expert_adaptive_mode:
+quantize: False
+lora: False
+lora_r: 32
+lora_dropout: 0.05
+use_bf16: True
+use_torch_compile: True
+
+# ==================== 数据集 ====================
+data:
+  statistics_path: ${dataset_dir}/b2d_statistics.json
+  use_fixed_images: False
+  work_dir: ${dataset_dir}
+  dynamic_dir: .
+  fixed_dir: b2d_fixed_camera
+  split: val
+  num_of_action_experts: 13
+  shuffle_buffer_size: 200000
+  norm_mode: ${norm_mode}
+  use_his_trajectory: True
+  state_frame_index:
+  nav_onehot: False
+  state_only: ${state_only_for_action}
+  image_augment: False
+  camera_mode: ${camera_mode}
+
+# ==================== 评测参数 ====================
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+device_batch_size: 32
+num_workers: 6
+flow_sampling: beta
+num_inference_steps: 10
+final_action_clip_value: 1.0
+debug: False
+save_trajectories: True
+norm_mode: percentile
+
+# ==================== 序列维度 ====================
+cond_steps: 5
+horizon_steps: 20
+action_dim: 2
+proprio_dim: 12
+state_dim: ${proprio_dim}
+max_seq_len: 600
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+# ==================== Mixture 配置 ====================
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 16384
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+time_hidden_size: 256
+
+# ==================== Tokenizer ====================
+image_token_index: 257152
+vocab_size: 257216
+pad_token_id: 0
+
+# ==================== Vision (SigLIP) ====================
+vision:
+  _target_: src.model.paligemma.siglip.SiglipVisionModel
+  config:
+    hidden_size: 1152
+    intermediate_size: 4304
+    num_hidden_layers: 27
+    num_attention_heads: 16
+    num_channels: 3
+    image_size: 224
+    patch_size: 14
+    layer_norm_eps: 1e-6
+    attention_dropout: 0.0
+    num_image_tokens: 512
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+  use_quantize: ${quantize}
+  use_lora: ${lora}
+
+# ==================== Vision Projector ====================
+vision_projector:
+  _target_: src.model.paligemma.siglip.PaliGemmaMultiModalProjector
+  config:
+    vision_config:
+      hidden_size: 1152
+      projection_dim: 2048
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+  use_quantize: ${quantize}
+  use_lora: ${lora}
+
+# ==================== Joint Model (Transformer) ====================
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 18
+    num_attention_heads: 8
+    num_key_value_heads: 1
+    head_dim: 256
+    max_position_embeddings: 8192
+    rms_norm_eps: 1e-6
+    rope_theta: 10000.0
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}

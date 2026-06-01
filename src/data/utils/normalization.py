@@ -63,10 +63,10 @@ class Normalize:
         # 历史轨迹参数（可选）
         his_x = pct.get("his_x")
         his_y = pct.get("his_y")
-        self.his_x_01 = his_x[0] if his_x else 0.0
-        self.his_x_99 = his_x[1] if his_x else 1.0
-        self.his_y_01 = his_y[0] if his_y else 0.0
-        self.his_y_99 = his_y[1] if his_y else 1.0
+        self.his_x_01 = his_x[0] if his_x else -abs(self.fur_x_99)
+        self.his_x_99 = his_x[1] if his_x else 0.0
+        self.his_y_01 = his_y[0] if his_y else self.fur_y_01
+        self.his_y_99 = his_y[1] if his_y else self.fur_y_99
 
         # navigation_id 参数（可选）
         nav = pct.get("navigation_id")
@@ -164,6 +164,46 @@ class Normalize:
             return x[:, np.newaxis]
         return x
 
+    def _prepare_history_xy(self, all_data, target_len: int):
+        origin_x_norm = float(self._normalize_by_mode(
+            np.array(0.0), self.his_x_01, self.his_x_99, self.his_x_min, self.his_x_max
+        ))
+        origin_y_norm = float(self._normalize_by_mode(
+            np.array(0.0), self.his_y_01, self.his_y_99, self.his_y_min, self.his_y_max
+        ))
+
+        if "his_x" in all_data and "his_y" in all_data:
+            his_x_raw = np.asarray(all_data["his_x"], dtype=np.float32).reshape(-1)
+            his_y_raw = np.asarray(all_data["his_y"], dtype=np.float32).reshape(-1)
+            hist_len = min(his_x_raw.shape[0], his_y_raw.shape[0])
+            his_x = self._normalize_by_mode(
+                his_x_raw[:hist_len], self.his_x_01, self.his_x_99, self.his_x_min, self.his_x_max
+            )
+            his_y = self._normalize_by_mode(
+                his_y_raw[:hist_len], self.his_y_01, self.his_y_99, self.his_y_min, self.his_y_max
+            )
+            his_traj = np.stack([his_x, his_y], axis=1)
+        elif "his_trajectory" in all_data:
+            his_traj_raw = np.asarray(all_data["his_trajectory"], dtype=np.float32)
+            # his_trajectory 存储顺序为 [y, x]，所以 [:,0]=y, [:,1]=x
+            his_y = self._normalize_by_mode(
+                his_traj_raw[:, 0], self.his_y_01, self.his_y_99, self.his_y_min, self.his_y_max
+            )
+            his_x = self._normalize_by_mode(
+                his_traj_raw[:, 1], self.his_x_01, self.his_x_99, self.his_x_min, self.his_x_max
+            )
+            his_traj = np.stack([his_x, his_y], axis=1)
+        else:
+            return np.full((target_len, 2), [origin_x_norm, origin_y_norm], dtype=np.float32)
+
+        if his_traj.shape[0] < target_len:
+            pad_len = target_len - his_traj.shape[0]
+            pad = np.full((pad_len, 2), [origin_x_norm, origin_y_norm], dtype=np.float32)
+            his_traj = np.concatenate([his_traj, pad], axis=0)
+        elif his_traj.shape[0] > target_len:
+            his_traj = his_traj[-target_len:]
+        return his_traj.astype(np.float32)
+
     # -------- 对外接口：state / traj / infer_traj --------
     def prepare_state(
         self,
@@ -173,69 +213,97 @@ class Normalize:
         state_frame_index: Optional[int] = None,
     ):
         """根据当前模式对状态进行归一化，支持 nav_onehot / use_his_trajectory / state_frame_index"""
-        # his_speed: (N,3) -> 取前2维 (y,x)，丢弃 dim2（恒为0）
-        his_speed = self._ensure_2d(self._normalize_by_mode(
-            np.asarray(all_data["his_speed"])[:, :2], self.speed_01, self.speed_99, self.speed_min, self.speed_max
-        ))
-        # his_acceleration: (N,3) -> 取前2维 (y,x)，丢弃 dim2
-        his_acceleration = self._ensure_2d(self._normalize_by_mode(
-            np.asarray(all_data["his_acceleration"])[:, :2],
-            self.acceleration_01,
-            self.acceleration_99,
-            self.acceleration_min,
-            self.acceleration_max,
-        ))
-        # his_angular_velocity: (N,3) -> 仅取 dim2 (yaw)，dim0/dim1 恒为0
-        his_angular_velocity = self._ensure_2d(self._normalize_by_mode(
-            np.asarray(all_data["his_angular_velocity"])[:, 2:3],
-            self.angular_velocity_01,
-            self.angular_velocity_99,
-            self.angular_velocity_min,
-            self.angular_velocity_max,
-        ))
-        his_theta = self._ensure_2d(self._normalize_by_mode(
-            np.asarray(all_data["his_theta"]), self.theta_01, self.theta_99, self.theta_min, self.theta_max
-        ))
+        his_speed_raw = np.asarray(all_data["his_speed"])
 
-        parts = [his_speed, his_acceleration, his_angular_velocity, his_theta]
+        if his_speed_raw.ndim == 1 and "x_command_far" in all_data and "y_command_far" in all_data:
+            # 旧 Bench2Drive/DriveMoE 格式：
+            # speed(1) + acceleration(3) + angular_velocity(3) + theta(1)
+            # + far command x/y(2) = state_dim 10。
+            his_speed = self._ensure_2d(self._normalize_by_mode(
+                his_speed_raw, self.speed_01, self.speed_99, self.speed_min, self.speed_max
+            ))
+            his_acceleration = self._ensure_2d(self._normalize_by_mode(
+                np.asarray(all_data["his_acceleration"]),
+                self.acceleration_01,
+                self.acceleration_99,
+                self.acceleration_min,
+                self.acceleration_max,
+            ))
+            his_angular_velocity = self._ensure_2d(self._normalize_by_mode(
+                np.asarray(all_data["his_angular_velocity"]),
+                self.angular_velocity_01,
+                self.angular_velocity_99,
+                self.angular_velocity_min,
+                self.angular_velocity_max,
+            ))
+            his_theta = self._ensure_2d(self._normalize_by_mode(
+                np.asarray(all_data["his_theta"]), self.theta_01, self.theta_99, self.theta_min, self.theta_max
+            ))
+            target_far_x = self._ensure_2d(self._normalize_by_mode(
+                np.asarray(all_data["x_command_far"]),
+                self.target_far_x_01,
+                self.target_far_x_99,
+                self.target_far_x_min,
+                self.target_far_x_max,
+            ))
+            target_far_y = self._ensure_2d(self._normalize_by_mode(
+                np.asarray(all_data["y_command_far"]),
+                self.target_far_y_01,
+                self.target_far_y_99,
+                self.target_far_y_min,
+                self.target_far_y_max,
+            ))
+            parts = [
+                his_speed,
+                his_acceleration,
+                his_angular_velocity,
+                his_theta,
+                target_far_x,
+                target_far_y,
+            ]
+            if use_his_trajectory:
+                parts.append(self._prepare_history_xy(all_data, target_len=his_theta.shape[0]))
+        else:
+            # MOGO/Naviv2 格式：speed/acceleration 取平面 2 维，yaw rate 取 z 轴。
+            his_speed = self._ensure_2d(self._normalize_by_mode(
+                his_speed_raw[:, :2], self.speed_01, self.speed_99, self.speed_min, self.speed_max
+            ))
+            his_acceleration = self._ensure_2d(self._normalize_by_mode(
+                np.asarray(all_data["his_acceleration"])[:, :2],
+                self.acceleration_01,
+                self.acceleration_99,
+                self.acceleration_min,
+                self.acceleration_max,
+            ))
+            his_angular_velocity = self._ensure_2d(self._normalize_by_mode(
+                np.asarray(all_data["his_angular_velocity"])[:, 2:3],
+                self.angular_velocity_01,
+                self.angular_velocity_99,
+                self.angular_velocity_min,
+                self.angular_velocity_max,
+            ))
+            his_theta = self._ensure_2d(self._normalize_by_mode(
+                np.asarray(all_data["his_theta"]), self.theta_01, self.theta_99, self.theta_min, self.theta_max
+            ))
 
-        # 历史轨迹（可选）
-        if use_his_trajectory:
-            his_traj = all_data.get("his_trajectory")
-            # 当前帧原点 (0, 0) 在归一化空间中的值，用于补齐
-            origin_x_norm = float(self._normalize_by_mode(
-                np.array(0.0), self.his_x_01, self.his_x_99, self.his_x_min, self.his_x_max))
-            origin_y_norm = float(self._normalize_by_mode(
-                np.array(0.0), self.his_y_01, self.his_y_99, self.his_y_min, self.his_y_max))
-            if his_traj is not None:
-                his_traj = np.asarray(his_traj, dtype=np.float32)
-                # his_trajectory 存储顺序为 [y, x]，所以 [:,0]=y, [:,1]=x
-                his_y = self._normalize_by_mode(his_traj[:, 0], self.his_y_01, self.his_y_99, self.his_y_min, self.his_y_max)
-                his_x = self._normalize_by_mode(his_traj[:, 1], self.his_x_01, self.his_x_99, self.his_x_min, self.his_x_max)
-                his_traj = np.stack([his_x, his_y], axis=1)
-                target_len = his_theta.shape[0]
-                if his_traj.shape[0] < target_len:
-                    pad_len = target_len - his_traj.shape[0]
-                    pad = np.full((pad_len, 2), [origin_x_norm, origin_y_norm], dtype=np.float32)
-                    his_traj = np.concatenate([his_traj, pad], axis=0)
-                elif his_traj.shape[0] > target_len:
-                    his_traj = his_traj[-target_len:]
-                parts.append(his_traj)
-            else:
-                parts.append(np.full((his_theta.shape[0], 2), [origin_x_norm, origin_y_norm], dtype=np.float32))
+            parts = [his_speed, his_acceleration, his_angular_velocity, his_theta]
 
-        # navigation_id（可选）
-        if nav_onehot and "navigation_id" in all_data:
-            parts.append(self._nav_id_to_onehot(np.asarray(all_data["navigation_id"])))
-        elif "navigation_id" in all_data:
-            navigation_id = self._normalize_by_mode(
-                np.asarray(all_data["navigation_id"]),
-                self.nav_id_01,
-                self.nav_id_99,
-                self.nav_id_min,
-                self.nav_id_max,
-            )
-            parts.append(self._ensure_2d(navigation_id))
+            # 历史轨迹（可选）
+            if use_his_trajectory:
+                parts.append(self._prepare_history_xy(all_data, target_len=his_theta.shape[0]))
+
+            # navigation_id（可选）
+            if nav_onehot and "navigation_id" in all_data:
+                parts.append(self._nav_id_to_onehot(np.asarray(all_data["navigation_id"])))
+            elif "navigation_id" in all_data:
+                navigation_id = self._normalize_by_mode(
+                    np.asarray(all_data["navigation_id"]),
+                    self.nav_id_01,
+                    self.nav_id_99,
+                    self.nav_id_min,
+                    self.nav_id_max,
+                )
+                parts.append(self._ensure_2d(navigation_id))
 
         state_np = np.concatenate(parts, axis=1)
 
