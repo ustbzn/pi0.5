@@ -40,10 +40,10 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 GPU_ID="${GPU_ID:-0}"
 
 # 0514 训练产物 checkpoint。训练未保存到该 step 前，脚本会提前报错退出。
-CHECKPOINT_PATH="${CHECKPOINT_PATH:-${PROJECT_DIR}/logs/train/drive-pi0/2026-05-14_20-56_qwen3_hdmap_all_features_8gpu/checkpoint/step37400.pt}"
+CHECKPOINT_PATH="${CHECKPOINT_PATH:-${PROJECT_DIR}/logs/train/drive-pi0/2026-06-03_00-29_qwen3_video_5frame_trainvlm_8gpu/checkpoint/step18700.pt}"
 
 # 由 config/train/DrivePi0/0514_qwen3_hdmap_all_features_8gpu.yaml 提取出的评测配置。
-CONFIG_PATH="${CONFIG_PATH:-${PROJECT_DIR}/config/inference/DrivePi0/0514_qwen3_hdmap_all_features_8gpu.yaml}"
+CONFIG_PATH="${CONFIG_PATH:-${PROJECT_DIR}/config/inference/DrivePi0/0602_qwen3_video_5frame_trainvlm_8gpu.yaml}"
 
 # MOGO naviv2 val 数据目录；inference_mogo_test.py 会遍历其中的 pkl。
 VAL_DATA_DIR="${VAL_DATA_DIR:-/pcpt/pcpt/data/VLA/MOGO/mogo_dataset_worldsim/val}"
