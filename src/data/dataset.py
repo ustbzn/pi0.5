@@ -145,14 +145,20 @@ class TorchDataset(Dataset):
         nav_onehot: bool = False,
         use_his_trajectory: bool = False,
         state_frame_index: Optional[int] = None,
-        use_hdmap_image: bool = False, 
+        use_acceleration: bool = True,
+        use_angular_velocity: bool = True,
+        use_hdmap_image: bool = False,
         use_hdmap_proprio: bool = False, 
         use_hdmap_cnn: bool = False, 
-        cam_image_size: tuple = (224, 224), 
-        hdmap_image_size: tuple = (192, 352), 
-        hdmap_bev_downsample_size: tuple = (48, 90), 
-        hdmap_downsample_mode=None, 
-        hdmap_channel_scale=None, 
+        cam_image_size: tuple = (224, 224),
+        hdmap_image_size: tuple = (192, 352),
+        hdmap_bev_downsample_size: tuple = (48, 90),
+        hdmap_downsample_mode=None,
+        hdmap_channel_scale=None,
+        use_video_input: bool = False,
+        video_frame_offsets=None,
+        video_frame_interval: float = 0.5,
+        image_augment: bool = True,
     ):
         super(TorchDataset, self).__init__()
         self.data_path = data_path
@@ -163,6 +169,8 @@ class TorchDataset(Dataset):
         self.nav_onehot = nav_onehot
         self.use_his_trajectory = use_his_trajectory
         self.state_frame_index = state_frame_index
+        self.use_acceleration = use_acceleration
+        self.use_angular_velocity = use_angular_velocity
         self.use_hdmap_image = use_hdmap_image
         self.use_hdmap_proprio = use_hdmap_proprio
         self.use_hdmap_cnn = use_hdmap_cnn
@@ -171,6 +179,14 @@ class TorchDataset(Dataset):
         self.hdmap_bev_downsample_size = tuple(hdmap_bev_downsample_size)  # (H, W) 方案 C BEV 下采样目标
         self.hdmap_downsample_mode = hdmap_downsample_mode
         self.hdmap_channel_scale = hdmap_channel_scale
+        # video 时序输入：每相机取多帧组成一段 clip
+        self.use_video_input = use_video_input
+        # 帧偏移，单位"帧"(按 video_frame_interval 秒/帧)，从旧到新排序。
+        # 例如 [4,3,2,1,0] = [prev_4, prev_3, prev_2, prev_1, current]。
+        self.video_frame_offsets = list(video_frame_offsets) if video_frame_offsets else [1, 0]
+        self.video_frame_interval = video_frame_interval
+        # 仅训练集做随机增强；val/推理关掉。video 模式下同一 clip 多帧共用 seed。
+        self.image_augment = image_augment
         self.list_data_dict = [f for f in os.listdir(self.data_path) if f.endswith('.pkl')]
 
     def __len__(self):
@@ -276,6 +292,104 @@ class TorchDataset(Dataset):
                     return path
         return None
 
+    # 缓存 {dir: 排序后的(timestamp, path)列表}，避免同一 batch 反复 listdir
+    _frame_dir_cache = {}
+
+    @classmethod
+    def _list_camera_frames(cls, cam_dir):
+        """列出某相机目录下全部帧，返回按时间戳升序的 [(ts, path), ...]。"""
+        cached = cls._frame_dir_cache.get(cam_dir)
+        if cached is not None:
+            return cached
+        frames = []
+        try:
+            for fn in os.listdir(cam_dir):
+                if not fn.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    continue
+                stem = fn.rsplit('.', 1)[0]
+                try:
+                    ts = float(stem)
+                except ValueError:
+                    continue
+                frames.append((ts, os.path.join(cam_dir, fn)))
+        except (FileNotFoundError, NotADirectoryError):
+            frames = []
+        frames.sort(key=lambda x: x[0])
+        cls._frame_dir_cache[cam_dir] = frames
+        return frames
+
+    def _resolve_video_frame_paths(self, all_data, cam_name):
+        """实例包装：用本 dataset 的 offsets / interval 解析某相机帧路径（旧→新）。"""
+        return self.resolve_video_frame_paths(
+            all_data, cam_name, self.video_frame_offsets, self.video_frame_interval
+        )
+
+    @classmethod
+    def resolve_video_frame_paths(cls, all_data, cam_name, video_frame_offsets,
+                                  video_frame_interval):
+        """为某相机解析 video_frame_offsets 对应的帧路径列表（旧→新）。
+
+        训练（TorchDataset 实例）与推理（inference_mogo_test，无实例）共用此逻辑：
+        - offset 0/1/2 直接复用 pkl 已有字段 cam_X / cam_X_prev_1 / cam_X_prev_2；
+        - offset >=3 从 source_image_dir/cam_name 下按时间戳 (current_ts - offset*interval)
+          最近邻检索；
+        - 任一 offset 取不到帧则置 None，由调用方做 edge pad（复制最早可用帧）。
+        """
+        cur_path = cls._pick_image_path(all_data, f'cam_{cam_name}', f'his_cam_{cam_name}')
+        # 当前帧时间戳（用于推算更早历史帧的目标时间）
+        cur_ts = None
+        if cur_path:
+            try:
+                cur_ts = float(os.path.basename(cur_path).rsplit('.', 1)[0])
+            except ValueError:
+                cur_ts = None
+
+        cam_dir = None
+        src_dir = cls._pick_image_path(all_data, 'source_image_dir')
+        if src_dir:
+            cam_dir = os.path.join(src_dir, cam_name)
+
+        paths = []
+        for off in video_frame_offsets:
+            p = None
+            if off == 0:
+                p = cur_path
+            elif off in (1, 2):
+                p = cls._pick_image_path(all_data, f'cam_{cam_name}_prev_{off}')
+            # pkl 字段缺失或 offset>=3：从目录按时间戳最近邻补
+            if p is None and cam_dir and cur_ts is not None:
+                target_ts = cur_ts - off * video_frame_interval
+                frames = cls._list_camera_frames(cam_dir)
+                if frames:
+                    best = min(frames, key=lambda x: abs(x[0] - target_ts))
+                    # 容差：最近邻偏离目标超过半个间隔则认为缺帧
+                    if abs(best[0] - target_ts) <= video_frame_interval:
+                        p = best[1]
+            paths.append(p)
+        return paths
+
+    def _load_camera_video_frames(self, all_data, cam_name, frame_seed):
+        """读取某相机的 video clip，返回 [T, H, W, C] uint8 张量（旧→新）。
+
+        缺帧用最早一个可用帧 edge pad；同一 clip 的所有帧共用 frame_seed，
+        保证随机增强的几何/色彩变换一致，不污染帧间运动信号。
+        """
+        paths = self._resolve_video_frame_paths(all_data, cam_name)
+        # edge pad：用第一个非 None 路径回填所有 None
+        first_valid = next((p for p in paths if p), None)
+        if first_valid is None:
+            return None  # 整段都取不到，交由调用方跳过该样本
+        paths = [p if p else first_valid for p in paths]
+
+        frames = [
+            image_normalization(
+                p, self.cam_image_size,
+                augment=self.image_augment, seed=frame_seed,
+            )
+            for p in paths
+        ]
+        return torch.stack(frames, dim=0)  # [T, H, W, C]
+
     def __getitem__(self, i):
         data_dict = {}
         pkl_data_path = os.path.join(self.data_path, self.list_data_dict[i])
@@ -301,10 +415,24 @@ class TorchDataset(Dataset):
                 use_his_trajectory=self.use_his_trajectory,
                 state_frame_index=self.state_frame_index,
                 use_hdmap_proprio=self.use_hdmap_proprio,
+                use_acceleration=self.use_acceleration,
+                use_angular_velocity=self.use_angular_velocity,
             )
             data_dict['state'] = state
 
-            if 'cam_front' in all_data:
+            # video 时序输入：每相机取一段多帧 clip（旧→新），存为 image_{cam}_frames [T,H,W,C]。
+            # 只负责填充帧；trajectory / hdmap / language / aux 仍走下方统一流程。
+            if self.use_video_input:
+                # 每个 clip 内多帧共用一个 seed（保证增强一致，不污染帧间运动）；
+                # 不同相机用不同 seed（视角本就不同）。val/推理 image_augment=False 时不增强。
+                rng = np.random.RandomState(i)
+                for cam_name in ['front', 'right', 'left', 'back']:
+                    frame_seed = rng.randint(0, 2**31 - 1, size=2).astype(np.int32)
+                    frames = self._load_camera_video_frames(all_data, cam_name, frame_seed)
+                    if frames is None:
+                        return self.__getitem__((i + 1) % len(self))
+                    data_dict[f'image_{cam_name}_frames'] = frames
+            elif 'cam_front' in all_data:
                 cam_key_map = {
                     'front': ('cam_front', 'cam_front_prev_1'),
                     'right': ('cam_right', 'cam_right_prev_1'),
@@ -432,14 +560,20 @@ def prepare_b2d_dataset(
     nav_onehot: bool = False,
     use_his_trajectory: bool = False,
     state_frame_index: Optional[int] = None,
-    use_hdmap_image: bool = False, 
+    use_acceleration: bool = True,
+    use_angular_velocity: bool = True,
+    use_hdmap_image: bool = False,
     use_hdmap_proprio: bool = False, 
     use_hdmap_cnn: bool = False, 
-    cam_image_size: tuple = (224, 224), 
-    hdmap_image_size: tuple = (192, 352), 
-    hdmap_bev_downsample_size: tuple = (48, 90), 
-    hdmap_downsample_mode=None, 
-    hdmap_channel_scale=None, 
+    cam_image_size: tuple = (224, 224),
+    hdmap_image_size: tuple = (192, 352),
+    hdmap_bev_downsample_size: tuple = (48, 90),
+    hdmap_downsample_mode=None,
+    hdmap_channel_scale=None,
+    use_video_input: bool = False,
+    video_frame_offsets=None,
+    video_frame_interval: float = 0.5,
+    image_augment: bool = True,
 ):
     common_kwargs = dict(
         statistics_path=statistics_path,
@@ -448,6 +582,8 @@ def prepare_b2d_dataset(
         nav_onehot=nav_onehot,
         use_his_trajectory=use_his_trajectory,
         state_frame_index=state_frame_index,
+        use_acceleration=use_acceleration,
+        use_angular_velocity=use_angular_velocity,
         use_hdmap_image=use_hdmap_image,
         use_hdmap_proprio=use_hdmap_proprio,
         use_hdmap_cnn=use_hdmap_cnn,
@@ -456,15 +592,22 @@ def prepare_b2d_dataset(
         hdmap_bev_downsample_size=hdmap_bev_downsample_size,
         hdmap_downsample_mode=hdmap_downsample_mode,
         hdmap_channel_scale=hdmap_channel_scale,
+        use_video_input=use_video_input,
+        video_frame_offsets=video_frame_offsets,
+        video_frame_interval=video_frame_interval,
     )
     if use_fixed_images:
         data_path = os.path.join(work_dir, fixed_dir_name)
-        return TorchDataset(data_path=data_path, use_fixed_images=True, **common_kwargs)
+        return TorchDataset(data_path=data_path, use_fixed_images=True,
+                            image_augment=image_augment, **common_kwargs)
     data_path = os.path.join(work_dir, dynamic_dir_name)
     if split == 'train':
         train_data_path = os.path.join(data_path, 'train')
-        return TorchDataset(data_path=os.path.join(data_path, 'train'), use_fixed_images=False, **common_kwargs)
+        # 训练集按配置做随机增强；验证集强制关闭，保证可复现且帧间一致
+        return TorchDataset(data_path=os.path.join(data_path, 'train'), use_fixed_images=False,
+                            image_augment=image_augment, **common_kwargs)
     if split == 'val':
         val_data_path = os.path.join(data_path, 'val')
-        return TorchDataset(data_path=os.path.join(data_path, 'val'), use_fixed_images=False, **common_kwargs)
+        return TorchDataset(data_path=os.path.join(data_path, 'val'), use_fixed_images=False,
+                            image_augment=False, **common_kwargs)
     raise ValueError("split type must be 'train' or 'val'")

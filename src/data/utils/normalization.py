@@ -139,12 +139,14 @@ class Normalize:
             return x[:, np.newaxis]
         return x
 
-    def prepare_state(self, 
-                      all_data, 
-                      nav_onehot: bool = False, 
-                      use_his_trajectory: bool = False, 
+    def prepare_state(self,
+                      all_data,
+                      nav_onehot: bool = False,
+                      use_his_trajectory: bool = False,
                       use_hdmap_proprio: bool = False,
                       state_frame_index: Optional[int] = None,
+                      use_acceleration: bool = True,
+                      use_angular_velocity: bool = True,
     ):
         # his_speed: 兼容 (N,3) 和 (N,) 两种格式
         raw_speed = np.asarray(all_data["his_speed"])
@@ -156,6 +158,7 @@ class Normalize:
             speed_input, self.speed_01, self.speed_99, self.speed_min, self.speed_max
         ))
         # his_acceleration: (N,3) -> 取前2维 (y,x)，丢弃 dim2
+        # use_acceleration=False 时整体不拼入 state（proprio_dim 需同步 -2）
         his_acceleration = self._ensure_2d(self._normalize_by_mode(
             np.asarray(all_data["his_acceleration"])[:, :2],
             self.acceleration_01,
@@ -164,6 +167,7 @@ class Normalize:
             self.acceleration_max,
         ))
         # his_angular_velocity: (N,3) -> 仅取 dim2 (yaw)，dim0/dim1 恒为0
+        # use_angular_velocity=False 时整体不拼入 state（proprio_dim 需同步 -1）
         his_angular_velocity = self._ensure_2d(self._normalize_by_mode(
             np.asarray(all_data["his_angular_velocity"])[:, 2:3],
             self.angular_velocity_01,
@@ -175,7 +179,14 @@ class Normalize:
             np.asarray(all_data["his_theta"]), self.theta_01, self.theta_99, self.theta_min, self.theta_max
         ))
 
-        parts = [his_speed, his_acceleration, his_angular_velocity, his_theta]
+        # 拼接顺序固定（模型按列切片，不靠字段名）：
+        #   his_speed(2) [+ his_acceleration(2)] [+ his_angular_velocity(1)] + his_theta(1) [+ his_trajectory] [+ nav]
+        parts = [his_speed]
+        if use_acceleration:
+            parts.append(his_acceleration)
+        if use_angular_velocity:
+            parts.append(his_angular_velocity)
+        parts.append(his_theta)
 
         if use_his_trajectory:
             his_traj = all_data.get("his_trajectory")

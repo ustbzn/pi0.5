@@ -65,8 +65,22 @@ def concatenate_images(left_image: str, middle_image: str, right_image: str):
     return rgb
 
 
-def image_normalization(path: str, size: Tuple[int, int]):
+def image_normalization(path: str, size: Tuple[int, int], augment: bool = True, seed=None):
+    """读取并缩放图像，可选随机数据增强。
+
+    Args:
+        path: 图像路径
+        size: 目标 (H, W)
+        augment: 是否做随机增强；val/推理或需要保持时序帧间一致时置 False
+        seed: 增强随机种子。传入同一 seed 可让多帧（如同一相机的 video clip）
+              使用【相同】的随机变换，避免帧间几何/色彩错位污染运动信号。
+              形状 [2] 的整型可直接喂 tf stateless 增强；标量会被扩成 [seed, seed]。
+    """
     image = read_resize_encode_image_pytorch(path, size)
+    if not augment:
+        # 直接返回缩放后的原图，不做任何随机扰动
+        return torch.as_tensor(image.numpy().astype(np.uint8))
+
     np_array = image.numpy()
     tf_tensor = tf.convert_to_tensor(np_array)
     image_augment_kwargs = dict(random_resized_crop=dict(scale=[0.8, 1.0], ratio=[0.9, 1.1],),
@@ -82,7 +96,13 @@ def image_normalization(path: str, size: Tuple[int, int]):
                                     "random_hue",
                                 ],
                             )
-    output = augment_image(image=tf_tensor, **image_augment_kwargs)
+    tf_seed = None
+    if seed is not None:
+        if np.isscalar(seed):
+            tf_seed = tf.constant([int(seed), int(seed)], dtype=tf.int32)
+        else:
+            tf_seed = tf.constant(list(seed)[:2], dtype=tf.int32)
+    output = augment_image(image=tf_tensor, seed=tf_seed, **image_augment_kwargs)
     np_image = output.numpy().astype(np.uint8)
     image = torch.as_tensor(np_image)
     return image

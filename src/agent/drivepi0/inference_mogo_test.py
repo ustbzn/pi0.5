@@ -24,6 +24,7 @@ from transformers import AutoTokenizer
 from PIL import Image
 import numpy as np
 from transformers import Qwen3VLProcessor
+from transformers.video_utils import VideoMetadata
 
 from src.model.DrivePi0.drivepi0 import DrivePiZeroInference
 from src.agent.dataset import Bench2DriveDataset
@@ -83,6 +84,9 @@ class DrivePiZeroInferenceAgent:
         self.nav_onehot = cfg.data.get("nav_onehot", False)
         self.use_his_trajectory = cfg.data.get("use_his_trajectory", False)
         self.state_frame_index = cfg.data.get("state_frame_index", None)
+        # 自车状态字段开关：必须与训练 yaml 一致，否则 proprio 维度失配
+        self.use_acceleration = cfg.data.get("use_acceleration", True)
+        self.use_angular_velocity = cfg.data.get("use_angular_velocity", True)
 
         # Diagnostic: zero out his_trajectory at inference (kept here so the switch
         # is per-agent and visible in logs). mask_vlm is handled via cfg override
@@ -103,6 +107,18 @@ class DrivePiZeroInferenceAgent:
         self.hdmap_bev_downsample_size = tuple(cfg.data.get("hdmap_bev_downsample_size", [48, 90]))
         self.hdmap_downsample_mode = cfg.data.get("hdmap_downsample_mode", None)
         self.hdmap_channel_scale = cfg.data.get("hdmap_channel_scale", None)
+
+        # video 时序输入（与训练 yaml 对齐）：每相机一段多帧 clip 走 Qwen3-VL video 路径
+        self.use_video_input = cfg.data.get("use_video_input", False)
+        self.video_frame_offsets = list(cfg.data.get("video_frame_offsets", [4, 3, 2, 1, 0]))
+        self.video_fps = cfg.data.get("video_fps", 2.0)
+        self.video_frame_interval = cfg.data.get("video_frame_interval", 0.5)
+        if self.use_video_input:
+            log.info(
+                f"Video input enabled (inference): {len(self.video_frame_offsets)} frames/clip, "
+                f"offsets={self.video_frame_offsets}, fps={self.video_fps}, "
+                f"interval={self.video_frame_interval}s"
+            )
         print('Agent done')
     
     
@@ -140,6 +156,10 @@ class DrivePiZeroInferenceAgent:
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             trajectory = self.model.infer_action(**inputs)
             return trajectory
+
+        # ===== video 时序输入分支：每相机一段多帧 clip（与训练 _build_video_model_inputs 对齐）=====
+        if self.use_video_input:
+            return self._run_video(data_dict)
 
         # 4 cameras (front, right, left, back) x 2 time steps (current + history) = 8 images
         cam_names = ['front', 'right', 'left', 'back']
@@ -241,7 +261,98 @@ class DrivePiZeroInferenceAgent:
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
         trajectory = self.model.infer_action(**inputs)
         return trajectory
-    
+
+    def _run_video(self, data_dict):
+        """video 时序输入推理：单样本，每相机一段多帧 clip 走 Qwen3-VL video token 路径。
+
+        与训练 DrivePiZeroTrainAgent._build_video_model_inputs 完全对齐：
+        do_sample_frames=False + 显式 VideoMetadata，避免 processor 重采样；
+        position_ids 走 video 专用 3D M-RoPE（每帧 t=1，时序由 prompt 时间戳承载）。
+        """
+        cam_names = ['front', 'right', 'left', 'back']
+        cam_labels = ['front view', 'right view', 'left view', 'rear view']
+
+        state = data_dict["state"].unsqueeze(0)
+        texts = [data_dict["language_instruction"]]
+
+        # 单样本 4 相机 clip → processor 期望的 video 列表（每个 [T,H,W,C] numpy uint8）
+        videos = []
+        video_metadata = []
+        num_frames = data_dict[f'image_{cam_names[0]}_frames'].shape[0]
+        for cam in cam_names:
+            frames_np = data_dict[f'image_{cam}_frames'].cpu().numpy().astype(np.uint8)
+            videos.append(frames_np)
+            h, w = frames_np.shape[1], frames_np.shape[2]
+            video_metadata.append(
+                VideoMetadata(
+                    total_num_frames=num_frames,
+                    fps=self.video_fps,
+                    width=w,
+                    height=h,
+                    duration=num_frames / float(self.video_fps),
+                    video_backend="decord",
+                    frames_indices=list(range(num_frames)),
+                )
+            )
+
+        content = []
+        for label in cam_labels:
+            content.append({"type": "text", "text": f"{label}:"})
+            content.append({"type": "video"})
+        content.append({"type": "text", "text": texts[0]})
+        chat_text = self.processor.apply_chat_template(
+            [{"role": "user", "content": content}],
+            tokenize=False, add_generation_prompt=True,
+        )
+
+        model_inputs = self.processor(
+            text=[chat_text],
+            videos=videos,
+            video_metadata=video_metadata,
+            do_sample_frames=False,
+            return_tensors="pt",
+            padding=self.tokenizer_padding,
+            max_length=self.max_seq_len,
+            truncation=True,
+        ).to(self.device)
+
+        causal_mask, _, state_position_ids, action_position_ids = (
+            self.model.build_causal_mask_and_position_ids(
+                model_inputs["attention_mask"], self.dtype
+            )
+        )
+        empty_image_grid = torch.empty((0, 3), dtype=torch.long, device=self.device)
+        vlm_position_ids = self.model.build_qwen3_vl_position_ids(
+            model_inputs["input_ids"],
+            empty_image_grid,
+            model_inputs["attention_mask"],
+            video_grid_thw=model_inputs["video_grid_thw"],
+        )
+
+        inputs = {
+            "input_ids": model_inputs["input_ids"],
+            "pixel_values": model_inputs["pixel_values_videos"].to(self.dtype),
+            "image_grid_thw": model_inputs["video_grid_thw"],
+            "vlm_position_ids": vlm_position_ids,
+            "proprio_position_ids": state_position_ids,
+            "action_position_ids": action_position_ids,
+            "proprios": state.to(self.dtype),
+        }
+        if self.use_hdmap_cnn and "hdmap_bev_raw" in data_dict:
+            inputs["hdmap_bev"] = data_dict["hdmap_bev_raw"].unsqueeze(0).to(self.device, dtype=self.dtype)
+        if self.use_hdmap_cnn and "hdmap_valid_mask" in data_dict:
+            inputs["hdmap_valid_mask"] = data_dict["hdmap_valid_mask"].reshape(1).to(self.device, dtype=self.dtype)
+
+        image_text_proprio_mask, action_mask = (
+            self.model.split_full_mask_into_submasks(causal_mask)
+        )
+        inputs["image_text_proprio_mask"] = image_text_proprio_mask
+        inputs["action_mask"] = action_mask
+
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        trajectory = self.model.infer_action(**inputs)
+        return trajectory
+
     @log_execution_time(log)
     def load_checkpoint(self, path):
         """从训练 checkpoint 加载完整模型权重"""
@@ -443,23 +554,48 @@ class DrivePiZeroInferenceAgent:
                         state_frame_index=self.state_frame_index,
                         use_his_trajectory=self.use_his_trajectory,
                         use_hdmap_proprio=self.use_hdmap_proprio,
+                        use_acceleration=self.use_acceleration,
+                        use_angular_velocity=self.use_angular_velocity,
                     )
 
                     data_dict = {}
-                    # 4 cameras x 2 time steps = 8 images（与训练一致）
-                    # 新数据格式：当前帧 cam_front / cam_left / cam_right / cam_back
-                    #             上一帧  cam_front_prev_1 / cam_left_prev_1 / cam_right_prev_1 / cam_back_prev_1
-                    cam_key_map = {
-                        'front': ('cam_front',      'cam_front_prev_1'),
-                        'right': ('cam_right',      'cam_right_prev_1'),
-                        'left':  ('cam_left',       'cam_left_prev_1'),
-                        'back':  ('cam_back',       'cam_back_prev_1'),
-                    }
-                    for cam_name, (cur_key, prev_key) in cam_key_map.items():
-                        cam_path = extract_image_path(all_data[cur_key])
-                        data_dict[f'image_{cam_name}'] = image_normalization(cam_path, self.cam_image_size)
-                        cam_time_path = extract_image_path(all_data[prev_key])
-                        data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, self.cam_image_size)
+                    # video 时序输入：每相机一段多帧 clip（旧→新），存为 image_{cam}_frames [T,H,W,C]。
+                    if self.use_video_input:
+                        from src.data.dataset import TorchDataset
+                        skip_sample = False
+                        for cam_name in ['front', 'right', 'left', 'back']:
+                            paths = TorchDataset.resolve_video_frame_paths(
+                                all_data, cam_name,
+                                self.video_frame_offsets, self.video_frame_interval,
+                            )
+                            first_valid = next((p for p in paths if p), None)
+                            if first_valid is None:
+                                skip_sample = True
+                                break
+                            paths = [p if p else first_valid for p in paths]
+                            frames = [
+                                image_normalization(p, self.cam_image_size, augment=False)
+                                for p in paths
+                            ]
+                            data_dict[f'image_{cam_name}_frames'] = torch.stack(frames, dim=0)
+                        if skip_sample:
+                            print(f"[WARNING] {pkl_file.name}: video 帧缺失，跳过该样本")
+                            continue
+                    else:
+                        # 4 cameras x 2 time steps = 8 images（与训练一致）
+                        # 新数据格式：当前帧 cam_front / cam_left / cam_right / cam_back
+                        #             上一帧  cam_front_prev_1 / cam_left_prev_1 / cam_right_prev_1 / cam_back_prev_1
+                        cam_key_map = {
+                            'front': ('cam_front',      'cam_front_prev_1'),
+                            'right': ('cam_right',      'cam_right_prev_1'),
+                            'left':  ('cam_left',       'cam_left_prev_1'),
+                            'back':  ('cam_back',       'cam_back_prev_1'),
+                        }
+                        for cam_name, (cur_key, prev_key) in cam_key_map.items():
+                            cam_path = extract_image_path(all_data[cur_key])
+                            data_dict[f'image_{cam_name}'] = image_normalization(cam_path, self.cam_image_size)
+                            cam_time_path = extract_image_path(all_data[prev_key])
+                            data_dict[f'image_{cam_name}_time'] = image_normalization(cam_time_path, self.cam_image_size)
 
                     # 方案 A: 加载 HDMap BEV 图像
                     if self.use_hdmap_image:
@@ -805,6 +941,8 @@ if __name__ == '__main__':
                 use_his_trajectory=inference_agent.use_his_trajectory,
                 use_hdmap_proprio=inference_agent.use_hdmap_proprio,
                 state_frame_index=getattr(inference_agent, "state_frame_index", None),
+                use_acceleration=getattr(inference_agent, "use_acceleration", True),
+                use_angular_velocity=getattr(inference_agent, "use_angular_velocity", True),
             )
 
             data_dict = {}

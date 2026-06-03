@@ -42,6 +42,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
         self.vocab_size = cfg.vocab_size
         self.pad_token_id = cfg.pad_token_id
         self.image_token_index = cfg.image_token_index
+        self.video_token_id = cfg.get("video_token_id", 151656)
         self.vision_start_token_id = cfg.get("vision_start_token_id", 151652)
         self.use_lm_head = cfg.get("use_lm_head", False)
 
@@ -584,19 +585,38 @@ class DrivePiZero(nn.Module, NoSyncBase):
         input_ids: torch.LongTensor,
         image_grid_thw: torch.LongTensor,
         attention_mask: torch.Tensor,
+        video_grid_thw: Optional[torch.LongTensor] = None,
     ) -> torch.LongTensor:
-        """生成 Qwen3-VL 官方 3D M-RoPE position_ids。
+        """生成 Qwen3-VL 官方 3D M-RoPE position_ids（同时支持 image / video）。
 
-        复刻 Qwen3VLModel.get_rope_index() 的 image 分支。
-        对文本 token: 3 个维度使用相同的递增位置。
-        对图像 token: t=0, h=0..H-1, w=0..W-1 (H=grid_h//merge, W=grid_w//merge)。
+        复刻 Qwen3VLModel.get_rope_index()：
+        - 文本 token：3 个维度使用相同的递增位置。
+        - 图像 token：t=0, h=0..H-1, w=0..W-1 (H=grid_h//merge, W=grid_w//merge)。
+        - 视频 token：Qwen3-VL 用【时间戳文本】(<X.X seconds>) 承载时序，processor 把
+          每帧拆成独立的 <vision_start>...<vision_end> 块。因此先把 video_grid_thw 按 t
+          做 repeat_interleave 展开成"每帧一行"，再令 t=1，使每帧当作独立的 t=1 网格处理
+          （与官方一致：t_index 恒为 0，时序信息不进 position_ids，而由 prompt 时间戳承载）。
+
+        Args:
+            image_grid_thw: [num_images, 3]，无图像时可为空张量。
+            video_grid_thw: [num_videos, 3]，video 模式下由 processor 产出；None 表示纯图像。
 
         Returns:
             position_ids: [3, B, S] — (temporal, height, width) 位置编码
         """
         spatial_merge_size = self.vision_tower.spatial_merge_size
         image_token_id = self.image_token_index
+        video_token_id = self.video_token_id
         vision_start_token_id = self.vision_start_token_id
+
+        # 视频：每帧拆块 + t=1（不改动调用方传入的张量）
+        if video_grid_thw is not None and video_grid_thw.numel() > 0:
+            video_grid_thw = torch.repeat_interleave(
+                video_grid_thw, video_grid_thw[:, 0], dim=0
+            ).clone()
+            video_grid_thw[:, 0] = 1
+        else:
+            video_grid_thw = None
 
         bsz, seq_len = input_ids.shape
         position_ids = torch.ones(
@@ -604,7 +624,7 @@ class DrivePiZero(nn.Module, NoSyncBase):
             dtype=input_ids.dtype, device=input_ids.device,
         )
 
-        image_index = 0
+        image_index, video_index = 0, 0
         for i in range(bsz):
             mask_i = attention_mask[i]
             ids_i = input_ids[i][mask_i == 1]
@@ -613,21 +633,41 @@ class DrivePiZero(nn.Module, NoSyncBase):
             vision_start_indices = torch.argwhere(ids_i == vision_start_token_id).squeeze(1)
             vision_tokens = ids_i[vision_start_indices + 1]
             image_nums = (vision_tokens == image_token_id).sum().item()
+            video_nums = (vision_tokens == video_token_id).sum().item()
 
             llm_pos_ids_list = []
             st = 0
-            remain_images = image_nums
+            remain_images, remain_videos = image_nums, video_nums
 
-            for _ in range(image_nums):
-                ed = input_tokens.index(image_token_id, st)
-                remain_images -= 1
+            for _ in range(image_nums + video_nums):
+                # 找到下一个 image / video 视觉块的起点，取较早者
+                if image_token_id in input_tokens and remain_images > 0:
+                    ed_image = input_tokens.index(image_token_id, st)
+                else:
+                    ed_image = len(input_tokens) + 1
+                if video_token_id in input_tokens and remain_videos > 0:
+                    ed_video = input_tokens.index(video_token_id, st)
+                else:
+                    ed_video = len(input_tokens) + 1
 
-                t, h, w = (
-                    image_grid_thw[image_index][0],
-                    image_grid_thw[image_index][1],
-                    image_grid_thw[image_index][2],
-                )
-                image_index += 1
+                if ed_image < ed_video:
+                    t, h, w = (
+                        image_grid_thw[image_index][0],
+                        image_grid_thw[image_index][1],
+                        image_grid_thw[image_index][2],
+                    )
+                    image_index += 1
+                    remain_images -= 1
+                    ed = ed_image
+                else:
+                    t, h, w = (
+                        video_grid_thw[video_index][0],
+                        video_grid_thw[video_index][1],
+                        video_grid_thw[video_index][2],
+                    )
+                    video_index += 1
+                    remain_videos -= 1
+                    ed = ed_video
 
                 llm_grid_t = t.item()
                 llm_grid_h = h.item() // spatial_merge_size
@@ -911,13 +951,17 @@ class DrivePiZero(nn.Module, NoSyncBase):
             deepstack_feature_lists = vision_output[1] if len(vision_output) > 1 else None
             image_features = image_features.to(dtype)
 
-            image_token_mask = (input_ids == self.image_token_index)
+            # video 模式下视觉占位符是 <|video_pad|>，需与 <|image_pad|> 一并识别。
+            # 二者互斥（一次前向只会有其一），用 OR 兼容两条路径。
+            image_token_mask = (input_ids == self.image_token_index) | (
+                input_ids == self.video_token_id
+            )
             num_masked = image_token_mask.sum().item()
             num_features = image_features.shape[0]
 
             if num_masked != num_features:
                 raise ValueError(
-                    f"<|image_pad|> token数 ({num_masked}) 与视觉特征数 ({num_features}) 不匹配"
+                    f"视觉占位符 token 数 ({num_masked}) 与视觉特征数 ({num_features}) 不匹配"
                 )
 
             final_embedding[image_token_mask] = image_features.to(dtype)

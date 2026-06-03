@@ -14,6 +14,7 @@ from PIL import Image
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch.utils.data.distributed import DistributedSampler
 from transformers import AutoTokenizer, Qwen3VLProcessor
+from transformers.video_utils import VideoMetadata
 
 import swanlab
 # import wandb
@@ -550,6 +551,17 @@ class DrivePiZeroTrainAgent:
         if self.use_hdmap_cnn:
             log.info("HDMap CNN encoder enabled (Plan C): will encode raw BEV into proprio")
 
+        # video 时序输入：每相机一段多帧 clip，走 Qwen3-VL video token 路径
+        self.use_video_input = cfg.data.train.get("use_video_input", False)
+        # 帧偏移（旧→新），默认 [4,3,2,1,0] = prev_4..current；fps 与帧间隔对应
+        self.video_frame_offsets = list(cfg.data.train.get("video_frame_offsets", [4, 3, 2, 1, 0]))
+        self.video_fps = cfg.data.train.get("video_fps", 2.0)
+        if self.use_video_input:
+            log.info(
+                f"Video input enabled: per-camera clip of {len(self.video_frame_offsets)} "
+                f"frames, offsets={self.video_frame_offsets}, fps={self.video_fps}"
+            )
+
     def sample_fm_time(self, bsz: int) -> torch.FloatTensor:
         if self.flow_sampling == "uniform":  # uniform between 0 and 1
             """https://github.com/gle-bellier/flow-matching/blob/main/Flow_Matching.ipynb"""
@@ -614,6 +626,79 @@ class DrivePiZeroTrainAgent:
 
         raise ValueError(f"Unknown eval_map_mode: {mode}")
 
+    def _build_video_model_inputs(self, batch, texts):
+        """把每相机的多帧 clip 组装成 Qwen3-VL video 输入。
+
+        batch 内每相机字段 image_{cam}_frames 形状 [B, T, H, W, C] (uint8)，
+        T = len(video_frame_offsets)（旧→新）。这里按 (sample, camera) flatten 成
+        Qwen3VLProcessor 期望的 video 列表（每个元素 [T,H,W,C] 的 numpy），
+        并显式传 do_sample_frames=False + video_metadata，避免 processor 重采样。
+
+        返回 dict：input_ids / attention_mask / pixel_values_videos / video_grid_thw。
+        token 数由 processor 按 temporal_patch_size=2 自动配对（奇数帧会向上配对），
+        每相机 clip 约 ceil(T/2) * (H/patch/merge) * (W/patch/merge) 个 video token。
+        """
+        cam_names = ['front', 'right', 'left', 'back']
+        cam_labels = ['front view', 'right view', 'left view', 'rear view']
+
+        # 取首个相机确定 batch_size / 帧数
+        clips_bcthwc = batch[f'image_{cam_names[0]}_frames']  # [B, T, H, W, C]
+        batch_size = clips_bcthwc.shape[0]
+        num_frames = clips_bcthwc.shape[1]
+
+        videos = []          # 长度 = batch_size * len(cam_names)，每个 [T,H,W,C] numpy uint8
+        video_metadata = []  # 与 videos 一一对应
+        for b in range(batch_size):
+            for cam in cam_names:
+                frames_np = batch[f'image_{cam}_frames'][b].cpu().numpy().astype(np.uint8)
+                videos.append(frames_np)
+                h, w = frames_np.shape[1], frames_np.shape[2]
+                video_metadata.append(
+                    VideoMetadata(
+                        total_num_frames=num_frames,
+                        fps=self.video_fps,
+                        width=w,
+                        height=h,
+                        duration=num_frames / float(self.video_fps),
+                        video_backend="decord",
+                        frames_indices=list(range(num_frames)),
+                    )
+                )
+
+        # 每个样本：4 相机的 video 占位 + 语义标签，最后接语言指令
+        chat_texts = []
+        for text in texts:
+            content = []
+            for label in cam_labels:
+                content.append({"type": "text", "text": f"{label}:"})
+                content.append({"type": "video"})
+            content.append({"type": "text", "text": text})
+            messages = [{"role": "user", "content": content}]
+            chat_text = self.processor.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            chat_texts.append(chat_text)
+
+        model_inputs = self.processor(
+            text=chat_texts,
+            videos=videos,
+            video_metadata=video_metadata,
+            do_sample_frames=False,  # 已是 pre-sampled 帧，禁止 processor 再按 fps 重采样
+            return_tensors="pt",
+            padding=self.processor_padding,
+            max_length=self.processor_max_length,
+            truncation=True,
+        ).to(self.device)
+
+        return {
+            "input_ids": model_inputs["input_ids"],
+            "attention_mask": model_inputs["attention_mask"],
+            "pixel_values_videos": model_inputs["pixel_values_videos"],
+            "video_grid_thw": model_inputs["video_grid_thw"],
+        }
+
     def run(self):
         timer = Timer()
         train_start_time = time.time()
@@ -674,6 +759,50 @@ class DrivePiZeroTrainAgent:
                 if sample_fm_time:
                     inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
 
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                return inputs
+
+            # ===== video 时序输入分支：每相机一段多帧 clip =====
+            if self.use_video_input:
+                model_inputs = self._build_video_model_inputs(batch, texts)
+                # video 路径：pixel_values_videos / video_grid_thw
+                causal_mask, _vlm_pos_1d, state_position_ids, action_position_ids = (
+                    model.build_causal_mask_and_position_ids(
+                        model_inputs["attention_mask"], self.dtype
+                    )
+                )
+                # 3D M-RoPE：video 分支（每帧独立 t=1 网格，时序由 prompt 时间戳承载）
+                empty_image_grid = torch.empty((0, 3), dtype=torch.long, device=self.device)
+                vlm_position_ids = model.build_qwen3_vl_position_ids(
+                    model_inputs["input_ids"],
+                    empty_image_grid,
+                    model_inputs["attention_mask"],
+                    video_grid_thw=model_inputs["video_grid_thw"],
+                )
+                inputs = {
+                    "input_ids": model_inputs["input_ids"],
+                    "pixel_values": model_inputs["pixel_values_videos"].to(self.dtype),
+                    "image_grid_thw": model_inputs["video_grid_thw"],
+                    "vlm_position_ids": vlm_position_ids,
+                    "proprio_position_ids": state_position_ids,
+                    "action_position_ids": action_position_ids,
+                    "proprios": state.to(self.dtype),
+                    "actions": trajectory.to(self.dtype),
+                }
+                if self.use_hdmap_cnn and "hdmap_bev_raw" in batch:
+                    inputs["hdmap_bev"] = batch["hdmap_bev_raw"].to(self.dtype)
+                if self.use_hdmap_cnn and "hdmap_valid_mask" in batch:
+                    inputs["hdmap_valid_mask"] = batch["hdmap_valid_mask"].to(self.dtype)
+                if split_mask:
+                    image_text_proprio_mask, action_mask = (
+                        model.split_full_mask_into_submasks(causal_mask)
+                    )
+                    inputs["image_text_proprio_mask"] = image_text_proprio_mask
+                    inputs["action_mask"] = action_mask
+                else:
+                    inputs["causal_mask"] = causal_mask
+                if sample_fm_time:
+                    inputs["t"] = self.sample_fm_time(len(texts)).to(self.dtype)
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
                 return inputs
 

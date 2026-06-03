@@ -23,6 +23,8 @@ class Bench2DriveDataset:
             nav_onehot=config.get("nav_onehot", False),
             use_his_trajectory=config.get("use_his_trajectory", False),
             state_frame_index=config.get("state_frame_index", None),
+            use_acceleration=config.get("use_acceleration", True),
+            use_angular_velocity=config.get("use_angular_velocity", True),
             use_hdmap_image=config.get("use_hdmap_image", False),
             use_hdmap_proprio=config.get("use_hdmap_proprio", False),
             use_hdmap_cnn=config.get("use_hdmap_cnn", False),
@@ -31,6 +33,10 @@ class Bench2DriveDataset:
             hdmap_bev_downsample_size=tuple(config.get("hdmap_bev_downsample_size", [48, 90])),
             hdmap_downsample_mode=config.get("hdmap_downsample_mode", None),
             hdmap_channel_scale=config.get("hdmap_channel_scale", None),
+            use_video_input=config.get("use_video_input", False),
+            video_frame_offsets=config.get("video_frame_offsets", None),
+            video_frame_interval=config.get("video_frame_interval", 0.5),
+            image_augment=config.get("image_augment", True),
         )
         self.dataset = dataset
 
