@@ -1,0 +1,308 @@
+# ============================================================================
+# Video 时序输入实验：4 相机 × 5 帧 clip 走 Qwen3-VL video token 路径
+# ============================================================================
+# 配置说明:
+#   - 输入: 4 路相机 (front/right/left/back)，每路一段 5 帧 video clip
+#     (offsets [4,3,2,1,0] = prev_4..current，间隔 0.5s → 等效 2 fps)，
+#     经 Qwen3VLProcessor video 路径编码（temporal_patch_size=2 → 每 clip grid=[3,14,14]）。
+#   - 与 8 图模式区别: 不再拼 current+history 共 8 张静态图，而是每相机一段连续 clip，
+#     时序由 processor 在 prompt 内注入的时间戳承载，position_ids 走 video 专用 3D M-RoPE。
+#   - 视觉必须开启: state_only_for_action=False；首版冻结 VLM (train_vlm=False) 仅验证全链路。
+#   - Token 预算 (cam_image_size=224): 单 clip video_token = 3*14*14/(merge=4) = 147，
+#     4 相机 = 588 video token；加 chat template + 指令文 ~120 + proprio(1) + action(6)。
+#     实测总输入 ~711，留余量设 max_seq_len=896。
+# ============================================================================
+
+defaults:
+  - _self_
+
+hydra:
+  run:
+    dir: ${log_dir}
+
+_target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
+
+# ==================== 路径配置 ====================
+current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/DrivePi_8GPU
+dataset_dir: /pcpt/pcpt/data/VLA/MOGO/mogo_dataset_navi_hdmap
+pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+run_name: ${now:%Y-%m-%d}_${now:%H-%M}_qwen3_video_5frame_8gpu
+log_dir: ${oc.env:LOG_DIR,logs}/train/${name}/${run_name}
+
+# ==================== 基本设置 ====================
+name: drive-pi0
+device: cuda
+n_nodes: 1
+seed: 42
+
+# ==================== 模型加载 ====================
+load_pretrained_weights: True
+resume_checkpoint_path:
+finetune_checkpoint_path:
+
+# ==================== 训练模式 ====================
+train_vlm: False                    # 首版冻结 VLM，先验证 video 全链路；后续可置 True + LoRA
+state_only_for_action: False        # video 输入需要视觉路径，必须 False
+mask_vlm_for_action: False
+action_expert_adaptive_mode:
+use_torch_compile: True             # 只 compile joint_model/action/proprio，跳过 vision_tower
+use_bf16: True
+use_fp16: False
+use_amp: True
+quantize: False
+use_lm_head: False
+
+# ==================== LoRA 配置 ====================
+lora: False
+lora_r: 32
+lora_alpha: 32
+lora_dropout: 0.05
+lora_vlm: False
+lora_vlm_target_modules: [q_proj, k_proj, v_proj, o_proj]
+lora_vlm_mlp: False
+lora_vision: False
+lora_vision_mlp: False
+lora_vision_merger: False
+lora_vision_deepstack_merger: False
+
+# ==================== HDMap 开关 (本实验关闭) ====================
+use_hdmap_image: False
+hdmap_image_size: [352, 192]
+use_hdmap_proprio: False
+use_hdmap_cnn: False
+hdmap_cnn_dim: 32
+hdmap_bev_downsample_size: [96, 180]
+hdmap_downsample_mode:
+  lanes: max
+  lane_links: max
+  lane_boundaries: max
+  junctions: area
+hdmap_channel_scale: [0.08, 0.12, 0.10, 1.0]
+hdmap_fusion_mode: gated_residual
+separate_hdmap_optimizer_group: False
+hdmap_lr: 1e-4
+hdmap_weight_decay: 1e-4
+hdmap_lr_scheduler:
+  min_lr: 1e-6
+
+# ==================== Video 时序输入 ====================
+use_video_input: True               # 总开关：dataset 产 image_{cam}_frames，train 走 video 路径
+video_frame_offsets: [4, 3, 2, 1, 0] # 旧→新，prev_4..current；缺帧 edge pad
+video_fps: 2.0                      # 与 video_frame_interval 对应 (1/0.5)
+video_frame_interval: 0.5           # 秒/帧，offset>=3 时按 (cur_ts - off*interval) 最近邻检索
+
+# ==================== 数据集 ====================
+data:
+  train:
+    statistics_path: ${dataset_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: ${dataset_dir}
+    fixed_dir: b2d_fixed_camera
+    split: train
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    nav_onehot: False
+    use_his_trajectory: False
+    state_frame_index: 0
+    cam_image_size: ${cam_image_size}
+    use_video_input: ${use_video_input}
+    video_frame_offsets: ${video_frame_offsets}
+    video_fps: ${video_fps}
+    video_frame_interval: ${video_frame_interval}
+    use_hdmap_image: ${use_hdmap_image}
+    use_hdmap_proprio: ${use_hdmap_proprio}
+    use_hdmap_cnn: ${use_hdmap_cnn}
+    hdmap_image_size: ${hdmap_image_size}
+    hdmap_bev_downsample_size: ${hdmap_bev_downsample_size}
+    hdmap_downsample_mode: ${hdmap_downsample_mode}
+    hdmap_channel_scale: ${hdmap_channel_scale}
+  val:
+    statistics_path: ${dataset_dir}/statistics.json
+    use_fixed_images: False
+    work_dir: ${current_dir}
+    dynamic_dir: ${dataset_dir}
+    fixed_dir: b2d_fixed_camera
+    split: val
+    num_of_action_experts: 13
+    shuffle_buffer_size: 200000
+    norm_mode: ${norm_mode}
+    nav_onehot: False
+    use_his_trajectory: False
+    state_frame_index: 0
+    cam_image_size: ${cam_image_size}
+    use_video_input: ${use_video_input}
+    video_frame_offsets: ${video_frame_offsets}
+    video_fps: ${video_fps}
+    video_frame_interval: ${video_frame_interval}
+    use_hdmap_image: ${use_hdmap_image}
+    use_hdmap_proprio: ${use_hdmap_proprio}
+    use_hdmap_cnn: ${use_hdmap_cnn}
+    hdmap_image_size: ${hdmap_image_size}
+    hdmap_bev_downsample_size: ${hdmap_bev_downsample_size}
+    hdmap_downsample_mode: ${hdmap_downsample_mode}
+    hdmap_channel_scale: ${hdmap_channel_scale}
+
+cam_image_size: [224, 224]          # 单帧分辨率；processor 对齐 patch=16/merge=2 后单 clip grid=[3,14,14]
+norm_mode: minmax
+
+# ==================== 日志 ====================
+swanlab:
+  enable: False
+  project: DriveMoE_Qwen3
+  experiment_name: ${run_name}
+  mode: cloud
+  description: "qwen3 video 5frame per-camera clip"
+  entity: null
+
+log_freq: 16
+
+# ==================== 加权采样 ====================
+nav_weighted_sampling: False
+trajectory_weighted_sampling:
+  enable: True
+  static_threshold: 1.0
+  turn_threshold: 2.0
+  static_weight: 2.0
+  turn_weight: 3.0
+  straight_weight: 1.0
+  hard_case_weight_path: null
+  hard_case_alpha: 1.0
+
+# ==================== 训练超参数 ====================
+n_epochs: 40
+n_train: 59778
+num_gpus: 8
+per_device_batch_size: 16            # video 路径视觉 token 多 (588/sample)，显存压力大，从 16 起步
+global_batch_size: ${eval:'${per_device_batch_size} * ${num_gpus}'}
+n_updates: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * ${n_epochs}'}
+save_model_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
+num_workers: 8
+max_grad_norm: 1.0
+
+# ==================== Eval 配置 ====================
+eval_freq: ${eval:'((${n_train} + ${global_batch_size} - 1) // ${global_batch_size}) * 5'}
+eval_size: 1024
+eval_full_val: True
+eval_seed: 42
+eval_repeats: 1
+eval_map_modes: [normal]
+eval_thresholds: [0.05, 0.1, 0.2, 0.3, 0.5]
+
+# ==================== 学习率 ====================
+action_lr: 5e-5
+vlm_lr: 5e-5
+action_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 200
+vlm_lr_scheduler:
+  first_cycle_steps: ${n_updates}
+  min_lr: 1e-8
+  warmup_steps: 500
+action_weight_decay: 0
+vlm_weight_decay: 0
+
+# ==================== Flow Matching ====================
+flow_sampling: beta
+flow_alpha: 1.5
+flow_beta: 1.0
+flow_sig_min: 0.001
+num_inference_steps: 10
+final_action_clip_value: 1.0
+
+# ==================== 轨迹辅助损失 ====================
+trajectory_loss:
+  lambda_smooth: 0.05
+  lambda_accel: 0.02
+  endpoint_weight_mode: linear
+  endpoint_weight_max: 2.0
+
+# ==================== Action-grounded 辅助监督 ====================
+aux_loss:
+  enable: False
+  lambda_maneuver: 0.2
+  lambda_stop: 0.1
+  lambda_endpoint: 0.2
+  lambda_progress: 0.05
+  lambda_curvature: 0.05
+
+# ==================== 序列维度 ====================
+cond_steps: 1
+horizon_steps: 6
+action_dim: 2
+proprio_dim: 7
+state_dim: ${proprio_dim}
+
+# video 模式: 4 相机 × 5 帧 → 588 video token + chat template + 指令文 + proprio + action。
+# 实测总输入 ~711，设 896 留余量；改 cam_image_size / 帧数 / 相机数需重算。
+max_seq_len: 896
+tokenizer_padding: max_length
+max_image_text_tokens: ${max_seq_len}
+
+# ==================== Mixture 配置 ====================
+mixture:
+  vlm:
+    hidden_size: 2048
+    intermediate_size: 6144
+    use_final_norm: False
+    cache: True
+    use_quantize: ${quantize}
+    use_lora: ${lora}
+    adaptive_mode:
+  proprio:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: True
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+  action:
+    hidden_size: 1024
+    intermediate_size: 4096
+    use_final_norm: True
+    cache: False
+    use_quantize: False
+    use_lora: False
+    adaptive_mode: ${action_expert_adaptive_mode}
+
+time_hidden_size: 256
+
+# ==================== Joint Model (Transformer) ====================
+joint:
+  _target_: src.model.DrivePi0.joint_model.JointModel
+  config:
+    pretrained_model_path: ${pretrained_model_path}
+    action_expert_adaptive_mode: ${action_expert_adaptive_mode}
+    time_hidden_size: ${time_hidden_size}
+    mixture: ${mixture}
+    lora:
+      r: ${lora_r}
+      dropout: ${lora_dropout}
+    num_hidden_layers: 28
+    num_attention_heads: 16
+    num_key_value_heads: 8
+    head_dim: 128
+    hidden_act: "silu"
+    max_position_embeddings: 262144
+    rms_norm_eps: 1e-6
+    rope_theta: 5000000
+    attention_bias: False
+    attention_dropout: 0.0
+    pad_token_id: ${pad_token_id}
+    rope_scaling:
+      mrope_interleaved: true
+      mrope_section: [24, 20, 20]
+      rope_type: "default"
+
+# ==================== Qwen3-VL Token 配置 ====================
+pad_token_id: 0
+image_token_index: 151655
+video_token_id: 151656
+vision_start_token_id: 151652
+vision_end_token_id: 151653
+vocab_size: 151936
+bos_token_id: 151643
+eos_token_id: 151645
