@@ -900,6 +900,7 @@ class RosbagToRecogDrivePklConverter:
         # fallback for fields that may be absent in future localization schemas.
         motion_states = getattr(chassis_msg, "vehicle_motion_states", None)
         drive_states = getattr(chassis_msg, "drive_system_states", None)
+        steer_states = getattr(chassis_msg, "steer_system_states", None)
         vx = first_valid_float(
             get_float_attr(loc_msg, "longitudinal_v"),
             get_float_attr(motion_states, "speed"),
@@ -923,6 +924,16 @@ class RosbagToRecogDrivePklConverter:
             get_float_attr(motion_states, "angular_speed"),
             default=0.0,
         )
+        # Chassis2025 stores steering wheel state in degrees / degrees per second.
+        # Convert to radians so downstream ego status features stay numerically compact.
+        steering_wheel_angle = math.radians(first_valid_float(
+            get_float_attr(steer_states, "steer_wheel_angle"),
+            default=0.0,
+        ))
+        steering_wheel_rate = math.radians(first_valid_float(
+            get_float_attr(steer_states, "steer_wheel_speed"),
+            default=0.0,
+        ))
 
         can_bus = [0.0] * 18
         can_bus[0] = x
@@ -934,6 +945,8 @@ class RosbagToRecogDrivePklConverter:
         can_bus[10] = ax
         can_bus[11] = ay
         can_bus[15] = yaw_rate
+        can_bus[16] = steering_wheel_angle
+        can_bus[17] = steering_wheel_rate
 
         return [x, y, z], yaw, [vx, vy, ax, ay], can_bus
 
