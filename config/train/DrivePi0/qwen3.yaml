@@ -5,7 +5,7 @@ hydra:
     dir: ${log_dir}
 _target_: src.agent.drivepi0.train.DrivePiZeroTrainAgent
 
-current_dir: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi  # You need to set path
+current_dir: /pcpt/pcpt/project/atlb/vla/Drive_pi  # You need to set path
 run_name: ${now:%Y-%m-%d}_${now:%H-%M}_nuscene_0325
 log_dir: ${oc.env:LOG_DIR}/train/${name}/${run_name}
 
@@ -13,7 +13,7 @@ name: drive-pi0
 device: cuda
 n_nodes: 1
 seed: 42
-pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct   # You need to set path
+pretrained_model_path: /pcpt/pcpt/project/atlb/vla/Drive_pi/Qwen3-VL-2B-Instruct   # You need to set path
 load_pretrained_weights: True
 
 # 模式 1: 首次训练（从预训练 Qwen3-VL 开始）
@@ -209,7 +209,7 @@ pad_token_id: 0
 joint:
   _target_: src.model.DrivePi0.joint_model.JointModel
   config:
-    pretrained_model_path: /pcpt/pcpt/project/jiangjunyuan/code/VLA/Qwen3-VL-2B-Instruct
+    pretrained_model_path: /pcpt/pcpt/project/atlb/vla/Drive_pi/Qwen3-VL-2B-Instruct
     action_expert_adaptive_mode: ${action_expert_adaptive_mode}
     time_hidden_size: ${time_hidden_size}
     mixture: ${mixture}

@@ -13,10 +13,10 @@
 export TZ='UTC-8'
 # SwanLab 配置
 export WANDB_DISABLED=true
-export SWANLAB_API_KEY='wMwCepr1MuBtmCchEgh9x'
-export PYTHONPATH="/pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi:$PYTHONPATH"
+export SWANLAB_API_KEY='MaEAs5BY7UrlqJkDxwQJF'
+export PYTHONPATH="/pcpt/pcpt/project/atlb/vla/Drive_pi:$PYTHONPATH"
 # 保存路径
-export LOG_DIR="/pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi/logs"
+export LOG_DIR="/pcpt/pcpt/project/atlb/vla/Drive_pi/logs"
 
 # GPU check
 echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"

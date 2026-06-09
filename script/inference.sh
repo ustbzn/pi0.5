@@ -1,4 +1,4 @@
-export PYTHONPATH="/pcpt/pcpt/project/jiangjunyuan/code/VLA/Drive_pi:$PYTHONPATH"
+export PYTHONPATH="/pcpt/pcpt/project/atlb/vla/Drive_pi:$PYTHONPATH"
 CUDA_VISIBLE_DEVICES=0 python src/agent/drivepi0/inference_nuscene_test.py \
     --mode batch \
     --val_data_dir datasets/nuscene-0111/val \
